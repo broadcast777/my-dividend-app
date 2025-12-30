@@ -1,4 +1,3 @@
-%%writefile app.py
 import streamlit as st
 import pandas as pd
 import requests
@@ -274,4 +273,5 @@ def main():
         st.dataframe(df[df['분류']=='해외'][cols], column_config=column_config, use_container_width=True, hide_index=True)
 
 if __name__ == "__main__":
+
     main()
