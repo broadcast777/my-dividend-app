@@ -118,9 +118,8 @@ def main():
     with st.spinner('⏳ 최신 데이터를 분석하고 있습니다... (약 10초 소요)'):
         df = load_and_process_data()
 
-    # --- 비중 조절형 포트폴리오 계산기 (최적화 버전) ---
+    # --- 비중 조절형 포트폴리오 계산기 ---
     with st.expander("🧮 나만의 배당 포트폴리오 만들기 (클릭)", expanded=False):
-      
         col_input1, col_input2 = st.columns([1, 2])
         with col_input1:
             total_invest = st.number_input("💰 총 투자 금액 (만원)", min_value=100, value=3000, step=100) * 10000
@@ -147,7 +146,6 @@ def main():
             for i, stock in enumerate(selected_stocks):
                 with cols_weight[i % 2]:
                     if i < len(selected_stocks) - 1:
-                        # 사용자가 조절하는 칸
                         val = st.number_input(
                             f"{stock} (%)", 
                             min_value=0, max_value=remaining, 
@@ -158,12 +156,10 @@ def main():
                         weights[stock] = val
                         remaining -= val
                     else:
-                        # 마지막 종목은 자동 계산
                         st.write(f"**{stock} (%)**")
                         st.info(f"남은 비중 {remaining}% 자동 적용")
                         weights[stock] = remaining
 
-            # 결과 계산
             total_monthly_income = 0
             avg_yield_sum = 0
             for stock_name, weight_percent in weights.items():
@@ -200,7 +196,6 @@ def main():
             ).properties(height=200)
             st.altair_chart(c, width='stretch')
             
-            # 🔥 [여기에 배치!] 결과 바로 밑에 빨간색 경고창
             st.error("""
                 **⚠️ 시뮬레이션 활용 시 유의사항**
                 1. 본 결과는 현재 시점의 배당률을 바탕으로 한 **단순 계산값**입니다.
@@ -209,8 +204,28 @@ def main():
             """)
         else:
             st.info("👆 위에서 종목을 선택하시면 비중 조절 칸이 나타납니다.")
-         
+
+    # --- [모바일 이탈 방지용 상세 정보 섹션] ---
+    st.markdown("---")
+    st.subheader("🔍 종목 상세 정보 (새 창으로 열기)")
+    st.info("💡 모바일에서 표의 링크를 눌러 화면이 꺼진다면, 여기서 종목을 선택해 '버튼'을 눌러주세요!")
     
+    selected_detail = st.selectbox(
+        "정보를 확인하고 싶은 종목을 선택하세요.",
+        options=df['종목명'].unique(),
+        index=None,
+        placeholder="종목을 선택해 주세요..."
+    )
+
+    if selected_detail:
+        detail_row = df[df['종목명'] == selected_detail].iloc[0]
+        c1, c2 = st.columns(2)
+        with c1:
+            st.link_button(f"🌐 {selected_detail} 네이버/야후 정보", detail_row['공식홈'], use_container_width=True)
+        with c2:
+            st.link_button(f"📝 {selected_detail} 배당팽이 분석글", detail_row['블로그'], use_container_width=True)
+    st.markdown("---")
+
     # --- [메인] 테이블 출력 ---
     column_config = {
         "종목코드": st.column_config.TextColumn("코드", width=50),
@@ -241,9 +256,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
