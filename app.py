@@ -216,6 +216,16 @@ def main():
         index=None,
         placeholder="종목을 선택해 주세요..."
     )
+    
+    # ❗ 이 아래 부분이 빠져서 에러가 났던 겁니다. 꼭 같이 넣어야 해요!
+    if selected_detail:
+        detail_row = df[df['종목명'] == selected_detail].iloc[0]
+        c1, c2 = st.columns(2)
+        with c1:
+            st.link_button(f"🌐 {selected_detail} 정보", detail_row['공식홈'], use_container_width=True)
+        with c2:
+            st.link_button(f"📝 {selected_detail} 분석글", detail_row['블로그'], use_container_width=True)
+    st.markdown("---")
 
     # --- [메인] 테이블 출력 ---
     column_config = {
@@ -247,5 +257,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
