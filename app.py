@@ -240,13 +240,15 @@ def main():
         st.caption("First Released: 2025.12.31 | [배당팽이의 배당 투자 일지](https://blog.naver.com/dividenpange)")
     
     with col_footer2:
-        # 방문자 수 뱃지 (URL: dividend-pange.streamlit.app 적용됨)
+        # [변경] 차단이 잘 되는 seeyoufarm 대신, 더 안정적인 'hits.sh'로 교체했습니다.
         st.markdown(
-            '[![Hits](https://hits.seeyoufarm.com/api/count/incr/badge.svg?url=https%3A%2F%2Fdividend-pange.streamlit.app&count_bg=%2379C83D&title_bg=%23555555&icon=&icon_color=%23E7E7E7&title=Visitors&edge_flat=false)](https://hits.seeyoufarm.com)'
+            '<a href="https://hits.sh/dividend-pange.streamlit.app/"><img alt="Hits" src="https://hits.sh/dividend-pange.streamlit.app.svg?style=flat-square&label=Visitors&color=79C83D"/></a>',
+            unsafe_allow_html=True
         )
  
 if __name__ == "__main__":
     main()
+
 
 
 
