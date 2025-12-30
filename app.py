@@ -209,7 +209,27 @@ def main():
             """)
         else:
             st.info("👆 위에서 종목을 선택하시면 비중 조절 칸이 나타납니다.")
+            # --- [신규] 모바일 친화형 상세 정보 섹션 ---
+            st.divider()
+            st.markdown("### 🔍 종목 상세 정보 및 분석")
+            st.caption("표에서 링크 클릭 시 화면이 꺼진다면, 여기서 종목을 선택해 '새 탭'으로 확인하세요.")
+    
+            selected_detail = st.selectbox(
+               "정보를 확인하고 싶은 종목을 선택하세요.",
+               options=df['종목명'].unique(),
+               index=None,
+               placeholder="종목 선택..."
+            )
 
+           if selected_detail:
+               detail_row = df[df['종목명'] == selected_detail].iloc[0]
+               c1, c2 = st.columns(2)
+               with c1:
+                   st.link_button(f"🌐 {selected_detail} 실시간 차트 (네이버/야후)", detail_row['공식홈'], use_container_width=True)
+               with c2:
+                   st.link_button(f"📝 {selected_detail} 배당팽이 분석글 읽기", detail_row['블로그'], use_container_width=True)
+           st.divider()
+    
     # --- [메인] 테이블 출력 ---
     column_config = {
         "종목코드": st.column_config.TextColumn("코드", width=50),
@@ -240,6 +260,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
