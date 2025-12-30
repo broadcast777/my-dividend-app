@@ -228,14 +228,26 @@ def main():
         st.dataframe(df[df['분류']=='국내'][cols_table], column_config=column_config, width='stretch', hide_index=True)
     with tab3:
         st.dataframe(df[df['분류']=='해외'][cols_table], column_config=column_config, width='stretch', hide_index=True)
-
-    # 하단 서명
+  
+    # --- 하단 서명 및 방문자 수 확인 ---
     st.markdown("---")
-    st.caption("© 2025 **배당팽이** | 실시간 데이터 기반 배당 대시보드")
-    st.caption("First Released: 2025.12.31 | [배당팽이의 배당 투자 일지](https://blog.naver.com/dividenpange)")
-
+    
+    # 공간을 3:1로 나누어 왼쪽엔 텍스트, 오른쪽엔 카운터를 둡니다
+    col_footer1, col_footer2 = st.columns([3, 1])
+    
+    with col_footer1:
+        st.caption("© 2025 **배당팽이** | 실시간 데이터 기반 배당 대시보드")
+        st.caption("First Released: 2025.12.31 | [배당팽이의 배당 투자 일지](https://blog.naver.com/dividenpange)")
+    
+    with col_footer2:
+        # 방문자 수 뱃지 (URL: dividend-pange.streamlit.app 적용됨)
+        st.markdown(
+            '[![Hits](https://hits.seeyoufarm.com/api/count/incr/badge.svg?url=https%3A%2F%2Fdividend-pange.streamlit.app&count_bg=%2379C83D&title_bg=%23555555&icon=&icon_color=%23E7E7E7&title=Visitors&edge_flat=false)](https://hits.seeyoufarm.com)'
+        )
+ 
 if __name__ == "__main__":
     main()
+
 
 
 
