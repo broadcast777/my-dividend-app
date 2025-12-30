@@ -118,6 +118,7 @@ def main():
     with st.spinner('⏳ 최신 데이터를 분석하고 있습니다... (약 10초 소요)'):
         df = load_and_process_data()
 
+    # --- 비중 조절형 포트폴리오 계산기 (최적화 버전) ---
     with st.expander("🧮 나만의 배당 포트폴리오 만들기 (클릭)", expanded=False):
         col_input1, col_input2 = st.columns([1, 2])
         with col_input1:
@@ -128,108 +129,103 @@ def main():
                 df['종목명'].unique(),
                 placeholder="종목을 선택하거나 검색하세요..."
             )
+        
         if selected_stocks:
-            has_foreign_stock = False
-            for s_name in selected_stocks:
-                if df[df['종목명'] == s_name].iloc[0]['분류'] == '해외':
-                    has_foreign_stock = True
-                    break
+            has_foreign_stock = any(df[df['종목명'] == s_name].iloc[0]['분류'] == '해외' for s_name in selected_stocks)
             if has_foreign_stock:
-                st.warning("📢 **잠깐!** 선택하신 종목 중 **'해외 상장 ETF(달러자산)'**가 포함되어 있습니다. \n\n해외 직투 종목은 **ISA/연금계좌에서 매수할 수 없습니다.** 아래 'ISA/연금' 결과는 **'만약 국내 상장된 동일/유사 ETF로 투자했다면?'**을 가정한 비교용 수치로 참고해 주세요.")
+                st.warning("📢 **잠깐!** 선택하신 종목 중 **'해외 상장 ETF'**가 포함되어 있습니다. ISA/연금계좌 결과는 참고용으로만 봐주세요.")
+
             st.markdown("---")
-            st.markdown("#### ⚖️ 종목별 비중 조절 (합계 100%를 맞춰주세요)")
+            st.markdown("#### ⚖️ 종목별 비중 조절")
+            st.caption("💡 팁: 마지막 종목을 제외한 나머지 비중을 정하면, 마지막은 자동으로 계산됩니다.")
+
             weights = {}
-            default_weight = int(100 / len(selected_stocks)) 
-            cols_slider = st.columns(2)
+            remaining = 100
+            cols_weight = st.columns(2)
+            
             for i, stock in enumerate(selected_stocks):
-                with cols_slider[i % 2]:
-                    weights[stock] = st.slider(f"{stock} (%)", 0, 100, default_weight, key=stock)
-            total_weight = sum(weights.values())
-            if total_weight != 100:
-                st.warning(f"⚠️ 현재 비중 합계: {total_weight}% (100%가 되어야 결과가 나옵니다)")
-            else:
-                total_monthly_income = 0
-                avg_yield_sum = 0
-                for stock_name, weight_percent in weights.items():
-                    row = df[df['종목명'] == stock_name].iloc[0]
-                    price = row['raw_price']
-                    yield_rate = row['연배당률']
-                    if price > 0:
-                        allocated_money = total_invest * (weight_percent / 100)
-                        annual_income = allocated_money * (yield_rate / 100)
-                        total_monthly_income += (annual_income / 12)
-                        avg_yield_sum += (yield_rate * weight_percent)
-                final_portfolio_yield = avg_yield_sum / 100
-                tax_general = total_monthly_income * 0.154
-                final_general = total_monthly_income - tax_general
-                final_isa = total_monthly_income
-                st.divider()
-                st.markdown(f"### 🎯 포트폴리오 결과")
-                st.metric("📈 가중 평균 연배당률", f"{final_portfolio_yield:.2f}%")
-                col_res1, col_res2, col_res3 = st.columns([1, 1, 1.5])
-                with col_res1:
-                    st.metric("월 수령액 (일반/세후)", f"{final_general:,.0f}원", delta="-15.4%", delta_color="inverse")
-                with col_res2:
-                    st.metric("월 수령액 (ISA/세전)", f"{final_isa:,.0f}원", delta="100%", delta_color="normal")
-                with col_res3:
-                    st.success(f"나만의 맞춤 비중으로\n\n**월 {final_isa:,.0f}원**의 현금흐름 완성! 🎉")
-                chart_data = pd.DataFrame({
-                    '계좌 종류': ['일반 계좌', 'ISA/연금'],
-                    '월 수령액': [final_general, final_isa]
-                })
-                c = alt.Chart(chart_data).mark_bar().encode(
-                    x=alt.X('계좌 종류', sort=None),
-                    y='월 수령액',
-                    color=alt.Color('계좌 종류', scale=alt.Scale(domain=['일반 계좌', 'ISA/연금'], range=['#95a5a6', '#f1c40f'])),
-                    tooltip=['계좌 종류', alt.Tooltip('월 수령액', format=',.0f')]
-                ).properties(height=200)
-                st.altair_chart(c, width='stretch')
+                with cols_weight[i % 2]:
+                    if i < len(selected_stocks) - 1:
+                        # 사용자가 조절하는 칸
+                        val = st.number_input(
+                            f"{stock} (%)", 
+                            min_value=0, max_value=remaining, 
+                            value=min(int(100/len(selected_stocks)), remaining),
+                            step=5,
+                            key=f"input_{stock}"
+                        )
+                        weights[stock] = val
+                        remaining -= val
+                    else:
+                        # 마지막 종목은 자동 계산
+                        st.write(f"**{stock} (%)**")
+                        st.info(f"남은 비중 {remaining}% 자동 적용")
+                        weights[stock] = remaining
+
+            # 결과 계산
+            total_monthly_income = 0
+            avg_yield_sum = 0
+            for stock_name, weight_percent in weights.items():
+                row = df[df['종목명'] == stock_name].iloc[0]
+                price = row['raw_price']
+                yield_rate = row['연배당률']
+                if price > 0:
+                    allocated_money = total_invest * (weight_percent / 100)
+                    annual_income = allocated_money * (yield_rate / 100)
+                    total_monthly_income += (annual_income / 12)
+                    avg_yield_sum += (yield_rate * weight_percent)
+            
+            final_portfolio_yield = avg_yield_sum / 100
+            final_general = total_monthly_income * (1 - 0.154)
+            final_isa = total_monthly_income
+
+            st.divider()
+            st.markdown(f"### 🎯 포트폴리오 결과")
+            st.metric("📈 가중 평균 연배당률", f"{final_portfolio_yield:.2f}%")
+            
+            col_res1, col_res2, col_res3 = st.columns([1, 1, 1.5])
+            with col_res1:
+                st.metric("월 수령액 (세후)", f"{final_general:,.0f}원", delta="-15.4%", delta_color="inverse")
+            with col_res2:
+                st.metric("월 수령액 (ISA/세전)", f"{final_isa:,.0f}원", delta="100%", delta_color="normal")
+            with col_res3:
+                st.success(f"나만의 맞춤 비중으로\n\n**월 {final_isa:,.0f}원** 완성! 🎉")
+
+            chart_data = pd.DataFrame({'계좌 종류': ['일반 계좌', 'ISA/연금'], '월 수령액': [final_general, final_isa]})
+            c = alt.Chart(chart_data).mark_bar().encode(
+                x=alt.X('계좌 종류', sort=None), y='월 수령액',
+                color=alt.Color('계좌 종류', scale=alt.Scale(domain=['일반 계좌', 'ISA/연금'], range=['#95a5a6', '#f1c40f'])),
+                tooltip=['계좌 종류', alt.Tooltip('월 수령액', format=',.0f')]
+            ).properties(height=200)
+            st.altair_chart(c, width='stretch')
         else:
-            st.info("👆 위에서 종목을 선택하시면 비중 조절 바가 나타납니다.")
-        st.error("""
-        🛑 **면책 조항 (필독)**
-        1. 본 계산 결과는 **가상의 시뮬레이션**이며, 투자의 **대략적인 흐름을 파악하기 위한 참고용**입니다.
-        2. 실제 배당금, 세금, 수수료 등은 시장 상황에 따라 달라질 수 있으므로 **실제 입금액과 차이가 발생할 수 있습니다.**
-        """)
+            st.info("👆 위에서 종목을 선택하시면 비중 조절 칸이 나타납니다.")
 
     # --- [메인] 테이블 출력 ---
     column_config = {
-        "종목코드": st.column_config.TextColumn("코드", width="small"),
-        "종목명": st.column_config.TextColumn("종목명", width="medium"),
-        "현재가": st.column_config.TextColumn("현재가", width="small"),
-        "연배당률": st.column_config.NumberColumn(
-            "연배당률 (Click 정렬)",
-            help="클릭하면 배당률 순으로 정렬됩니다.",
-            format="%.2f%%", 
-        ),
-        "환헤지": st.column_config.TextColumn("환헤지", width="small"),
-        "배당락일": st.column_config.TextColumn("배당락일", width="medium"),
-        "공식홈": st.column_config.LinkColumn(
-            "📊 네이버/야후",
-            display_text="🔗 금융정보",
-            help="네이버 금융(국내) 또는 야후 파이낸스(해외)로 이동합니다."
-        ),
-        "블로그": st.column_config.LinkColumn(
-            "📝 블로그",
-            display_text="📝 글보기",
-            help="배당팽이의 분석 포스팅으로 이동합니다."
-        )
+        "종목코드": st.column_config.TextColumn("코드", width=50),
+        "종목명": st.column_config.TextColumn("종목명", width=120),
+        "현재가": st.column_config.TextColumn("현재가", width=70),
+        "연배당률": st.column_config.NumberColumn("연배당률", format="%.2f%%", width=70),
+        "환헤지": st.column_config.TextColumn("환헤지", width=50),
+        "배당락일": st.column_config.TextColumn("배당락일", width=100),
+        "공식홈": st.column_config.LinkColumn("금융정보", display_text="🔗정보", width=60),
+        "블로그": st.column_config.LinkColumn("분석글", display_text="📝보기", width=60)
     }
 
     cols_table = ['종목코드', '종목명', '현재가', '연배당률', '환헤지', '배당락일', '공식홈', '블로그']
-    tab1, tab2, tab3 = st.tabs(["🌐 전체 랭킹", "🇰🇷 국내 ETF", "🇺🇸 해외 ETF"])
+    tab1, tab2, tab3 = st.tabs(["🌐 전체", "🇰🇷 국내", "🇺🇸 해외"])
     
     with tab1:
-        st.write(f"### 🔥 전체 {len(df)}종 통합 랭킹 ({now_kst} 기준)")
+        st.write(f"### 🔥 통합 랭킹 ({now_kst} 기준)")
         st.dataframe(df[cols_table], column_config=column_config, width='stretch', hide_index=True)
     with tab2:
         st.dataframe(df[df['분류']=='국내'][cols_table], column_config=column_config, width='stretch', hide_index=True)
     with tab3:
         st.dataframe(df[df['분류']=='해외'][cols_table], column_config=column_config, width='stretch', hide_index=True)
 
-    # 화면 하단 공통 서명 각인
+    # 하단 서명
     st.markdown("---")
-    st.write(" ")
     st.caption("© 2025 **배당팽이** | 실시간 데이터 기반 배당 대시보드")
     st.caption("First Released: 2025.12.31 | [배당팽이의 배당 투자 일지](https://blog.naver.com/dividenpange)")
 
