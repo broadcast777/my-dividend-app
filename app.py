@@ -205,28 +205,7 @@ def main():
         else:
             st.info("👆 위에서 종목을 선택하시면 비중 조절 칸이 나타납니다.")
 
-    # --- [모바일 이탈 방지용 상세 정보 섹션] ---
-    st.markdown("---")
-    st.subheader("🔍 종목 상세 정보 (새 창으로 열기)")
-    st.info("💡 모바일에서 표의 링크를 눌러 화면이 꺼진다면, 여기서 종목을 선택해 '버튼'을 눌러주세요!")
-    
-    selected_detail = st.selectbox(
-        "정보를 확인하고 싶은 종목을 선택하세요.",
-        options=df['종목명'].unique(),
-        index=None,
-        placeholder="종목을 선택해 주세요..."
-    )
-    
-    # ❗ 이 아래 부분이 빠져서 에러가 났던 겁니다. 꼭 같이 넣어야 해요!
-    if selected_detail:
-        detail_row = df[df['종목명'] == selected_detail].iloc[0]
-        c1, c2 = st.columns(2)
-        with c1:
-            st.link_button(f"🌐 {selected_detail} 정보", detail_row['공식홈'], use_container_width=True)
-        with c2:
-            st.link_button(f"📝 {selected_detail} 분석글", detail_row['블로그'], use_container_width=True)
-    st.markdown("---")
-
+  
     # --- [메인] 테이블 출력 ---
     column_config = {
         "종목코드": st.column_config.TextColumn("코드", width=50),
@@ -257,6 +236,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
