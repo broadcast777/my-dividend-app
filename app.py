@@ -271,7 +271,15 @@ def main():
         
     with tab3:
         st.dataframe(df[df['분류']=='해외'][cols], column_config=column_config, use_container_width=True, hide_index=True)
+        
+# 여기서부터는 Tab 안에 갇히지 않고, 화면 맨 아래에 공통으로 뜨게 됩니다.
+    st.markdown("---")
+    st.write(" ")
+    st.caption("© 2025 **배당팽이** | 실시간 데이터 기반 배당 대시보드")
+    st.caption("First Released: 2025.12.31 | [배당팽이의 배당 투자 일지](https://blog.naver.com/dividenpange)")
 
 if __name__ == "__main__":
 
     main()
+
+
