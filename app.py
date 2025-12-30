@@ -1,0 +1,277 @@
+%%writefile app.py
+import streamlit as st
+import pandas as pd
+import requests
+from bs4 import BeautifulSoup
+import yfinance as yf
+import FinanceDataReader as fdr
+from datetime import datetime
+import time
+import pytz
+import altair as alt
+
+# [1] 페이지 설정
+st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
+
+# [2] 데이터베이스
+STOCKS_DATA = {
+    # --- 국내 ETF ---
+    '476800': ['KODEX 한국부동산리츠인프라', 422, '국내', 'https://blog.naver.com/dividenpange/224071556339', '매월 15일(영업일 기준)', 0],
+    '329200': ['TIGER 부동산리츠인프라', 379, '국내', 'https://blog.naver.com/dividenpange/224081483734', '매월 마지막영업일', 0],
+    '0052D0': ['TIGER 코리아배당다우존스', 293, '국내', 'https://blog.naver.com/dividenpange/224074046441', '매월 15일(영업일 기준)', 6],
+    '441640': ['KODEX 미국배당커버드콜액티브', 1130, '국내', 'https://blog.naver.com/dividenpange/224072761806', '매월 15일(영업일 기준)', 0],
+    '0105E0': ['SOL 코리아고배당', 156, '국내', 'https://blog.naver.com/dividenpange/224081486301', '매월 15일(영업일 기준)', 2],
+    '279530': ['KODEX 고배당주', 628, '국내', 'https://blog.naver.com/dividenpange/224109514837', '매월 마지막영업일', 0],
+    '498400': ['KODEX 200타겟위클리커버드콜', 1954, '국내', 'https://blog.naver.com/dividenpange/224084682629', '매월 15일(영업일 기준)', 0],
+    '468380': ['KODEX iShares 미국하이일드액티브', 750, '국내', 'https://blog.naver.com/dividenpange/224092022168', '매월 마지막영업일', 0],
+    '0086B0': ['TIGER 리츠부동산인프라TOP10액티브', 216, '국내', 'https://blog.naver.com/dividenpange/224084731534', '매월 15일(영업일 기준)', 4],
+    '161510': ['PLUS 고배당주', 866, '국내', 'https://blog.naver.com/dividenpange/224097267562', '매월 마지막영업일', 0],
+    '481060': ['KODEX 미국30년국채타겟커버드콜', 1063, '국내', 'https://blog.naver.com/dividenpange/224116572356', '매월 15일(영업일 기준)', 0],
+    '484880': ['SOL 금융지주플러스고배당', 720, '국내', 'https://blog.naver.com/dividenpange/224093074417', '매월 마지막영업일', 0],
+    '0046A0': ['TIGER 미국초단기(3개월이하)국채', 121, '국내', 'https://blog.naver.com/dividenpange/224106519426', '매월 마지막영업일', 4],
+    '480020': ['ACE 미국빅테크7+데일리타겟커버드콜', 1712, '국내', 'https://blog.naver.com/dividenpange/224101062938', '매월 15일(영업일 기준)', 0],
+    '489250': ['KODEX 미국배당다우존스', 355, '국내', 'https://blog.naver.com/dividenpange/224094660299', '매월 15일(영업일 기준)', 0],
+    '458730': ['TIGER 미국배당다우존스', 430, '국내', 'https://blog.naver.com/dividenpange/224094660299', '매월 마지막영업일', 0],
+    '498410': ['KODEX 금융고배당TOP10타겟위클리', 1774, '국내', 'https://blog.naver.com/dividenpange/224093577682', '매월 마지막영업일', 0],
+    '476760': ['ACE 미국30년국채액티브', 368, '국내', 'https://blog.naver.com/dividenpange/224092374735', '매월 마지막영업일', 0],
+    '491620': ['RISE 미국테크100데일리고정커버드콜', 2148, '국내', 'https://blog.naver.com/dividenpange/224092460024', '매월 마지막영업일', 0],
+    '466940': ['TIGER 은행고배당플러스TOP10', 917, '국내', 'https://blog.naver.com/dividenpange/224093074417', '매월 마지막영업일', 0],
+    '482730': ['TIGER 미국S&P500타겟데일리커버드콜', 1115, '국내', 'https://blog.naver.com/dividenpange/224095987359', '매월 마지막영업일', 0],
+    '441800': ['TIMEFOLIO Korea플러스배당액티브', 1305, '국내', 'https://blog.naver.com/dividenpange/224112258378', '매월 마지막영업일', 0],
+    '475720': ['RISE 200위클리커버드콜', 1676, '국내', 'https://blog.naver.com/dividenpange/224112140265', '매월 마지막영업일', 0],
+    '0022T0': ['SOL 국제금커버드콜액티브', 363, '국내', 'https://blog.naver.com/dividenpange/224117827502', '매월 마지막영업일', 9],
+    
+    # --- 해외 ETF ---
+    'PFF': ['iShares Preferred and Income Securities ETF', 1.95, '해외', 'https://blog.naver.com/dividenpange/224091640816', '매월 초(1~3일 전후)', 0],
+    'JEPI': ['JPMorgan Equity Premium Income ETF', 4.69, '해외', 'https://blog.naver.com/dividenpange/224095987359', '매월 초(불규칙)', 0],
+    'QYLD': ['Global X NASDAQ 100 Covered Call ETF', 2.04, '해외', 'https://blog.naver.com/dividenpange/224109189806', '매월 하순(21~25일)', 0],
+    'SGOV': ['iShares 0-3 Month Treasury Bond ETF', 4.12, '해외', 'https://blog.naver.com/dividenpange/224101325285', '매월 초(현지기준)', 0]
+}
+
+def get_safe_price(code, category):
+    if category == '해외':
+        try: return yf.Ticker(code).fast_info['last_price']
+        except: return None
+    try:
+        url = f"https://finance.naver.com/item/main.naver?code={code}"
+        res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=2)
+        soup = BeautifulSoup(res.text, 'html.parser')
+        no_today = soup.select_one(".no_today .blind")
+        if no_today: return int(no_today.text.replace(",", ""))
+    except: pass
+    try:
+        df = fdr.DataReader(code)
+        if not df.empty: return int(df['Close'].iloc[-1])
+    except: pass
+    return None
+
+def get_hedge_status(code, name, category):
+    if category == '해외': return "💲달러자산"
+    if code == '481060': return "🛡️환헤지(H)"
+    if any(x in name for x in ['미국', 'Global', '국제', 'S&P', 'NASDAQ', '하이일드']): return "⚡환노출"
+    return "-"
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_and_process_data():
+    results = []
+    
+    for code, info in STOCKS_DATA.items():
+        name, raw_div, category, blog_url, ex_date, months = info
+        price = get_safe_price(code, category)
+        
+        if price:
+            if months > 0:
+                annual_div = (raw_div / months) * 12
+                name_display = f"{name} ⭐(신규)"
+            else:
+                annual_div = raw_div
+                name_display = name
+
+            if category == '국내':
+                if '초단기국채' in name and price < 5000: price = 9970
+                div_yield = (annual_div / price) * 100
+                price_disp = f"{price:,}원"
+                link_url = f"https://finance.naver.com/item/main.naver?code={code}"
+            else:
+                div_yield = (annual_div / price) * 100 
+                price_disp = f"${price:.2f}"
+                link_url = f"https://finance.yahoo.com/quote/{code}"
+
+            hedge_status = get_hedge_status(code, name, category)
+            
+            results.append({
+                '종목코드': code,
+                '종목명': name_display,
+                '현재가': price_disp,
+                '연배당률': div_yield,
+                '환헤지': hedge_status,
+                '배당락일': ex_date,
+                '공식홈': link_url,
+                '블로그': blog_url,
+                '분류': category,
+                'raw_price': price
+            })
+        else:
+            results.append({
+                '종목코드': code, '종목명': f"{name} (점검중)", '현재가': "-", 
+                '연배당률': 0.0, '환헤지': "-", '배당락일': "-", 
+                '공식홈': "", '블로그': "", '분류': category, 'raw_price': 0
+            })
+            
+    return pd.DataFrame(results).sort_values(by='연배당률', ascending=False)
+
+# [4] 메인 UI
+def main():
+    st.title("💰 배당팽이의 실시간 연배당률 대시보드")
+    
+    st.warning("""
+        ⚠️ **투자 유의사항:** 본 대시보드의 연배당률은 과거 분배금 데이터를 기반으로 계산된 참고용 지표입니다. 
+        실제 배당금은 운용사의 사정 및 시장 상황에 따라 매월 변동될 수 있습니다. 
+    """)
+    st.info("💡 팁: 표의 맨 윗줄(헤더)을 클릭하면 '오름차순/내림차순' 정렬이 가능합니다!")
+    
+    korea_tz = pytz.timezone('Asia/Seoul')
+    now_kst = datetime.now(korea_tz).strftime('%H:%M')
+
+    with st.spinner('⏳ 최신 데이터를 분석하고 있습니다... (약 10초 소요)'):
+        df = load_and_process_data()
+
+    # --- [업그레이드] 비중 조절형 포트폴리오 계산기 ---
+    with st.expander("🧮 나만의 배당 포트폴리오 만들기 (클릭)", expanded=False):
+        
+        col_input1, col_input2 = st.columns([1, 2])
+        
+        with col_input1:
+            total_invest = st.number_input("💰 총 투자 금액 (만원)", min_value=100, value=3000, step=100) * 10000
+        with col_input2:
+            selected_stocks = st.multiselect(
+                "📊 종목 선택 (여러 개 담아보세요)", 
+                df['종목명'].unique(),
+                placeholder="종목을 선택하거나 검색하세요..."
+            )
+        
+        if selected_stocks:
+            # [스마트 감지] 해외 종목이 하나라도 포함되어 있는지 확인
+            has_foreign_stock = False
+            for s_name in selected_stocks:
+                if df[df['종목명'] == s_name].iloc[0]['분류'] == '해외':
+                    has_foreign_stock = True
+                    break
+            
+            # [스마트 알림] 해외 종목이 있으면 경고 문구 표시
+            if has_foreign_stock:
+                st.warning("📢 **잠깐!** 선택하신 종목 중 **'해외 상장 ETF(달러자산)'**가 포함되어 있습니다. \n\n해외 직투 종목은 **ISA/연금계좌에서 매수할 수 없습니다.** 아래 'ISA/연금' 결과는 **'만약 국내 상장된 동일/유사 ETF로 투자했다면?'**을 가정한 비교용 수치로 참고해 주세요.")
+
+            st.markdown("---")
+            st.markdown("#### ⚖️ 종목별 비중 조절 (합계 100%를 맞춰주세요)")
+            
+            # 비중 입력 슬라이더
+            weights = {}
+            default_weight = int(100 / len(selected_stocks)) 
+            
+            cols = st.columns(2)
+            for i, stock in enumerate(selected_stocks):
+                with cols[i % 2]:
+                    weights[stock] = st.slider(f"{stock} (%)", 0, 100, default_weight, key=stock)
+            
+            total_weight = sum(weights.values())
+            
+            if total_weight != 100:
+                st.warning(f"⚠️ 현재 비중 합계: {total_weight}% (100%가 되어야 결과가 나옵니다)")
+            else:
+                total_monthly_income = 0
+                avg_yield_sum = 0
+                
+                for stock_name, weight_percent in weights.items():
+                    row = df[df['종목명'] == stock_name].iloc[0]
+                    price = row['raw_price']
+                    yield_rate = row['연배당률']
+                    
+                    if price > 0:
+                        allocated_money = total_invest * (weight_percent / 100)
+                        annual_income = allocated_money * (yield_rate / 100)
+                        total_monthly_income += (annual_income / 12)
+                        avg_yield_sum += (yield_rate * weight_percent)
+                
+                final_portfolio_yield = avg_yield_sum / 100
+                
+                tax_general = total_monthly_income * 0.154
+                final_general = total_monthly_income - tax_general
+                final_isa = total_monthly_income
+                
+                st.divider()
+                st.markdown(f"### 🎯 포트폴리오 결과")
+                
+                st.metric("📈 가중 평균 연배당률", f"{final_portfolio_yield:.2f}%")
+                
+                col_res1, col_res2, col_res3 = st.columns([1, 1, 1.5])
+                with col_res1:
+                    st.metric("월 수령액 (일반/세후)", f"{final_general:,.0f}원", delta="-15.4%", delta_color="inverse")
+                with col_res2:
+                    st.metric("월 수령액 (ISA/세전)", f"{final_isa:,.0f}원", delta="100%", delta_color="normal")
+                with col_res3:
+                    st.success(f"나만의 맞춤 비중으로\n\n**월 {final_isa:,.0f}원**의 현금흐름 완성! 🎉")
+
+                chart_data = pd.DataFrame({
+                    '계좌 종류': ['일반 계좌', 'ISA/연금'],
+                    '월 수령액': [final_general, final_isa]
+                })
+                
+                c = alt.Chart(chart_data).mark_bar().encode(
+                    x=alt.X('계좌 종류', sort=None),
+                    y='월 수령액',
+                    color=alt.Color('계좌 종류', scale=alt.Scale(domain=['일반 계좌', 'ISA/연금'], range=['#95a5a6', '#f1c40f'])),
+                    tooltip=['계좌 종류', alt.Tooltip('월 수령액', format=',.0f')]
+                ).properties(height=200)
+                
+                st.altair_chart(c, use_container_width=True)
+                
+        else:
+            st.info("👆 위에서 종목을 선택하시면 비중 조절 바가 나타납니다.")
+
+        st.error("""
+        🛑 **면책 조항 (필독)**
+        1. 본 계산 결과는 **가상의 시뮬레이션**이며, 투자의 **대략적인 흐름을 파악하기 위한 참고용**입니다.
+        2. 실제 배당금, 세금, 수수료 등은 시장 상황에 따라 달라질 수 있으므로 **실제 입금액과 차이가 발생할 수 있습니다.**
+        """)
+
+    # --- [메인] 테이블 출력 ---
+    column_config = {
+        "종목코드": st.column_config.TextColumn("코드", width="small"),
+        "종목명": st.column_config.TextColumn("종목명", width="medium"),
+        "현재가": st.column_config.TextColumn("현재가", width="small"),
+        "연배당률": st.column_config.NumberColumn(
+            "연배당률 (Click 정렬)",
+            help="클릭하면 배당률 순으로 정렬됩니다.",
+            format="%.2f%%", 
+        ),
+        "환헤지": st.column_config.TextColumn("환헤지", width="small"),
+        "배당락일": st.column_config.TextColumn("배당락일", width="medium"),
+        "공식홈": st.column_config.LinkColumn(
+            "📊 네이버/야후",
+            display_text="🔗 금융정보",
+            help="네이버 금융(국내) 또는 야후 파이낸스(해외)로 이동합니다."
+        ),
+        "블로그": st.column_config.LinkColumn(
+            "📝 블로그",
+            display_text="📝 글보기",
+            help="배당팽이의 분석 포스팅으로 이동합니다."
+        )
+    }
+
+    cols = ['종목코드', '종목명', '현재가', '연배당률', '환헤지', '배당락일', '공식홈', '블로그']
+    
+    tab1, tab2, tab3 = st.tabs(["🌐 전체 랭킹", "🇰🇷 국내 ETF", "🇺🇸 해외 ETF"])
+    
+    with tab1:
+        st.write(f"### 🔥 전체 {len(df)}종 통합 랭킹 ({now_kst} 기준)")
+        st.dataframe(df[cols], column_config=column_config, use_container_width=True, hide_index=True)
+        
+    with tab2:
+        st.dataframe(df[df['분류']=='국내'][cols], column_config=column_config, use_container_width=True, hide_index=True)
+        
+    with tab3:
+        st.dataframe(df[df['분류']=='해외'][cols], column_config=column_config, use_container_width=True, hide_index=True)
+
+if __name__ == "__main__":
+    main()
