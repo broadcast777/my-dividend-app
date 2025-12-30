@@ -209,8 +209,8 @@ def main():
         "연배당률": st.column_config.NumberColumn("연배당률", format="%.2f%%", width=70),
         "환헤지": st.column_config.TextColumn("환헤지", width=50),
         "배당락일": st.column_config.TextColumn("배당락일", width=100),
-        "공식홈": st.column_config.LinkColumn("금융정보", display_text="🔗정보", width=60),
-        "블로그": st.column_config.LinkColumn("분석글", display_text="📝보기", width=60)
+        "공식홈": st.column_config.LinkColumn("네이버/야후", display_text="🔗정보", width=60),
+        "블로그": st.column_config.LinkColumn("포스팅보기", display_text="📝보기", width=60)
     }
 
     cols_table = ['종목코드', '종목명', '현재가', '연배당률', '환헤지', '배당락일', '공식홈', '블로그']
@@ -231,3 +231,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
