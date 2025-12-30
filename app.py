@@ -120,6 +120,13 @@ def main():
 
     # --- 비중 조절형 포트폴리오 계산기 (최적화 버전) ---
     with st.expander("🧮 나만의 배당 포트폴리오 만들기 (클릭)", expanded=False):
+        # 빨간색 경고창(st.error)으로 시인성 극대화
+        st.error("""
+            **⚠️ 시뮬레이션 활용 시 유의사항**
+            1. 본 결과는 현재 시점의 배당률을 바탕으로 한 **단순 계산값**입니다.
+            2. 실제 배당금은 운용사의 공시 및 환율 상황에 따라 **매월 달라질 수 있습니다.**
+            3. 본 도구는 투자 참고용이며, 최종 투자 결정은 **본인의 판단**하에 신중히 결정하시기 바랍니다.
+        """)
         col_input1, col_input2 = st.columns([1, 2])
         with col_input1:
             total_invest = st.number_input("💰 총 투자 금액 (만원)", min_value=100, value=3000, step=100) * 10000
@@ -231,4 +238,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
