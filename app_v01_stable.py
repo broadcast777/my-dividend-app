@@ -41,11 +41,28 @@ def get_safe_price(code, category):
 def classify_asset(row):
     name = str(row.get('종목명', '')).upper()
     symbol = str(row.get('종목코드', '')).upper()
+    
+    # 키워드 정의
     covered = ['커버드콜', 'COVERED CALL', '프리미엄', 'PREMIUM', '+10%', '옵션', 'OPTION', 'QYLD', 'JEPI', 'JEPQ', 'XYLD', 'RYLD', 'NVDY', 'TSLY', 'CONY', 'MSTY', 'ULTRA', 'QQQI', 'GPIQ', 'XYLG', 'QYLG', 'TLTW', 'SVOL']
     bond = ['채권', '국채', 'BOND', '단기채', 'TREASURY', '하이일드', 'HIGH YIELD', 'PFF', '국제금', '골드', 'GOLD']
-    if any(k in name for k in covered) or any(k in symbol for k in covered): return '🛡️ 커버드콜'
-    if any(k in name for k in bond) or any(k in symbol for k in bond): return '🏦 채권형'
-    if any(k in name for k in ['리츠', 'REITS', '부동산']): return '🏢 리츠형'
+    
+    # 1순위: 커버드콜 (혼합형이라도 커버드콜 전략이면 커버드콜로 분류)
+    if any(k in name for k in covered) or any(k in symbol for k in covered): 
+        return '🛡️ 커버드콜'
+    
+    # 2순위: 혼합형 (새로 추가됨)
+    if '혼합' in name:
+        return '⚖️ 혼합형'
+        
+    # 3순위: 채권형
+    if any(k in name for k in bond) or any(k in symbol for k in bond): 
+        return '🏦 채권형'
+        
+    # 4순위: 리츠형
+    if any(k in name for k in ['리츠', 'REITS', '부동산']): 
+        return '🏢 리츠형'
+        
+    # 기본값: 주식형
     return '📈 주식형'
 
 def get_hedge_status(name, category):
