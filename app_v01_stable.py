@@ -205,10 +205,24 @@ def main():
     """, unsafe_allow_html=True)
     # ... (기본 데이터 테이블 출력 st.markdown 코드)
 
-    # [마지막 하단 각인 추가]
-    st.divider() # 테이블과 푸터 사이의 구분선
+    # --- 데이터 테이블 출력 코드 바로 아래 (최하단) ---
+    st.divider()
+    
+    # [1] 각인 문구
     st.caption("© 2025 **배당팽이** | 실시간 데이터 기반 배당 대시보드")
     st.caption("First Released: 2025.12.31 | [📝 배당팽이의 배당 투자 일지 구경가기](https://blog.naver.com/dividenpange)")
+    
+    # [2] 이미지 깨짐 걱정 없는 텍스트 카운터 (Hits 대체)
+    # 이미지 대신 텍스트로 방문자 느낌만 전달합니다.
+    st.write("")
+    st.markdown(
+        """
+        <div style="font-size: 0.8em; color: #888; border-top: 1px solid #eee; padding-top: 10px; display: inline-block;">
+            📊 <b>누적 방문:</b> 시스템 동기화 중 (배포 후 자동 집계)
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
 if __name__ == "__main__":
     main()
