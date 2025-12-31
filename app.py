@@ -118,7 +118,7 @@ def main():
             # 해외 종목 경고
             has_foreign_stock = any(df[df['pure_name'] == s_name].iloc[0]['분류'] == '해외' for s_name in selected)
             if has_foreign_stock:
-                st.warning("📢 **잠깐!** 선택하신 종목 중 **'해외 상장 ETF'**가 포함되어 있습니다. ISA/연금계좌 결과는 참고용으로만 봐주세요.")
+                st.warning("📢 **잠깐!** 선택하신 종목 중 **'해외 상장 ETF'**가 포함되어 있습니다. ISA/연금계좌에서 매수 불가, 결과는 참고용으로만 봐주세요.")
 
             weights = {}; remaining = 100; cols_w = st.columns(2); all_data = []
             for i, stock in enumerate(selected):
@@ -243,3 +243,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
