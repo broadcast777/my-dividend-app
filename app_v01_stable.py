@@ -203,6 +203,12 @@ def main():
         <tbody>{''.join(html_rows)}</tbody>
     </table>
     """, unsafe_allow_html=True)
+    # ... (기본 데이터 테이블 출력 st.markdown 코드)
+
+    # [마지막 하단 각인 추가]
+    st.divider() # 테이블과 푸터 사이의 구분선
+    st.caption("© 2025 **배당팽이** | 실시간 데이터 기반 배당 대시보드")
+    st.caption("First Released: 2025.12.31 | [📝 배당팽이의 배당 투자 일지 구경가기](https://blog.naver.com/dividenpange)")
 
 if __name__ == "__main__":
     main()
