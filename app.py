@@ -251,18 +251,14 @@ def main():
         st.caption("© 2025 **배당팽이** | 실시간 데이터 기반 배당 대시보드")
         st.caption("First Released: 2025.12.31 | [배당팽이의 배당 투자 일지](https://blog.naver.com/dividenpange)")
     with col_footer2:
-        st.markdown(
-            f"""
-            <div style="text-align: right;">
-                <span style="color: grey; font-size: 0.8rem;">오늘의 방문자 : </span>
-                <a href="https://hits.seeyoufarm.com">
-                    <img src="https://hits.seeyoufarm.com/api/count/incr/badge.svg?url=https%3A%2F%2Fdividend-pange.streamlit.app&count_bg=%23999999&title_bg=%23999999&icon=&icon_color=%23E7E7E7&title=HIT&edge_flat=false" alt="Hits">
-                </a>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+        # [수정] HTML 대신 Streamlit 네이티브 이미지 함수 사용
+        hit_url = "https://hits.seeyoufarm.com/api/count/incr/badge.svg?url=https%3A%2F%2Fdividend-pange.streamlit.app&count_bg=%23999999&title_bg=%23999999&icon=&icon_color=%23E7E7E7&title=VISIT&edge_flat=false"
+        
+        # 캡션으로 '오늘의 방문자' 표시하고 이미지 출력
+        st.caption("오늘의 방문자") 
+        st.image(hit_url, width=100) # width로 크기 조절 가능
 
 if __name__ == "__main__":
     main()
+
 
