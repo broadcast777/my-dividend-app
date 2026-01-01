@@ -11,7 +11,7 @@ import altair as alt
 # [1] 페이지 설정
 st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
 
-# [2] Supabase 연결 설정 (이 위치가 딱 좋습니다!)
+# [2] Supabase 연결 설정
 URL = "https://nkazyjvlrgpgxhgqtkud.supabase.co"
 KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5rYXp5anZscmdwZ3hoZ3F0a3VkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcyNDEzODMsImV4cCI6MjA4MjgxNzM4M30.OZr0SlcesETGxrbdtLnp6DaJVCBNHHZS3ZBTUNNrVi8"
 supabase = create_client(URL, KEY) #
@@ -125,7 +125,7 @@ def main():
             # 해외 종목 경고
             has_foreign_stock = any(df[df['pure_name'] == s_name].iloc[0]['분류'] == '해외' for s_name in selected)
             if has_foreign_stock:
-                st.warning("📢 **잠깐!** 선택하신 종목 중 **'해외 상장 ETF'**가 포함되어 있습니다. ISA/연금계좌 결과는 참고용으로만 봐주세요.")
+                st.warning("📢 **잠깐!** 선택하신 종목 중 '해외 상장 ETF'가 포함되어 있습니다. ISA/연금계좌 결과는 참고용으로만 봐주세요.")
 
             weights = {}; remaining = 100; cols_w = st.columns(2); all_data = []
             for i, stock in enumerate(selected):
@@ -295,6 +295,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
