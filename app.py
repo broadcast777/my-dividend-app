@@ -37,12 +37,24 @@ def get_safe_price(code, category):
             if not price:
                 price = ticker.history(period="1d")['Close'].iloc[-1]
             return float(price) if price else None
+            
+        # 국내 주식 크롤링
         url = f"https://finance.naver.com/item/main.naver?code={code_str}"
+        # timeout=3을 넣어 3초 이상 응답 없으면 타임아웃 에러 발생
         res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=3)
         soup = BeautifulSoup(res.text, 'html.parser')
         no_today = soup.select_one(".no_today .blind")
         return int(no_today.text.replace(",", "")) if no_today else None
-    except: return None
+
+    # 1. 인터넷 연결 문제나 서버 지연 시 (타임아웃)
+    except requests.exceptions.Timeout:
+        st.warning(f"⏱️ {code} 데이터 조회 중 응답 시간이 초과되었습니다. (서버 지연)")
+        return None
+    # 2. 그 외 모든 에러 (종목 코드 오류, 코드 오타 등)
+    except Exception as e:
+        # 에러 메시지를 빨간색 창으로 띄워서 블로거님이 바로 알 수 있게 함
+        st.error(f"❌ {code} ({category}) 조회 실패: {str(e)}")
+        return None
 
 def classify_asset(row):
     name = str(row.get('종목명', '')).upper()
@@ -302,6 +314,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
