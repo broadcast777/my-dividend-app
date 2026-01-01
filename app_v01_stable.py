@@ -260,10 +260,19 @@ def main():
     st.caption("© 2025 **배당팽이** | 실시간 데이터 기반 배당 대시보드")
     st.caption("First Released: 2025.12.31 | [📝 배당팽이의 배당 투자 일지 구경가기](https://blog.naver.com/dividenpange)")
 
-    # [2] Supabase 방문자 카운트 로직 (여기에 삽입!)
+    # [2] Supabase 방문자 카운트 및 유입 경로 로직 (교체하세요!)
     if 'visited' not in st.session_state:
         try:
-            # DB에서 현재 값 가져와서 +1 업데이트
+            # 1. 유입 경로 가져오기
+            from streamlit.web.server.websocket_headers import _get_websocket_headers
+            headers = _get_websocket_headers()
+            # 주소창에 직접 치면 Direct, 블로그 타고 오면 블로그 주소가 남습니다.
+            referer = headers.get("Referer", "Direct (주소창 직접 입력)") 
+
+            # 2. 유입 경로 로그 저장 (visit_logs 테이블)
+            supabase.table("visit_logs").insert({"referer": referer}).execute()
+
+            # 3. 전체 카운트 업데이트 (visit_counts 테이블)
             response = supabase.table("visit_counts").select("count").eq("id", 1).execute()
             if response.data:
                 new_count = response.data[0]['count'] + 1
@@ -271,14 +280,12 @@ def main():
                 st.session_state.visited = True
                 st.session_state.display_count = new_count
         except Exception as e:
-            # 에러 발생 시 로그를 남기지 않고 조용히 처리 (사용자에게는 확인 중으로 표시)
             st.session_state.display_count = "연결 확인 중"
     elif 'display_count' not in st.session_state:
-        # 세션은 있는데 표시 숫자가 없는 경우 다시 읽어오기
         response = supabase.table("visit_counts").select("count").eq("id", 1).execute()
         if response.data:
             st.session_state.display_count = response.data[0]['count']
-
+            
     # [3] 실제 화면 표시 (기존 "시스템 동기화 중" 부분을 대체)
     st.write("")
     display_num = st.session_state.get('display_count', '집계 중')
@@ -295,6 +302,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
