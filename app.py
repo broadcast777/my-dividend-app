@@ -1,4 +1,3 @@
-%%writefile app.py
 import streamlit as st
 import pandas as pd
 import requests
@@ -253,4 +252,5 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
