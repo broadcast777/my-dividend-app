@@ -285,7 +285,7 @@ def main():
     st.markdown(
         f"""
         <div style="font-size: 0.8em; color: #888; border-top: 1px solid #eee; padding-top: 10px; display: inline-block;">
-            📊 <b>누적 방문:</b> {display_num}분께서 배당팽이를 돌려보셨습니다.
+            📊 <b>누적 방문:</b> {display_num}분께서 계산기를 돌려보셨습니다.
         </div>
         """,
         unsafe_allow_html=True
@@ -295,6 +295,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
