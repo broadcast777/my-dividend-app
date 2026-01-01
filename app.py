@@ -1,3 +1,4 @@
+%%writefile app.py
 import streamlit as st
 import pandas as pd
 import requests
@@ -41,28 +42,11 @@ def get_safe_price(code, category):
 def classify_asset(row):
     name = str(row.get('종목명', '')).upper()
     symbol = str(row.get('종목코드', '')).upper()
-    
-    # 키워드 정의
     covered = ['커버드콜', 'COVERED CALL', '프리미엄', 'PREMIUM', '+10%', '옵션', 'OPTION', 'QYLD', 'JEPI', 'JEPQ', 'XYLD', 'RYLD', 'NVDY', 'TSLY', 'CONY', 'MSTY', 'ULTRA', 'QQQI', 'GPIQ', 'XYLG', 'QYLG', 'TLTW', 'SVOL']
     bond = ['채권', '국채', 'BOND', '단기채', 'TREASURY', '하이일드', 'HIGH YIELD', 'PFF', '국제금', '골드', 'GOLD']
-    
-    # 1순위: 커버드콜 (혼합형이라도 커버드콜 전략이면 커버드콜로 분류)
-    if any(k in name for k in covered) or any(k in symbol for k in covered): 
-        return '🛡️ 커버드콜'
-    
-    # 2순위: 혼합형 (새로 추가됨)
-    if '혼합' in name:
-        return '⚖️ 혼합형'
-        
-    # 3순위: 채권형
-    if any(k in name for k in bond) or any(k in symbol for k in bond): 
-        return '🏦 채권형'
-        
-    # 4순위: 리츠형
-    if any(k in name for k in ['리츠', 'REITS', '부동산']): 
-        return '🏢 리츠형'
-        
-    # 기본값: 주식형
+    if any(k in name for k in covered) or any(k in symbol for k in covered): return '🛡️ 커버드콜'
+    if any(k in name for k in bond) or any(k in symbol for k in bond): return '🏦 채권형'
+    if any(k in name for k in ['리츠', 'REITS', '부동산']): return '🏢 리츠형'
     return '📈 주식형'
 
 def get_hedge_status(name, category):
@@ -100,7 +84,8 @@ def load_and_process_data(df_raw):
 
 def main():
     st.title("💰 배당팽이 실시간 연배당률 대시보드")
-    
+
+
     df_raw = load_stock_data_from_csv()
     if df_raw.empty: st.stop()
 
@@ -113,44 +98,59 @@ def main():
         col1, col2 = st.columns([1, 2])
         total_invest = col1.number_input("💰 총 투자 금액 (만원)", min_value=100, value=3000, step=100) * 10000
         selected = col2.multiselect("📊 종목 선택", df['pure_name'].unique())
-        
+
         if selected:
             # 해외 종목 경고
             has_foreign_stock = any(df[df['pure_name'] == s_name].iloc[0]['분류'] == '해외' for s_name in selected)
             if has_foreign_stock:
-                st.warning("📢 **잠깐!** 선택하신 종목 중 **'해외 상장 ETF'**가 포함되어 있습니다. ISA/연금계좌에서 매수 불가, 결과는 참고용으로만 봐주세요.")
+                st.warning("📢 **잠깐!** 선택하신 종목 중 **'해외 상장 ETF'**가 포함되어 있습니다. ISA/연금계좌 결과는 참고용으로만 봐주세요.")
 
             weights = {}; remaining = 100; cols_w = st.columns(2); all_data = []
             for i, stock in enumerate(selected):
                 with cols_w[i % 2]:
                     safe_rem = max(0, remaining)
+                    
                     if i < len(selected) - 1:
-                        def_v = min(100 // len(selected), safe_rem)
-                        val = st.number_input(f"{stock} (%)", 0, 100, def_v, 5, key=f"s_{i}")
-                        weights[stock] = val; remaining -= val
-                        # 💡 이 부분 추가: 일반 종목 비중 입력 아래에 금액 표시
+                        # 일반 종목 입력 (가드레일 적용)
+                        val = st.number_input(
+                            f"{stock} (%)", 
+                            min_value=0, 
+                            max_value=safe_rem, 
+                            value=min(safe_rem, 100 // len(selected)), 
+                            step=5, 
+                            key=f"s_{i}"
+                        )
+                        weights[stock] = val
+                        remaining -= val
                         amt = total_invest * (val / 100)
-                        st.caption(f"💰 투자금: **{amt/10000:,.0f}만원**")
                     else:
+                        # [중요] 마지막 종목: 남은 비중을 자동으로 할당
                         st.info(f"{stock}: {safe_rem}% 자동 적용")
-                        weights[stock] = safe_rem
-                         # 💡 이 부분 추가: 마지막 종목 자동 적용 안내 아래에 금액 표시
+                        weights[stock] = safe_rem  # <--- 이 줄이 빠져서 에러가 났던 겁니다!
                         amt = total_invest * (safe_rem / 100)
-                        st.caption(f"💰 투자금: **{amt/10000:,.0f}만원**")
+                    
+                    st.caption(f"💰 투자금: **{amt/10000:,.0f}만원**")
+                
+                # 데이터 저장 (들여쓰기 위치 확인: for문 안쪽, if문 바깥쪽)
                 s_row = df[df['pure_name'] == stock].iloc[0]
-                all_data.append({'종목': stock, '비중': weights[stock], '자산유형': s_row['자산유형']})
+                all_data.append({
+                    '종목': stock, 
+                    '비중': weights[stock], 
+                    '자산유형': s_row['자산유형'],
+                    '투자금액_만원': amt / 10000 # 툴팁용 데이터 미리 계산
+                })
 
             total_y_div = sum([(total_invest * (weights[n]/100) * (df[df['pure_name']==n].iloc[0]['연배당률']/100)) for n in selected])
             total_m = total_y_div / 12
             avg_y = sum([(df[df['pure_name']==n].iloc[0]['연배당률'] * (weights[n]/100)) for n in selected])
-            
+
             st.markdown("### 🎯 포트폴리오 결과")
             st.metric("📈 가중 평균 연배당률", f"{avg_y:.2f}%")
-            
+
             r1, r2, r3 = st.columns(3)
             r1.metric("월 수령액 (세후)", f"{total_m * 0.846:,.0f}원", delta="-15.4%", delta_color="inverse")
             r2.metric("월 수령액 (ISA/세전)", f"{total_m:,.0f}원", delta="100%", delta_color="normal")
-            
+
             # [유지] 이득 금액 및 부연 설명 통합 박스
             with r3:
                 st.markdown(f"""
@@ -165,7 +165,7 @@ def main():
 
             # [🔥 복구된 탭 섹션]
             res_tab1, res_tab2 = st.tabs(["📊 월 배당금 비교", "💎 포트폴리오 자산 구성"])
-            
+
             with res_tab1:
                 c_data = pd.DataFrame({'계좌 종류': ['일반 계좌', 'ISA/연금'], '월 수령액': [total_m * 0.846, total_m]})
                 chart = alt.Chart(c_data).mark_bar().encode(
@@ -178,21 +178,26 @@ def main():
             with res_tab2:
                 chart_col, table_col = st.columns([1, 1.2])
                 df_ana = pd.DataFrame(all_data)
-                asset_sum = df_ana.groupby('자산유형').agg({'비중': 'sum', '종목': lambda x: ', '.join(x)}).reset_index()
-                
+                asset_sum = df_ana.groupby('자산유형').agg({'비중': 'sum', '투자금액_만원': 'sum', '종목': lambda x: ', '.join(x)}).reset_index()
                 with chart_col:
                     donut = alt.Chart(asset_sum).mark_arc(innerRadius=60).encode(
                         theta=alt.Theta("비중:Q"),
                         color=alt.Color("자산유형:N", legend=None),
-                        tooltip=[alt.Tooltip("자산유형:N"), alt.Tooltip("비중:Q", format=".1f"), alt.Tooltip("종목:N", title="포함 종목")]
+                        # 수정 코드 (투자금(만원) 툴팁 추가)
+                        tooltip=[
+                            alt.Tooltip("자산유형:N"), 
+                            alt.Tooltip("비중:Q", format=".1f", title="비중(%)"), 
+                            alt.Tooltip("투자금액_만원:Q", format=",d", title="투자금(만원)"), # 이 줄 추가!
+                            alt.Tooltip("종목:N", title="포함 종목")
+                                ]
                     ).properties(height=350)
                     st.altair_chart(donut, use_container_width=True)
-                
+
                 with table_col:
                     st.write("📋 **유형별 요약**")
-                    st.dataframe(asset_sum.sort_values('비중', ascending=False), 
-                                 column_config={"비중": st.column_config.NumberColumn(format="%d%%"), 
-                                                "종목": st.column_config.TextColumn("종목", width="large")}, 
+                    st.dataframe(asset_sum.sort_values('비중', ascending=False),
+                                 column_config={"비중": st.column_config.NumberColumn(format="%d%%"),
+                                                "종목": st.column_config.TextColumn("종목", width="large")},
                                  hide_index=True, use_container_width=True)
 
             st.error("""
@@ -203,7 +208,7 @@ def main():
             """)
 
     st.info("💡 **이동 안내:** '코드' 클릭 시 블로그 분석글로, '🔗정보' 클릭 시 네이버/야후 금융 정보로 이동합니다. (**⭐ 표시는 상장 1년 미만 종목입니다.**)")
-    
+
     # 데이터 테이블 출력부
     html_rows = []
     for _, row in df.iterrows():
@@ -226,15 +231,13 @@ def main():
         <tbody>{''.join(html_rows)}</tbody>
     </table>
     """, unsafe_allow_html=True)
-    # ... (기본 데이터 테이블 출력 st.markdown 코드)
-
-    # --- 데이터 테이블 출력 코드 바로 아래 (최하단) ---
+  # --- 데이터 테이블 출력 코드 바로 아래 (최하단) ---
     st.divider()
-    
+
     # [1] 각인 문구
     st.caption("© 2025 **배당팽이** | 실시간 데이터 기반 배당 대시보드")
     st.caption("First Released: 2025.12.31 | [📝 배당팽이의 배당 투자 일지 구경가기](https://blog.naver.com/dividenpange)")
-    
+
     # [2] 이미지 깨짐 걱정 없는 텍스트 카운터 (Hits 대체)
     # 이미지 대신 텍스트로 방문자 느낌만 전달합니다.
     st.write("")
@@ -247,7 +250,7 @@ def main():
         unsafe_allow_html=True
     )
 
+# 프로그램 실행
 if __name__ == "__main__":
     main()
-
 
