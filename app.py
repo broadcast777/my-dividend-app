@@ -1,4 +1,5 @@
 import streamlit as st
+from supabase import create_client #
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
@@ -10,7 +11,12 @@ import altair as alt
 # [1] 페이지 설정
 st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
 
-# [2] 데이터 로드 및 처리 함수
+# [2] Supabase 연결 설정 (이 위치가 딱 좋습니다!)
+URL = "https://nkazyjvlrgpgxhgqtkud.supabase.co"
+KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5rYXp5anZscmdwZ3hoZ3F0a3VkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcyNDEzODMsImV4cCI6MjA4MjgxNzM4M30.OZr0SlcesETGxrbdtLnp6DaJVCBNHHZS3ZBTUNNrVi8"
+supabase = create_client(URL, KEY) #
+
+# [3] 데이터 로드 및 처리 함수
 @st.cache_data(ttl=600)
 def load_stock_data_from_csv():
     url = "https://raw.githubusercontent.com/broadcast777/my-dividend-app/main/stocks.csv"
@@ -254,18 +260,38 @@ def main():
     st.caption("© 2025 **배당팽이** | 실시간 데이터 기반 배당 대시보드")
     st.caption("First Released: 2025.12.31 | [📝 배당팽이의 배당 투자 일지 구경가기](https://blog.naver.com/dividenpange)")
 
-    # [2] 이미지 깨짐 걱정 없는 텍스트 카운터 (Hits 대체)
-    # 이미지 대신 텍스트로 방문자 느낌만 전달합니다.
+    # [2] Supabase 방문자 카운트 로직 (여기에 삽입!)
+    if 'visited' not in st.session_state:
+        try:
+            # DB에서 현재 값 가져와서 +1 업데이트
+            response = supabase.table("visit_counts").select("count").eq("id", 1).execute()
+            if response.data:
+                new_count = response.data[0]['count'] + 1
+                supabase.table("visit_counts").update({"count": new_count}).eq("id", 1).execute()
+                st.session_state.visited = True
+                st.session_state.display_count = new_count
+        except Exception as e:
+            # 에러 발생 시 로그를 남기지 않고 조용히 처리 (사용자에게는 확인 중으로 표시)
+            st.session_state.display_count = "연결 확인 중"
+    elif 'display_count' not in st.session_state:
+        # 세션은 있는데 표시 숫자가 없는 경우 다시 읽어오기
+        response = supabase.table("visit_counts").select("count").eq("id", 1).execute()
+        if response.data:
+            st.session_state.display_count = response.data[0]['count']
+
+    # [3] 실제 화면 표시 (기존 "시스템 동기화 중" 부분을 대체)
     st.write("")
+    display_num = st.session_state.get('display_count', '집계 중')
     st.markdown(
-        """
+        f"""
         <div style="font-size: 0.8em; color: #888; border-top: 1px solid #eee; padding-top: 10px; display: inline-block;">
-            📊 <b>누적 방문:</b> 시스템 동기화 중 (배포 후 자동 집계)
+            📊 <b>누적 방문:</b> {display_num}분께서 배당팽이를 돌려보셨습니다.
         </div>
         """,
         unsafe_allow_html=True
     )
-
+    # --- main() 함수 끝 ---
+    
 # 프로그램 실행
 if __name__ == "__main__":
     main()

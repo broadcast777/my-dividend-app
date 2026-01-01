@@ -7,3 +7,4 @@ finance-datareader
 pytz
 altair
 streamlit-analytics2
+supabase
