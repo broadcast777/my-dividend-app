@@ -20,11 +20,20 @@ supabase = create_client(URL, KEY) #
 @st.cache_data(ttl=600)
 def load_stock_data_from_csv():
     url = "https://raw.githubusercontent.com/broadcast777/my-dividend-app/main/stocks.csv"
-    for enc in ['utf-8-sig', 'cp949']:
+    # euc-kr을 추가하여 한글 호환성을 극대화했습니다.
+    encodings = ['utf-8-sig', 'cp949', 'euc-kr']
+    
+    for enc in encodings:
         try:
             df = pd.read_csv(url, dtype={'종목코드': str}, encoding=enc)
+            # 성공하면 조용히 데이터를 반환합니다.
             return df
-        except: continue
+        except Exception:
+            # 실패하면 다음 인코딩으로 넘어갑니다.
+            continue
+            
+    # 모든 시도가 실패했을 때만 사용자에게 알림을 띄웁니다.
+    st.error("❌ 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.")
     return pd.DataFrame()
 
 @st.cache_data(ttl=300)
@@ -314,6 +323,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
