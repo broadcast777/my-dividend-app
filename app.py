@@ -128,9 +128,15 @@ def main():
                         def_v = min(100 // len(selected), safe_rem)
                         val = st.number_input(f"{stock} (%)", 0, 100, def_v, 5, key=f"s_{i}")
                         weights[stock] = val; remaining -= val
+                        # 💡 이 부분 추가: 일반 종목 비중 입력 아래에 금액 표시
+                        amt = total_invest * (val / 100)
+                        st.caption(f"💰 투자금: **{amt/10000:,.0f}만원**")
                     else:
                         st.info(f"{stock}: {safe_rem}% 자동 적용")
                         weights[stock] = safe_rem
+                         # 💡 이 부분 추가: 마지막 종목 자동 적용 안내 아래에 금액 표시
+                        amt = total_invest * (safe_rem / 100)
+                        st.caption(f"💰 투자금: **{amt/10000:,.0f}만원**")
                 s_row = df[df['pure_name'] == stock].iloc[0]
                 all_data.append({'종목': stock, '비중': weights[stock], '자산유형': s_row['자산유형']})
 
@@ -243,4 +249,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
