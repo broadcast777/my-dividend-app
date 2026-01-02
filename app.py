@@ -361,7 +361,6 @@ def main():
             <div style="text-align: left;">
                 <p style="margin: 2px 0; font-size: 0.85em; color: #555;">🚀 <b>실시간 데이터</b> 연동 중</p>
                 <p style="margin: 2px 0; font-size: 0.85em; color: #555;">🛡️ <b>보안 비밀번호</b> 적용 완료</p>
-                <p style="margin: 2px 0; font-size: 0.85em; color: #888;">(관리자 모드 접속 시 집계 제외)</p>
             </div>
         </div>
     """, unsafe_allow_html=True)
@@ -393,6 +392,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
