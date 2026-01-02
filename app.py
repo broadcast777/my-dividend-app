@@ -366,11 +366,34 @@ def main():
         </div>
     """, unsafe_allow_html=True)
     
+    # [관리자 전용] 최근 유입 경로 실시간 모니터링 (서울 시간 반영)
+    if st.query_params.get("admin", "false").lower() == "true":
+        with st.expander("🛠️ 관리자 전용: 최근 유입 로그 (최근 5건)", expanded=False):
+            try:
+                # SQL에서 직접 9시간을 더해 서울 시간으로 가져옵니다.
+                recent_logs = supabase.table("visit_logs")\
+                    .select("referer, created_at")\
+                    .order("created_at", descending=True)\
+                    .limit(5)\
+                    .execute()
+                
+                if recent_logs.data:
+                    # 데이터프레임 생성 및 시간 포맷 정리
+                    log_df = pd.DataFrame(recent_logs.data)
+                    log_df['created_at'] = pd.to_datetime(log_df['created_at']).dt.tz_convert('Asia/Seoul').dt.strftime('%Y-%m-%d %H:%M:%S')
+                    log_df.columns = ['유입 경로', '접속 시간(KST)']
+                    st.table(log_df)
+                else:
+                    st.write("아직 기록된 유입이 없습니다.")
+            except Exception as e:
+                st.error(f"로그 로드 실패: {e}")
+                
     # --- main() 함수 끝 ---
     
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
