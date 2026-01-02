@@ -94,9 +94,26 @@ def classify_asset(row):
 
 def get_hedge_status(name, category):
     name_str = str(name).upper()
-    if category == '해외': return "💲달러(직투)"
-    if "(H)" in name_str or "헤지" in name_str: return "🛡️환헤지(H)"
-    if any(x in name_str for x in ['미국', 'GLOBAL', 'S&P500', '나스닥', '빅테크', '국제금', '골드', 'GOLD']): return "⚡환노출"
+    
+    # 1순위: 해외 직투는 무조건 달러
+    if category == '해외': 
+        return "💲달러(직투)"
+    
+    # 2순위: 이름에 '환노출'이 명시된 경우 (예: ACE 미국빅테크7... 합성(환노출))
+    # '합성' 글자가 있어도 '환노출'이 있으면 2순위에서 먼저 걸러져서 정확히 나옵니다.
+    if "환노출" in name_str or "UNHEDGED" in name_str:
+        return "⚡환노출"
+    
+    # 3순위: 방패 키워드 확인 ( (H), 헤지, 합성 )
+    # 이제 CSV에서 (합성)을 넣으셨으니 여기서 '🛡️환헤지(H)'로 분류됩니다.
+    if any(x in name_str for x in ["(H)", "헤지", "합성"]): 
+        return "🛡️환헤지(H)"
+    
+    # 4순위: 방패가 없는데 미국/글로벌 키워드가 있는 경우
+    if any(x in name_str for x in ['미국', 'GLOBAL', 'S&P500', '나스닥', '빅테크', '국제금', '골드', 'GOLD']): 
+        return "⚡환노출"
+    
+    # 5순위: 일반 국내 자산
     return "-"
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -329,6 +346,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
