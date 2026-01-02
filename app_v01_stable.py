@@ -268,41 +268,48 @@ def main():
             """)
 
     st.info("💡 **이동 안내:** '코드' 클릭 시 블로그 분석글로, '🔗정보' 클릭 시 네이버/야후 금융 정보로 이동합니다. (**⭐ 표시는 상장 1년 미만 종목입니다.**)")
-    # --- 데이터 테이블 출력부 (6번 개선안 반영 버전) ---
-    html_rows = []
-    for _, row in df.iterrows():
-        # [6번 개선안] 블로그 링크 검증 및 기본값 처리
-        blog_link = str(row.get('블로그링크', '')).strip()
-        if not blog_link or blog_link == '#':
-            # 링크가 비어있거나 #이면 내 블로그 홈으로 연결하여 '깨진 링크' 방지
-            blog_link = "https://blog.naver.com/dividenpange"
+  
+    # 1. 표를 그리는 기능을 '함수'로 정의 (탭마다 돌려쓰기 위함)
+    def render_custom_table(data_frame):
+        html_rows = []
+        for _, row in data_frame.iterrows():
+            # [6번 개선안] 깨진 링크 방지 로직 유지
+            blog_link = str(row.get('블로그링크', '')).strip()
+            if not blog_link or blog_link == '#':
+                blog_link = "https://blog.naver.com/dividenpange"
             
-        # 종목 코드 클릭 시 블로그 링크로 연결
-        b_link = f"<a href='{blog_link}' target='_blank' style='color:#0068c9; text-decoration:none; font-weight:bold;'>{row['코드']}</a>"
-        
-        stock_name = f"<span style='color:#333; font-weight:500;'>{row['종목명']}</span>"
-        f_link = f"<a href='{row['금융링크']}' target='_blank' style='color:#0068c9; text-decoration:none;'>🔗정보</a>"
-        
-        # 연배당률 10% 이상은 빨간색 강조
-        yield_display = f"<span style='color:{'#ff4b4b' if row['연배당률']>=10 else '#333'}; font-weight:{'bold' if row['연배당률']>=10 else 'normal'};'>{row['연배당률']:.2f}%</span>"
-        
-        # 행 추가
-        html_rows.append(f"<tr><td>{b_link}</td><td class='name-cell'>{stock_name}</td><td>{row['현재가']}</td><td>{yield_display}</td><td>{row['환구분']}</td><td>{row['배당락일']}</td><td>{f_link}</td></tr>")
+            b_link = f"<a href='{blog_link}' target='_blank' style='color:#0068c9; text-decoration:none; font-weight:bold;'>{row['코드']}</a>"
+            stock_name = f"<span style='color:#333; font-weight:500;'>{row['종목명']}</span>"
+            f_link = f"<a href='{row['금융링크']}' target='_blank' style='color:#0068c9; text-decoration:none;'>🔗정보</a>"
+            yield_display = f"<span style='color:{'#ff4b4b' if row['연배당률']>=10 else '#333'}; font-weight:{'bold' if row['연배당률']>=10 else 'normal'};'>{row['연배당률']:.2f}%</span>"
+            
+            html_rows.append(f"<tr><td>{b_link}</td><td class='name-cell'>{stock_name}</td><td>{row['현재가']}</td><td>{yield_display}</td><td>{row['환구분']}</td><td>{row['배당락일']}</td><td>{f_link}</td></tr>")
 
-    # [테이블 스타일 및 출력] (이하 동일)
-    st.markdown(f"""
-    <style>
-        table {{ width:100% !important; border-collapse:collapse; font-size:14px; table-layout: auto !important; margin: 0 auto; }}
-        th {{ background:#f0f2f6; padding:12px 8px; white-space: nowrap; border-bottom: 2px solid #ddd; text-align: center; }}
-        td {{ padding:10px 8px; border-bottom:1px solid #eee; text-align: center; }}
-        .name-cell {{ text-align: left !important; white-space: normal !important; min-width: 200px; }}
-        tr:hover {{ background-color: #f9f9f9; }}
-    </style>
-    <table>
-        <thead><tr><th>코드</th><th style='text-align:left;'>종목명</th><th>현재가</th><th>연배당률</th><th>환구분</th><th>배당락일</th><th>네이버/야후</th></tr></thead>
-        <tbody>{''.join(html_rows)}</tbody>
-    </table>
-    """, unsafe_allow_html=True)
+        st.markdown(f"""
+        <style>
+            table {{ width:100% !important; border-collapse:collapse; font-size:14px; margin: 0 auto; }}
+            th {{ background:#f0f2f6; padding:12px 8px; border-bottom: 2px solid #ddd; text-align: center; }}
+            td {{ padding:10px 8px; border-bottom:1px solid #eee; text-align: center; }}
+            .name-cell {{ text-align: left !important; white-space: normal !important; min-width: 150px; }}
+        </style>
+        <table>
+            <thead><tr><th>코드</th><th style='text-align:left;'>종목명</th><th>현재가</th><th>연배당률</th><th>환구분</th><th>배당락일</th><th>네이버/야후</th></tr></thead>
+            <tbody>{''.join(html_rows)}</tbody>
+        </table>
+        """, unsafe_allow_html=True)
+
+    # 2. 탭 인터페이스 생성 및 데이터 연결
+    tab_all, tab_kor, tab_usa = st.tabs(["🌎 전체", "🇰🇷 국내", "🇺🇸 해외"])
+
+    with tab_all:
+        render_custom_table(df) # 전체 데이터 사용
+
+    with tab_kor:
+        render_custom_table(df[df['분류'] == '국내']) # 국내만 필터링
+
+    with tab_usa:
+        render_custom_table(df[df['분류'] == '해외']) # 해외만 필터링
+    
 
   # --- 데이터 테이블 출력 코드 바로 아래 (최하단) ---
     st.divider()
@@ -392,6 +399,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
