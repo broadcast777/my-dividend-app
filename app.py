@@ -281,48 +281,55 @@ def main():
     st.caption("© 2025 **배당팽이** | 실시간 데이터 기반 배당 대시보드")
     st.caption("First Released: 2025.12.31 | [📝 배당팽이의 배당 투자 일지 구경가기](https://blog.naver.com/dividenpange)")
 
-    # [2] Supabase 방문자 카운트 및 유입 경로 로직 (교체하세요!)
+    # --- [방문자 카운트 및 유입 경로 추적 로직] ---
     if 'visited' not in st.session_state:
         try:
-            # 1. 유입 경로 가져오기
+            # 1. 유입 경로 파악 (URL 파라미터 우선, 없으면 Referer)
+            query_params = st.query_params
+            source_tag = query_params.get("source", None) # URL 뒤에 ?source=blog1 이런게 있는지 확인
+            
             from streamlit.web.server.websocket_headers import _get_websocket_headers
             headers = _get_websocket_headers()
-            # 주소창에 직접 치면 Direct, 블로그 타고 오면 블로그 주소가 남습니다.
-            referer = headers.get("Referer", "Direct (주소창 직접 입력)") 
+            referer = headers.get("Referer", "Direct")
 
-            # 2. 유입 경로 로그 저장 (visit_logs 테이블)
-            supabase.table("visit_logs").insert({"referer": referer}).execute()
+            # 관리자 접속 제외 (URL 뒤에 ?admin=true 붙여서 접속하면 카운트 안 됨)
+            is_admin = query_params.get("admin", "false").lower() == "true"
 
-            # 3. 전체 카운트 업데이트 (visit_counts 테이블)
-            response = supabase.table("visit_counts").select("count").eq("id", 1).execute()
-            if response.data:
-                new_count = response.data[0]['count'] + 1
-                supabase.table("visit_counts").update({"count": new_count}).eq("id", 1).execute()
-                st.session_state.visited = True
-                st.session_state.display_count = new_count
-        except Exception as e:
-            st.session_state.display_count = "연결 확인 중"
-    elif 'display_count' not in st.session_state:
-        response = supabase.table("visit_counts").select("count").eq("id", 1).execute()
-        if response.data:
-            st.session_state.display_count = response.data[0]['count']
+            if not is_admin:
+                # 2. 유입 경로 로그 저장 (source 태그가 있으면 그걸 우선 기록)
+                log_entry = source_tag if source_tag else referer
+                supabase.table("visit_logs").insert({"referer": log_entry}).execute()
+
+                # 3. 전체 카운트 업데이트
+                response = supabase.table("visit_counts").select("count").eq("id", 1).execute()
+                if response.data:
+                    new_count = response.data[0]['count'] + 1
+                    supabase.table("visit_counts").update({"count": new_count}).eq("id", 1).execute()
+                    st.session_state.display_count = new_count
+            else:
+                # 관리자일 때는 기존 숫자만 가져오고 업데이트는 안 함
+                response = supabase.table("visit_counts").select("count").eq("id", 1).execute()
+                st.session_state.display_count = response.data[0]['count'] if response.data else "Admin"
+
+            st.session_state.visited = True # 세션 유지되는 동안(브라우저 안 닫으면) 재카운트 방지
             
-    # [3] 실제 화면 표시 (기존 "시스템 동기화 중" 부분을 대체)
-    st.write("")
+        except Exception as e:
+            st.session_state.display_count = "확인 중"
+    
+    # 화면 표시부
     display_num = st.session_state.get('display_count', '집계 중')
-    st.markdown(
-        f"""
-        <div style="font-size: 0.8em; color: #888; border-top: 1px solid #eee; padding-top: 10px; display: inline-block;">
+    st.markdown(f"""
+        <div style="font-size: 0.8em; color: #888; border-top: 1px solid #eee; padding-top: 10px;">
             📊 <b>누적 방문:</b> {display_num}분께서 계산기를 돌려보셨습니다.
         </div>
-        """,
-        unsafe_allow_html=True
-    )
+    """, unsafe_allow_html=True)
+    
     # --- main() 함수 끝 ---
     
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
