@@ -311,40 +311,39 @@ def main():
     st.caption("© 2025 **배당팽이** | 실시간 데이터 기반 배당 대시보드")
     st.caption("First Released: 2025.12.31 | [📝 배당팽이의 배당 투자 일지 구경가기](https://blog.naver.com/dividenpange)")
 
-    # --- [방문자 카운트 및 유입 경로 추적 로직] ---
+ # --- [방문자 카운트 로직 개선 버전] ---
     if 'visited' not in st.session_state:
+        st.session_state.visited = False
+
+    if not st.session_state.visited:
         try:
-            # 1. 유입 경로 파악 (URL 파라미터 우선, 없으면 Referer)
             query_params = st.query_params
-            source_tag = query_params.get("source", None) # URL 뒤에 ?source=blog1 이런게 있는지 확인
-            
-            from streamlit.web.server.websocket_headers import _get_websocket_headers
-            headers = _get_websocket_headers()
-            referer = headers.get("Referer", "Direct")
-
-            # 관리자 접속 제외 (URL 뒤에 ?admin=true 붙여서 접속하면 카운트 안 됨)
             is_admin = query_params.get("admin", "false").lower() == "true"
-
+            
             if not is_admin:
-                # 2. 유입 경로 로그 저장 (source 태그가 있으면 그걸 우선 기록)
+                source_tag = query_params.get("source", None)
+                from streamlit.web.server.websocket_headers import _get_websocket_headers
+                headers = _get_websocket_headers()
+                referer = headers.get("Referer", "Direct")
+                
                 log_entry = source_tag if source_tag else referer
                 supabase.table("visit_logs").insert({"referer": log_entry}).execute()
 
-                # 3. 전체 카운트 업데이트
                 response = supabase.table("visit_counts").select("count").eq("id", 1).execute()
                 if response.data:
                     new_count = response.data[0]['count'] + 1
                     supabase.table("visit_counts").update({"count": new_count}).eq("id", 1).execute()
                     st.session_state.display_count = new_count
             else:
-                # 관리자일 때는 기존 숫자만 가져오고 업데이트는 안 함
                 response = supabase.table("visit_counts").select("count").eq("id", 1).execute()
                 st.session_state.display_count = response.data[0]['count'] if response.data else "Admin"
 
-            st.session_state.visited = True # 세션 유지되는 동안(브라우저 안 닫으면) 재카운트 방지
+            # [핵심] 성공하든 실패하든 '처리 완료'로 표시하여 재요청 방지
+            st.session_state.visited = True
             
-        except Exception as e:
+        except Exception:
             st.session_state.display_count = "확인 중"
+            st.session_state.visited = True # 에러가 나도 이번 세션은 다시 시도 안 함
     
     # 화면 표시부
     display_num = st.session_state.get('display_count', '집계 중')
@@ -359,6 +358,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
