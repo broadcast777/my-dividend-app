@@ -11,10 +11,10 @@ import altair as alt
 # [1] 페이지 설정
 st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
 
-# [2] Supabase 연결 설정
-URL = "https://nkazyjvlrgpgxhgqtkud.supabase.co"
-KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5rYXp5anZscmdwZ3hoZ3F0a3VkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcyNDEzODMsImV4cCI6MjA4MjgxNzM4M30.OZr0SlcesETGxrbdtLnp6DaJVCBNHHZS3ZBTUNNrVi8"
-supabase = create_client(URL, KEY) #
+# [2] Supabase 연결 설정 (보안 적용)
+URL = st.secrets["SUPABASE_URL"]
+KEY = st.secrets["SUPABASE_KEY"]
+supabase = create_client(URL, KEY)
 
 # [3] 데이터 로드 및 처리 함수
 @st.cache_data(ttl=600)
@@ -359,6 +359,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
