@@ -11,20 +11,29 @@ import altair as alt
 # [1] 페이지 설정
 st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
 
-# [2] Supabase 연결 설정
-URL = "https://nkazyjvlrgpgxhgqtkud.supabase.co"
-KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5rYXp5anZscmdwZ3hoZ3F0a3VkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcyNDEzODMsImV4cCI6MjA4MjgxNzM4M30.OZr0SlcesETGxrbdtLnp6DaJVCBNHHZS3ZBTUNNrVi8"
-supabase = create_client(URL, KEY) #
+# [2] Supabase 연결 설정 (보안 적용)
+URL = st.secrets["SUPABASE_URL"]
+KEY = st.secrets["SUPABASE_KEY"]
+supabase = create_client(URL, KEY)
 
 # [3] 데이터 로드 및 처리 함수
 @st.cache_data(ttl=600)
 def load_stock_data_from_csv():
     url = "https://raw.githubusercontent.com/broadcast777/my-dividend-app/main/stocks.csv"
-    for enc in ['utf-8-sig', 'cp949']:
+    # euc-kr을 추가하여 한글 호환성을 극대화했습니다.
+    encodings = ['utf-8-sig', 'cp949', 'euc-kr']
+    
+    for enc in encodings:
         try:
             df = pd.read_csv(url, dtype={'종목코드': str}, encoding=enc)
+            # 성공하면 조용히 데이터를 반환합니다.
             return df
-        except: continue
+        except Exception:
+            # 실패하면 다음 인코딩으로 넘어갑니다.
+            continue
+            
+    # 모든 시도가 실패했을 때만 사용자에게 알림을 띄웁니다.
+    st.error("❌ 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.")
     return pd.DataFrame()
 
 @st.cache_data(ttl=300)
@@ -37,12 +46,24 @@ def get_safe_price(code, category):
             if not price:
                 price = ticker.history(period="1d")['Close'].iloc[-1]
             return float(price) if price else None
+            
+        # 국내 주식 크롤링
         url = f"https://finance.naver.com/item/main.naver?code={code_str}"
+        # timeout=3을 넣어 3초 이상 응답 없으면 타임아웃 에러 발생
         res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=3)
         soup = BeautifulSoup(res.text, 'html.parser')
         no_today = soup.select_one(".no_today .blind")
         return int(no_today.text.replace(",", "")) if no_today else None
-    except: return None
+
+    # 1. 인터넷 연결 문제나 서버 지연 시 (타임아웃)
+    except requests.exceptions.Timeout:
+        st.warning(f"⏱️ {code} 데이터 조회 중 응답 시간이 초과되었습니다. (서버 지연)")
+        return None
+    # 2. 그 외 모든 에러 (종목 코드 오류, 코드 오타 등)
+    except Exception as e:
+        # 에러 메시지를 빨간색 창으로 띄워서 블로거님이 바로 알 수 있게 함
+        st.error(f"❌ {code} ({category}) 조회 실패: {str(e)}")
+        return None
 
 def classify_asset(row):
     name = str(row.get('종목명', '')).upper()
@@ -73,9 +94,26 @@ def classify_asset(row):
 
 def get_hedge_status(name, category):
     name_str = str(name).upper()
-    if category == '해외': return "💲달러(직투)"
-    if "(H)" in name_str or "헤지" in name_str: return "🛡️환헤지(H)"
-    if any(x in name_str for x in ['미국', 'GLOBAL', 'S&P500', '나스닥', '빅테크', '국제금', '골드', 'GOLD']): return "⚡환노출"
+    
+    # 1순위: 해외 직투는 무조건 달러
+    if category == '해외': 
+        return "💲달러(직투)"
+    
+    # 2순위: 이름에 '환노출'이 명시된 경우 (예: ACE 미국빅테크7... 합성(환노출))
+    # '합성' 글자가 있어도 '환노출'이 있으면 2순위에서 먼저 걸러져서 정확히 나옵니다.
+    if "환노출" in name_str or "UNHEDGED" in name_str:
+        return "⚡환노출"
+    
+    # 3순위: 방패 키워드 확인 ( (H), 헤지, 합성 )
+    # 이제 CSV에서 (합성)을 넣으셨으니 여기서 '🛡️환헤지(H)'로 분류됩니다.
+    if any(x in name_str for x in ["(H)", "헤지", "합성"]): 
+        return "🛡️환헤지(H)"
+    
+    # 4순위: 방패가 없는데 미국/글로벌 키워드가 있는 경우
+    if any(x in name_str for x in ['미국', 'GLOBAL', 'S&P500', '나스닥', '빅테크', '국제금', '골드', 'GOLD']): 
+        return "⚡환노출"
+    
+    # 5순위: 일반 국내 자산
     return "-"
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -230,16 +268,28 @@ def main():
             """)
 
     st.info("💡 **이동 안내:** '코드' 클릭 시 블로그 분석글로, '🔗정보' 클릭 시 네이버/야후 금융 정보로 이동합니다. (**⭐ 표시는 상장 1년 미만 종목입니다.**)")
-
-    # 데이터 테이블 출력부
+    # --- 데이터 테이블 출력부 (6번 개선안 반영 버전) ---
     html_rows = []
     for _, row in df.iterrows():
-        b_link = f"<a href='{row['블로그링크']}' target='_blank' style='color:#0068c9; text-decoration:none; font-weight:bold;'>{row['코드']}</a>"
+        # [6번 개선안] 블로그 링크 검증 및 기본값 처리
+        blog_link = str(row.get('블로그링크', '')).strip()
+        if not blog_link or blog_link == '#':
+            # 링크가 비어있거나 #이면 내 블로그 홈으로 연결하여 '깨진 링크' 방지
+            blog_link = "https://blog.naver.com/dividenpange"
+            
+        # 종목 코드 클릭 시 블로그 링크로 연결
+        b_link = f"<a href='{blog_link}' target='_blank' style='color:#0068c9; text-decoration:none; font-weight:bold;'>{row['코드']}</a>"
+        
         stock_name = f"<span style='color:#333; font-weight:500;'>{row['종목명']}</span>"
         f_link = f"<a href='{row['금융링크']}' target='_blank' style='color:#0068c9; text-decoration:none;'>🔗정보</a>"
+        
+        # 연배당률 10% 이상은 빨간색 강조
         yield_display = f"<span style='color:{'#ff4b4b' if row['연배당률']>=10 else '#333'}; font-weight:{'bold' if row['연배당률']>=10 else 'normal'};'>{row['연배당률']:.2f}%</span>"
+        
+        # 행 추가
         html_rows.append(f"<tr><td>{b_link}</td><td class='name-cell'>{stock_name}</td><td>{row['현재가']}</td><td>{yield_display}</td><td>{row['환구분']}</td><td>{row['배당락일']}</td><td>{f_link}</td></tr>")
 
+    # [테이블 스타일 및 출력] (이하 동일)
     st.markdown(f"""
     <style>
         table {{ width:100% !important; border-collapse:collapse; font-size:14px; table-layout: auto !important; margin: 0 auto; }}
@@ -253,6 +303,7 @@ def main():
         <tbody>{''.join(html_rows)}</tbody>
     </table>
     """, unsafe_allow_html=True)
+
   # --- 데이터 테이블 출력 코드 바로 아래 (최하단) ---
     st.divider()
 
@@ -260,48 +311,98 @@ def main():
     st.caption("© 2025 **배당팽이** | 실시간 데이터 기반 배당 대시보드")
     st.caption("First Released: 2025.12.31 | [📝 배당팽이의 배당 투자 일지 구경가기](https://blog.naver.com/dividenpange)")
 
-    # [2] Supabase 방문자 카운트 및 유입 경로 로직 (교체하세요!)
+ # --- [방문자 카운트 로직 개선 버전] ---
     if 'visited' not in st.session_state:
+        st.session_state.visited = False
+
+    if not st.session_state.visited:
         try:
-            # 1. 유입 경로 가져오기
-            from streamlit.web.server.websocket_headers import _get_websocket_headers
-            headers = _get_websocket_headers()
-            # 주소창에 직접 치면 Direct, 블로그 타고 오면 블로그 주소가 남습니다.
-            referer = headers.get("Referer", "Direct (주소창 직접 입력)") 
-
-            # 2. 유입 경로 로그 저장 (visit_logs 테이블)
-            supabase.table("visit_logs").insert({"referer": referer}).execute()
-
-            # 3. 전체 카운트 업데이트 (visit_counts 테이블)
-            response = supabase.table("visit_counts").select("count").eq("id", 1).execute()
-            if response.data:
-                new_count = response.data[0]['count'] + 1
-                supabase.table("visit_counts").update({"count": new_count}).eq("id", 1).execute()
-                st.session_state.visited = True
-                st.session_state.display_count = new_count
-        except Exception as e:
-            st.session_state.display_count = "연결 확인 중"
-    elif 'display_count' not in st.session_state:
-        response = supabase.table("visit_counts").select("count").eq("id", 1).execute()
-        if response.data:
-            st.session_state.display_count = response.data[0]['count']
+            query_params = st.query_params
+            is_admin = query_params.get("admin", "false").lower() == "true"
             
-    # [3] 실제 화면 표시 (기존 "시스템 동기화 중" 부분을 대체)
-    st.write("")
+            if not is_admin:
+                source_tag = query_params.get("source", None)
+                from streamlit.web.server.websocket_headers import _get_websocket_headers
+                headers = _get_websocket_headers()
+                referer = headers.get("Referer", "Direct")
+                
+                log_entry = source_tag if source_tag else referer
+                supabase.table("visit_logs").insert({"referer": log_entry}).execute()
+
+                response = supabase.table("visit_counts").select("count").eq("id", 1).execute()
+                if response.data:
+                    new_count = response.data[0]['count'] + 1
+                    supabase.table("visit_counts").update({"count": new_count}).eq("id", 1).execute()
+                    st.session_state.display_count = new_count
+            else:
+                response = supabase.table("visit_counts").select("count").eq("id", 1).execute()
+                st.session_state.display_count = response.data[0]['count'] if response.data else "Admin"
+
+            # [핵심] 성공하든 실패하든 '처리 완료'로 표시하여 재요청 방지
+            st.session_state.visited = True
+            
+        except Exception:
+            st.session_state.display_count = "확인 중"
+            st.session_state.visited = True # 에러가 나도 이번 세션은 다시 시도 안 함
+    
+    # --- [개선된 화면 표시부: 위젯만 추가] ---
     display_num = st.session_state.get('display_count', '집계 중')
-    st.markdown(
-        f"""
-        <div style="font-size: 0.8em; color: #888; border-top: 1px solid #eee; padding-top: 10px; display: inline-block;">
-            📊 <b>누적 방문:</b> {display_num}분께서 계산기를 돌려보셨습니다.
+    
+    st.write("") # 상단 여백
+    # 기존에 st.divider()가 중복된다면 하나는 삭제하셔도 됩니다.
+    
+    st.markdown(f"""
+        <div style="display: flex; justify-content: center; align-items: center; gap: 20px; padding: 25px; background: #f8f9fa; border-radius: 15px; border: 1px solid #eee; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 10px;">
+            <div style="text-align: center;">
+                <p style="margin: 0; font-size: 0.9em; color: #666; font-weight: 500;">누적 방문자</p>
+                <p style="margin: 0; font-size: 2.2em; font-weight: 800; color: #0068c9;">{display_num}</p>
+            </div>
+            <div style="width: 1px; height: 50px; background: #ddd;"></div>
+            <div style="text-align: left;">
+                <p style="margin: 2px 0; font-size: 0.85em; color: #555;">🚀 <b>실시간 데이터</b> 연동 중</p>
+                <p style="margin: 2px 0; font-size: 0.85em; color: #555;">🛡️ <b>보안 비밀번호</b> 적용 완료</p>
+            </div>
         </div>
-        """,
-        unsafe_allow_html=True
-    )
+    """, unsafe_allow_html=True)
+    
+# [관리자 전용] 최근 유입 경로 실시간 모니터링 (서울 시간 반영)
+    if st.query_params.get("admin", "false").lower() == "true":
+        with st.expander("🛠️ 관리자 전용: 최근 유입 로그 (최근 5건)", expanded=False):
+            try:
+                # descending=True 를 desc=True 로 수정했습니다.
+                recent_logs = supabase.table("visit_logs")\
+                    .select("referer, created_at")\
+                    .order("created_at", desc=True)\
+                    .limit(5)\
+                    .execute()
+                
+                if recent_logs.data:
+                    log_df = pd.DataFrame(recent_logs.data)
+                    # 서울 시간 변환 및 포맷 정리
+                    log_df['created_at'] = pd.to_datetime(log_df['created_at']).dt.tz_convert('Asia/Seoul').dt.strftime('%Y-%m-%d %H:%M:%S')
+                    log_df.columns = ['유입 경로', '접속 시간(KST)']
+                    st.table(log_df)
+                else:
+                    st.write("아직 기록된 유입이 없습니다.")
+            except Exception as e:
+                st.error(f"로그 로드 실패: {e}")
+                
     # --- main() 함수 끝 ---
     
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
+
+
+
+
+
+
+
+
+
+
 
 
 
