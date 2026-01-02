@@ -345,11 +345,24 @@ def main():
             st.session_state.display_count = "확인 중"
             st.session_state.visited = True # 에러가 나도 이번 세션은 다시 시도 안 함
     
-    # 화면 표시부
+    # --- [개선된 화면 표시부: 위젯만 추가] ---
     display_num = st.session_state.get('display_count', '집계 중')
+    
+    st.write("") # 상단 여백
+    # 기존에 st.divider()가 중복된다면 하나는 삭제하셔도 됩니다.
+    
     st.markdown(f"""
-        <div style="font-size: 0.8em; color: #888; border-top: 1px solid #eee; padding-top: 10px;">
-            📊 <b>누적 방문:</b> {display_num}분께서 계산기를 돌려보셨습니다.
+        <div style="display: flex; justify-content: center; align-items: center; gap: 20px; padding: 25px; background: #f8f9fa; border-radius: 15px; border: 1px solid #eee; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 10px;">
+            <div style="text-align: center;">
+                <p style="margin: 0; font-size: 0.9em; color: #666; font-weight: 500;">누적 방문자</p>
+                <p style="margin: 0; font-size: 2.2em; font-weight: 800; color: #0068c9;">{display_num}</p>
+            </div>
+            <div style="width: 1px; height: 50px; background: #ddd;"></div>
+            <div style="text-align: left;">
+                <p style="margin: 2px 0; font-size: 0.85em; color: #555;">🚀 <b>실시간 데이터</b> 연동 중</p>
+                <p style="margin: 2px 0; font-size: 0.85em; color: #555;">🛡️ <b>보안 비밀번호</b> 적용 완료</p>
+                <p style="margin: 2px 0; font-size: 0.85em; color: #888;">(관리자 모드 접속 시 집계 제외)</p>
+            </div>
         </div>
     """, unsafe_allow_html=True)
     
@@ -358,6 +371,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
