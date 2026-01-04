@@ -71,7 +71,8 @@ def classify_asset(row):
     
     # 키워드 정의
     covered = ['커버드콜', 'COVERED CALL', '프리미엄', 'PREMIUM', '+10%', '옵션', 'OPTION', 'QYLD', 'JEPI', 'JEPQ', 'XYLD', 'RYLD', 'NVDY', 'TSLY', 'CONY', 'MSTY', 'ULTRA', 'QQQI', 'GPIQ', 'XYLG', 'QYLG', 'TLTW', 'SVOL']
-    bond = ['채권', '국채', 'BOND', '단기채', 'TREASURY', '하이일드', 'HIGH YIELD', 'PFF', '국제금', '골드', 'GOLD','T-Bill']
+    # [수정됨] 여기에 'BIL', 'SHV', 'T-BILL'을 추가했습니다!
+    bond = ['채권', '국채', 'BOND', '단기채', 'TREASURY', '하이일드', 'HIGH YIELD', 'PFF', '국제금', '골드', 'GOLD', 'BIL', 'SHV', 'T-BILL', 'SGOV', 'TLT']
     
     # 1순위: 커버드콜 (혼합형이라도 커버드콜 전략이면 커버드콜로 분류)
     if any(k in name for k in covered) or any(k in symbol for k in covered): 
@@ -117,7 +118,7 @@ def get_hedge_status(name, category):
     return "-"
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_and_process_data(df_raw):
+def load_and_process_data(df_raw, is_admin=False): # 👈 여기에 is_admin 추가!
     results = []
     if df_raw.empty: return pd.DataFrame()
     
@@ -125,29 +126,25 @@ def load_and_process_data(df_raw):
         code = str(row.get('종목코드', '')).strip()
         name = str(row.get('종목명', '')).strip()
         category = str(row.get('분류', '국내')).strip()
-        
-        # 가격 조회
         price = get_safe_price(code, category)
         
         if price:
             raw_div = float(row.get('연배당금', 0))
             months = int(row.get('신규상장개월수', 0))
-            
-            # 연 배당금 계산
             annual_div = (raw_div / months * 12) if months > 0 else raw_div
-            
-            # 배당률 계산
             yield_val = (annual_div / price) * 100
 
-            # [🚨 핵심 필터링 로직] 
-            # 배당률이 2.0% 미만(너무 짬)이거나, 25.0% 초과(데이터 오류 의심)면 
-            # 리스트에 넣지 않고 무시(continue)합니다.
+            # [🚨 스마트 필터링] 
+            # 배당률이 이상할 때 (2% 미만 or 25% 초과)
             if yield_val < 2.0 or yield_val > 25.0:
-                continue 
+                if not is_admin: 
+                    continue  # 일반인은 아예 안 보임 (삭제)
+                else:
+                    # 관리자는 보임 + 이름 앞에 '🚫' 마크 붙여줌
+                    name = f"🚫 {name} (필터됨)" 
 
             price_display = f"{int(price):,}원" if category == '국내' else f"${price:.2f}"
             
-            # 결과 담기 (아까 추가한 '신규상장개월수'도 안전하게 포함됨)
             results.append({
                 '코드': code, '종목명': f"{name} ⭐" if months > 0 else name,
                 '블로그링크': str(row.get('블로그링크', '#')),
@@ -168,8 +165,11 @@ def main():
     df_raw = load_stock_data_from_csv()
     if df_raw.empty: st.stop()
 
-    with st.spinner('⚙️ 배당 데이터베이스 엔진 가동 중... 실시간 시세를 연동하고 있습니다.'):
-        df = load_and_process_data(df_raw)
+    with st.spinner('⚙️ 배당 데이터베이스 엔진 가동 중...'):
+    # 관리자 모드인지 먼저 확인
+    is_admin = st.query_params.get("admin", "false").lower() == "true"
+    # 함수에 '관리자야!'라고 알려줌
+    df = load_and_process_data(df_raw, is_admin)
 
     st.warning("⚠️ **투자 유의사항:** 본 대시보드의 연배당률은 과거 분배금 데이터를 기반으로 계산된 참고용 지표입니다. 실제 배당금은 운용사의 사정 및 시장 상황에 따라 매월 변동될 수 있습니다.")
 
@@ -422,6 +422,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
