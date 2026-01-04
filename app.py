@@ -255,6 +255,26 @@ def main():
                     </div>
                 """, unsafe_allow_html=True)
 
+            # --- [여기] 막대 그래프 복구 (숫자 바로 밑에 배치) ---
+            st.write("") # 간격 띄우기
+            
+            # 그래프 데이터 생성
+            c_data = pd.DataFrame({
+                '계좌 종류': ['일반 계좌 (15.4% 떼감)', 'ISA/연금 (다 받음)'], 
+                '월 수령액': [total_m * 0.846, total_m]
+            })
+            
+            # 비교 차트 그리기
+            chart_compare = alt.Chart(c_data).mark_bar(cornerRadiusTopLeft=10, cornerRadiusTopRight=10).encode(
+                x=alt.X('계좌 종류', sort=None, axis=alt.Axis(labelAngle=0, title=None)),
+                y=alt.Y('월 수령액', title=None),
+                color=alt.Color('계좌 종류', scale=alt.Scale(domain=['일반 계좌 (15.4% 떼감)', 'ISA/연금 (다 받음)'], range=['#95a5a6', '#f1c40f']), legend=None),
+                tooltip=[alt.Tooltip('계좌 종류'), alt.Tooltip('월 수령액', format=',.0f')]
+            ).properties(height=220) # 높이는 적당히 조절
+            
+            st.altair_chart(chart_compare, use_container_width=True)
+            # ----------------------------------------------------
+
             if total_y_div > 20000000:
                 st.warning(f"🚨 **주의:** 연간 예상 배당금이 **{total_y_div/10000:,.0f}만원**입니다. 금융소득종합과세 대상에 해당될 수 있습니다.")
 
@@ -586,6 +606,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
