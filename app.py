@@ -356,26 +356,24 @@ def main():
                         else:
                             st.caption("💡 원화 자산 중심의 구성입니다.")
 
-                        # [탭 2] 적립식 시뮬레이션 (상단 금액 연동 + ISA 한도 컷 적용)
+                       # [탭 2] 적립식 시뮬레이션 (ISA 월 한도 강제 적용 수정본)
                 with tab_simulation:
                     # 1. 초기 자산 세팅 (상단 입력값 연동)
-                    start_money = total_invest # 상단에서 입력한 '총 투자 금액'
+                    start_money = total_invest
                     is_over_100m = start_money > 100000000
 
                     st.info(f"📊 상단에서 설정한 **초기 자산 {start_money/10000:,.0f}만원**으로 시뮬레이션을 시작합니다.")
 
-                    # 2. 옵션 설정 (ISA 자동 제어)
+                    # 2. 옵션 설정
                     c1, c2 = st.columns([1.5, 1])
                     with c1:
                         if is_over_100m:
-                            # 1억 초과 시 ISA 강제 비활성화
                             is_isa_mode = st.toggle("🛡️ ISA 계좌 불가 (한도 1억 초과)", value=False, disabled=True)
-                            st.caption("🚫 **초기 투자금이 1억원을 초과**하여 ISA 계좌 개설이 불가능합니다. (일반 계좌 적용)")
+                            st.caption("🚫 초기 투자금이 1억원을 초과하여 일반 계좌로만 진행됩니다.")
                         else:
-                            # 1억 이하일 때만 선택 가능
                             is_isa_mode = st.toggle("🛡️ ISA (절세) 계좌로 모으기", value=True)
                             if is_isa_mode:
-                                st.caption("💡 **ISA 모드:** 비과세 + 과세이연 효과 적용 (남은 한도 내 납입)")
+                                st.caption("💡 **ISA 모드:** 비과세 + 과세이연 효과 (연 2,000만원 한도)")
                             else:
                                 st.caption("💡 **일반 모드:** 배당소득세(15.4%) 납부 후 재투자")
 
@@ -389,28 +387,33 @@ def main():
                     if is_isa_mode:
                         isa_type = st.radio("ISA 유형", ["일반형 (비과세 200만)", "서민형 (비과세 400만)"], horizontal=True, label_visibility="collapsed")
                         isa_exempt = 400 if "서민형" in isa_type else 200
-                        # [현실 고증] 초기 자금이 있어도 ISA는 연 2천만원 납입 한도가 있음
                         if start_money > 20000000:
-                            st.warning(f"⚠️ **현실 체크:** ISA는 연간 2,000만원까지만 납입 가능합니다. 시뮬레이션 상으로는 **기존에 {start_money/10000:,.0f}만원을 이미 납입해둔 ISA 계좌**라고 가정하고 진행합니다.")
+                            st.warning(f"⚠️ 기존에 납입한 {start_money/10000:,.0f}만원은 ISA 총 한도(1억)에서 차감됩니다.")
                     else:
-                        if not is_over_100m: # 1억 이하인데 일반을 선택한 경우에만 재투자율 표시
+                        if not is_over_100m:
                             st.caption("설정한 비율만큼만 재투자하고 나머지는 생활비로 씁니다.")
                             reinvest_ratio = st.slider("💰 재투자 비율 (%)", 0, 100, 100, step=10)
 
                     st.markdown("---")
 
                     # 3. 월 적립금 입력
-                    monthly_add = st.number_input(
+                    monthly_input = st.number_input(
                         "➕ 매월 추가 적립 (만원)", 
                         min_value=0, max_value=3000, 
                         value=150, step=10
                     ) * 10000
+                    
+                    # [수정됨] ISA 월 납입 한도 강제 적용 로직
+                    monthly_add = monthly_input
+                    if is_isa_mode and monthly_add > 1666666:
+                        st.warning("⚠️ **ISA 연간 한도 제한:** 월 납입금이 **약 166만원(연 2,000만원)**으로 자동 조정되어 계산됩니다.")
+                        monthly_add = 1666666 # 강제로 166.6만원으로 고정
 
                     # --- [계산 로직] ---
                     months_sim = years_sim * 12
                     monthly_yld = avg_y / 100 / 12
                     
-                    current_bal = start_money # 초기 자산 연동
+                    current_bal = start_money
                     total_principal = start_money
                     
                     ISA_YEARLY_CAP = 20000000
@@ -431,7 +434,6 @@ def main():
                         if is_isa_mode:
                             remaining_yearly = max(0, ISA_YEARLY_CAP - yearly_contribution)
                             remaining_total = max(0, ISA_TOTAL_CAP - total_principal)
-                            # 한도가 없으면 납입 불가
                             actual_add = min(monthly_add, remaining_yearly, remaining_total)
 
                         current_bal += actual_add
@@ -476,10 +478,8 @@ def main():
                         real_money = final_asset - tax
                         tax_msg = f"세금 -{tax/10000:,.0f}만원 (9.9%)"
                         monthly_pocket = monthly_div_final 
-                        
-                        # ISA 한도 꽉 찼는지 체크
                         if final_principal >= ISA_TOTAL_CAP:
-                            st.caption("ℹ️ **ISA 총 납입 한도(1억)에 도달**하여, 더 이상 원금을 추가하지 않고 배당금만 재투자했습니다.")
+                            st.caption("ℹ️ **ISA 총 납입 한도(1억)에 도달**하여, 이후에는 배당금 재투자로만 운용되었습니다.")
                     else:
                         real_money = final_asset
                         tax_msg = "세금 납부 완료 (15.4%)"
@@ -523,7 +523,8 @@ def main():
                     annual_div_income = monthly_div_final * 12
                     if annual_div_income > 20000000:
                         st.warning(f"🚨 **주의:** {years_sim}년 뒤 연간 배당금이 2,000만원을 초과하여 금융소득종합과세 대상이 될 수 있습니다.")
-                    # --- [유의사항] ---
+
+                    # 유의사항
                     st.error("""
                     **⚠️ 시뮬레이션 활용 시 유의사항**
                     1. 본 결과는 주가·환율 변동과 수수료 등을 제외하고, 현재 배당률로만 계산한 결과입니다.
@@ -663,6 +664,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
