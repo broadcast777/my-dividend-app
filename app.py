@@ -252,184 +252,171 @@ def main():
             if total_y_div > 20000000:
                 st.warning(f"🚨 **주의:** 연간 예상 배당금이 **{total_y_div/10000:,.0f}만원**입니다. 금융소득종합과세 대상에 해당될 수 있습니다.")
 
- # [🔥 복구된 탭 섹션]
-            res_tab1, res_tab2 = st.tabs(["📊 월 배당금 비교", "💎 포트폴리오 자산 구성"])
+# --- [여기서부터 교체된 코드입니다] ---
+            
+            # 분석용 데이터프레임 생성
+            df_ana = pd.DataFrame(all_data)
 
-            with res_tab1:
-                c_data = pd.DataFrame({'계좌 종류': ['일반 계좌', 'ISA/연금'], '월 수령액': [total_m * 0.846, total_m]})
-                chart = alt.Chart(c_data).mark_bar().encode(
-                    x=alt.X('계좌 종류', sort=None, axis=alt.Axis(labelAngle=0)),
-                    y='월 수령액',
-                    color=alt.Color('계좌 종류', scale=alt.Scale(domain=['일반 계좌', 'ISA/연금'], range=['#95a5a6', '#f1c40f']))
-                ).properties(height=350)
-                st.altair_chart(chart, use_container_width=True)
-
-            with res_tab2:
-                chart_col, table_col = st.columns([1, 1.2])
-                df_ana = pd.DataFrame(all_data)
+            if not df_ana.empty:
+                st.write("") # 디자인적 여백
                 
-                if not df_ana.empty:
-                    # 1. 통화 분류 로직 (환노출 종목 완벽 대응)
+                # 📱 탭을 사용하여 화면 분할 (스크롤 압박 해소 및 기능 분리)
+                # 기존 '월 배당금 비교' 탭은 상단 메트릭(숫자)으로 충분하므로 제거하고 핵심 기능에 집중합니다.
+                tab_analysis, tab_simulation = st.tabs(["💎 자산 구성 분석", "🔄 10년 뒤 미래 설계"])
+
+                # -------------------------------------------------------
+                # [탭 1] 자산 구성 및 달러 비중 분석
+                # -------------------------------------------------------
+                with tab_analysis:
+                    # 모바일 가독성을 위해 컬럼 비율 조정
+                    chart_col, table_col = st.columns([1.2, 1]) 
+                    
+                    # 1. 통화/자산 분류 로직
                     def classify_currency(row):
                         try:
-                            # 원본 데이터(df)에서 해당 종목 정보를 가져옴
+                            # 원본 데이터(df) 참조
                             target = df[df['pure_name'] == row['종목']].iloc[0]
                             hwan = str(target.get('환구분', ''))
                             bunryu = str(target.get('분류', ''))
-                            
-                            # 환구분에 '환노출/달러/직투'가 있거나 분류가 '해외'면 달러 자산
+                            # 환노출, 달러, 직투, 해외 분류인 경우 달러 자산으로 간주
                             if any(k in hwan for k in ["환노출", "달러", "직투"]) or bunryu == "해외":
                                 return "🇺🇸 달러 자산"
                         except:
                             pass
-                        
-                        # 종목명에 (해외)가 붙어있는 경우 체크
-                        if "(해외)" in row['종목']:
-                            return "🇺🇸 달러 자산"
+                        if "(해외)" in row['종목']: return "🇺🇸 달러 자산"
                         return "🇰🇷 원화 자산"
 
-                    # 통화 분류 및 달러 비중 합산
                     df_ana['통화'] = df_ana.apply(classify_currency, axis=1)
                     usd_ratio = df_ana[df_ana['통화'] == "🇺🇸 달러 자산"]['비중'].sum()
                     
-                    # 자산유형별 요약 데이터 생성
+                    # 자산유형별 데이터 집계
                     asset_sum = df_ana.groupby('자산유형').agg({
                         '비중': 'sum', 
                         '투자금액_만원': 'sum', 
                         '종목': lambda x: ', '.join(x)
                     }).reset_index()
 
-                    with chart_col:
-                        # [A] 자산 유형 도넛 차트 (종목명 툴팁 추가 버전)
-                        st.write("💎 **자산 유형 비중**")
-                        donut = alt.Chart(asset_sum).mark_arc(innerRadius=60).encode(
-                            theta=alt.Theta("비중:Q"),
-                            color=alt.Color("자산유형:N", legend=None),
-                            tooltip=[
-                                alt.Tooltip("자산유형:N", title="자산 유형"), 
-                                alt.Tooltip("비중:Q", format=".1f", title="비중(%)"), 
-                                alt.Tooltip("투자금액_만원:Q", format=",d", title="투자금(만원)"),
-                                alt.Tooltip("종목:N", title="포함 종목") # 마우스 올리면 종목 리스트 출력
-                            ]
-                        ).properties(height=350)
-                        st.altair_chart(donut, width='stretch')
+                    # [차트] 도넛 차트 그리기
+                    donut = alt.Chart(asset_sum).mark_arc(innerRadius=60).encode(
+                        theta=alt.Theta("비중:Q"),
+                        color=alt.Color("자산유형:N", legend=alt.Legend(orient='bottom', title=None)), 
+                        tooltip=[
+                            alt.Tooltip("자산유형", title="유형"),
+                            alt.Tooltip("비중", format=".1f", title="비중(%)"), 
+                            alt.Tooltip("투자금액_만원", format=",d", title="금액(만원)"),
+                            alt.Tooltip("종목", title="포함종목")
+                        ]
+                    ).properties(height=300)
+                    
+                    st.altair_chart(donut, use_container_width=True)
+                    
+                    # [위젯] 달러 노출도 진행바
+                    st.divider()
+                    st.markdown(f"**🌐 달러 자산 노출도: `{usd_ratio:.1f}%`**")
+                    st.progress(usd_ratio / 100)
+                    
+                    if usd_ratio >= 50:
+                        st.caption("💡 포트폴리오의 절반 이상이 환율 변동에 영향을 받습니다.")
+                    else:
+                        st.caption("💡 원화 자산 중심의 안정적인 구성입니다.")
 
-                    with table_col:
-                        # [B] 우측 상단: 유형별 요약 테이블
-                        st.write("📋 **유형별 요약**")
-                        st.dataframe(asset_sum.sort_values('비중', ascending=False),
-                                     column_config={
-                                         "비중": st.column_config.NumberColumn(format="%d%%"),
-                                         "투자금액_만원": st.column_config.NumberColumn("투자금(만원)", format="%d"),
-                                         "종목": st.column_config.TextColumn("포함 종목", width="large")
-                                     },
-                                     hide_index=True, width='stretch')
+                # -------------------------------------------------------
+                # [탭 2] 복리 재투자 시뮬레이션 (입력창 이동 및 오해 방지)
+                # -------------------------------------------------------
+                with tab_simulation:
+                    st.info("📊 투자 기간과 추가 적립금을 설정하여 미래 자산을 그려보세요.")
+                    
+                    # 1. 시뮬레이션 설정 (탭 내부로 이동)
+                    s_col1, s_col2 = st.columns(2)
+                    with s_col1:
+                        is_tax_free_sim = st.toggle("🛡️ 절세 계좌 모드", value=False)
+                    with s_col2:
+                        years_sim = st.select_slider("⏳ 투자 기간 (년)", options=[1, 3, 5, 10, 15, 20, 30], value=10)
+
+                    # 재투자 비중 설정
+                    if not is_tax_free_sim:
+                        reinvest_ratio = st.slider("💰 배당금 재투자 비중 (%)", 0, 100, 80, step=10)
+                        st.caption(f"💡 배당금의 {reinvest_ratio}%는 재투자하고, 나머지는 생활비로 씁니다.")
+                    else:
+                        reinvest_ratio = 100
+                        st.caption("💡 절세 계좌는 배당금 100% 재투자를 가정합니다.")
+                    
+                    # [핵심 수정] 추가 적립금 입력 명확화 & 기본값 0원
+                    st.markdown("---")
+                    st.markdown("**💵 매월 추가 투자금 (선택사항)**")
+                    monthly_add_sim = st.number_input(
+                        "매월 배당금 외에 추가로 더 투자할 금액 (만원)", 
+                        min_value=0, max_value=2000, 
+                        value=0, # 기본값을 0으로 설정하여 1.3억 오해 방지
+                        step=5, 
+                        help="이 금액은 매월 원금에 추가되어 복리로 함께 굴러갑니다."
+                    ) * 10000
+
+                    # 2. 복리 계산 로직 (스파크 방지 및 정확한 계산)
+                    months_sim = years_sim * 12
+                    current_bal = total_invest
+                    monthly_yld = avg_y / 100 / 12 # 월 수익률
+                    sim_data = []
+
+                    for m in range(months_sim + 1):
+                        div_earned = current_bal * monthly_yld
+                        actual_reinvest = div_earned * (reinvest_ratio / 100)
                         
-                        # [C] 우측 하단: 달러 노출도 위젯
-                        st.write("---")
-                        st.markdown(f"### 🌐 달러 노출도: `{usd_ratio:.1f}%`")
-                        st.progress(usd_ratio / 100)
+                        sim_data.append({
+                            "년차": m / 12, 
+                            "자산총액": current_bal / 10000,
+                            "실제월배당": div_earned # 결과 카드용 데이터
+                        })
                         
-                        if usd_ratio >= 50:
-                            st.success(f"포트폴리오의 {usd_ratio:.1f}%가 달러 노출! 환율 변동에 따라 내 자산 가치가 민감하게 움직일 수 있어요.")
-                        else:
-                            st.info("환율보다는 국내 시장 상황에 더 큰 영향을 받아요. 원화 자산 중심으로 구성되어 있어요.")
-                else:
-                    st.info("📊 종목을 선택하시면 자산 구성 분석이 나타납니다.")
-             
-            # --- [0.2v 신규 기능: 복리 재투자 시뮬레이션 삽입 시작] ---
-            st.divider()
-            st.subheader("🔄 배당금 재투자 시뮬레이션")
+                        # 원금 업데이트 (재투자금 + 월 추가 적립금)
+                        current_bal += (actual_reinvest + monthly_add_sim)
 
-            # 1. 시뮬레이션 설정부
-            s_col1, s_col2 = st.columns(2)
-            with s_col1:
-                is_tax_free_sim = st.toggle("🛡️ 절세 계좌 모드", value=False, key="sim_tax_toggle")
-            with s_col2:
-                years_sim = st.select_slider("⏳ 투자 기간", options=[1, 3, 5, 10, 15, 20, 30], value=10, key="sim_years")
+                    df_sim_chart = pd.DataFrame(sim_data)
 
-            if not is_tax_free_sim:
-                reinvest_ratio = st.slider("💰 배당금 재투자 비중 (%)", 0, 100, 80, step=10, key="sim_reinvest_ratio")
-                st.caption(f"💡 나머지 {100-reinvest_ratio}%는 생활비로 활용하는 시나리오입니다.")
-            else:
-                reinvest_ratio = 100
-                st.info("✨ 절세 계좌 모드: 배당금이 전액(100%) 재투자됩니다.")
+                    # 3. 차트 시각화 (Area Chart)
+                    chart_sim = alt.Chart(df_sim_chart).mark_area(
+                        line={'color':'#0068c9'},
+                        color=alt.Gradient(
+                            gradient='linear',
+                            stops=[alt.GradientStop(color='white', offset=0), alt.GradientStop(color='#0068c9', offset=1)],
+                            x1=1, x2=1, y1=1, y2=0
+                        )
+                    ).encode(
+                        x=alt.X('년차:Q', title='투자 기간'),
+                        y=alt.Y('자산총액:Q', title='자산 가치 (만원)', stack=None), # stack=None으로 스파크 방지
+                        tooltip=[alt.Tooltip('년차', format='.1f'), alt.Tooltip('자산총액', format=',.0f')]
+                    ).properties(height=250)
+                    
+                    st.altair_chart(chart_sim, use_container_width=True)
 
-            monthly_add_sim = st.number_input("💵 매월 추가 적립 (만원)", 0, 1000, 30, step=5, key="sim_add_money") * 10000
+                    # 4. 결과 카드 (토스 스타일 + 랜덤 비유)
+                    final_row = df_sim_chart.iloc[-1]
+                    
+                    import random
+                    analogy_items = [
+                        {"name": "☕ 스타벅스", "price": 4500, "unit": "잔"},
+                        {"name": "🍔 빅맥 세트", "price": 7200, "unit": "개"},
+                        {"name": "🍗 치킨", "price": 23000, "unit": "마리"}
+                    ]
+                    selected_item = random.choice(analogy_items)
+                    # 비유는 세후 금액 기준 (보수적 접근)
+                    item_count = int((final_row['실제월배당'] * 0.846) // selected_item['price'])
 
-            # 2. 복리 계산 로직 (스파크 제거 및 미래 배당금 계산 추가)
-            months_sim = years_sim * 12
-            current_bal = total_invest
-            monthly_yld = avg_y / 100 / 12
-            sim_data = []
-
-            for m in range(months_sim + 1):
-                div_earned = current_bal * monthly_yld
-                actual_reinvest = div_earned * (reinvest_ratio / 100)
-                
-                # 그래프용 데이터 (자산총액만!)
-                sim_data.append({
-                    "년차": m / 12, 
-                    "자산총액": current_bal / 10000,
-                    "실제월배당": div_earned  # 결과 카드 출력용
-                })
-                
-                # 원금 업데이트
-                current_bal += (actual_reinvest + monthly_add_sim)
-
-            df_sim_chart = pd.DataFrame(sim_data)
-
-            # 3. 에어리어 차트 시각화 (y축 고정으로 스파크 방지)
-            chart_sim = alt.Chart(df_sim_chart).mark_area(
-                line={'color':'#0068c9'},
-                color=alt.Gradient(
-                    gradient='linear',
-                    stops=[alt.GradientStop(color='white', offset=0),
-                           alt.GradientStop(color='#0068c9', offset=1)],
-                    x1=1, x2=1, y1=1, y2=0
-                )
-            ).encode(
-                x=alt.X('년차:Q', title='투자 기간 (년)'),
-                y=alt.Y('자산총액:Q', title='자산 가치 (만원)', stack=None), # stack=None이 핵심!
-                tooltip=[
-                    alt.Tooltip('년차:Q', format='.1f', title='년차'), 
-                    alt.Tooltip('자산총액:Q', format=',.0f', title='자산(만원)')
-                ]
-            ).properties(height=280)
-            
-            st.altair_chart(chart_sim, use_container_width=True)
-
-            # 4. 결과값 추출 (최종 시점)
-            final_row = df_sim_chart.iloc[-1]
-            final_assets_val = final_row['자산총액']
-            final_monthly_cash = final_row['실제월배당'] # 최종 시점의 월 배당금(세전)
-
-            # 랜덤 실생활 비유
-            import random
-            analogy_items = [
-                {"name": "☕ 스타벅스 아메리카노", "price": 4500, "unit": "잔"},
-                {"name": "🍔 빅맥 세트", "price": 7200, "unit": "개"},
-                {"name": "🍗 황금올리브 치킨", "price": 23000, "unit": "마리"}
-            ]
-            selected_item = random.choice(analogy_items)
-            item_count = int((final_monthly_cash * 0.846) // selected_item['price']) # 세후 기준 비유
-
-            # 5. 토스 스타일 결과 카드 (미래 배당금 액수 추가)
-            st.markdown(f"""
-                <div style="background-color: #f8f9fa; padding: 25px; border-radius: 20px; border: 1px solid #e9ecef; text-align: center; margin-top: 10px;">
-                    <p style="margin: 0; font-size: 0.95em; color: #666;">{years_sim}년 뒤 나의 예상 자산</p>
-                    <h1 style="margin: 5px 0; color: #0068c9; font-size: 2.2em;">약 {final_assets_val/10000:,.1f} 억원</h1>
-                    <div style="background-color: #e7f3ff; display: inline-block; padding: 5px 15px; border-radius: 10px; margin-bottom: 15px;">
-                        <span style="color: #0068c9; font-weight: bold; font-size: 1.1em;">
-                            📅 월 예상 배당금: 약 {final_monthly_cash/10000:,.1f} 만원 (세전)
-                        </span>
-                    </div>
-                    <p style="margin: 5px 0 0 0; font-size: 1em; color: #333; line-height: 1.5;">
-                        그때가 되면 매달 배당금만으로<br>
-                        <b>{selected_item['name']} {item_count:,}{selected_item['unit']}</b>를 즐길 수 있어요! 🎊
-                    </p>
-                </div>
-            """, unsafe_allow_html=True)
+                    st.markdown(f"""
+                        <div style="background-color: #f8f9fa; padding: 20px; border-radius: 15px; text-align: center; border: 1px solid #eee;">
+                            <p style="margin:0; color:#666; font-size:0.9em;">{years_sim}년 뒤 예상 자산</p>
+                            <h2 style="margin:5px 0; color:#0068c9;">약 {final_row['자산총액']/10000:,.1f} 억원</h2>
+                            <div style="margin-top:15px; background-color:#e7f3ff; display:inline-block; padding:5px 15px; border-radius:10px;">
+                                <span style="color:#0068c9; font-weight:bold; font-size:0.95em;">
+                                    📅 월 예상 배당금: {final_row['실제월배당']/10000:,.1f} 만원 (세전)
+                                </span>
+                            </div>
+                            <p style="margin-top:15px; font-size:0.9em; color:#444; line-height:1.4;">
+                                그 돈이면 매달...<br>
+                                <b>{selected_item['name']} {item_count:,}{selected_item['unit']}</b> 마음껏 즐기기 가능! 😋
+                            </p>
+                        </div>
+                    """, unsafe_allow_html=True)
             # --- [0.2v 신규 기능 삽입 끝] ---
 
             st.error("""
@@ -575,6 +562,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
