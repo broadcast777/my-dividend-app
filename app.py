@@ -419,9 +419,9 @@ def main():
                         else:
                             st.caption("💡 원화 자산 중심의 구성입니다.")
 
-                       # [탭 2] 적립식 시뮬레이션 (ISA 월 한도 강제 적용 수정본)
+                       # [탭 2] 적립식 시뮬레이션 (HTML 들여쓰기 문제 해결 최종본)
                 with tab_simulation:
-                    # 1. 초기 자산 세팅 (상단 입력값 연동)
+                    # 1. 초기 자산 세팅
                     start_money = total_invest
                     is_over_100m = start_money > 100000000
 
@@ -466,11 +466,10 @@ def main():
                         value=150, step=10
                     ) * 10000
                     
-                    # [수정됨] ISA 월 납입 한도 강제 적용 로직
                     monthly_add = monthly_input
                     if is_isa_mode and monthly_add > 1666666:
                         st.warning("⚠️ **ISA 연간 한도 제한:** 월 납입금이 **약 166만원(연 2,000만원)**으로 자동 조정되어 계산됩니다.")
-                        monthly_add = 1666666 # 강제로 166.6만원으로 고정
+                        monthly_add = 1666666 
 
                     # --- [계산 로직] ---
                     months_sim = years_sim * 12
@@ -492,7 +491,6 @@ def main():
                             yearly_contribution = 0
                             year_tracker = m // 12
 
-                        # 납입 한도 체크
                         actual_add = monthly_add
                         if is_isa_mode:
                             remaining_yearly = max(0, ISA_YEARLY_CAP - yearly_contribution)
@@ -503,7 +501,6 @@ def main():
                         total_principal += actual_add
                         yearly_contribution += actual_add
 
-                        # 배당 및 재투자
                         div_earned = current_bal * monthly_yld
                         
                         if is_isa_mode:
@@ -546,7 +543,6 @@ def main():
                         tax_msg = "세금 납부 완료 (15.4%)"
                         monthly_pocket = monthly_div_final * 0.846
 
-                    # 비유 아이템 선택
                     import random
                     analogy_items = [
                         {"name": "스타벅스", "unit": "잔", "price": 4500, "emoji": "☕"},
@@ -557,32 +553,19 @@ def main():
                     selected_item = random.choice(analogy_items)
                     item_count = int(monthly_pocket // selected_item['price'])
 
+                    # [핵심 수정] HTML 태그 앞의 공백을 모두 제거하여 코드 블록으로 인식되는 문제 해결
                     st.markdown(f"""
-                        <div style="background-color: #e7f3ff; border: 1.5px solid #d0e8ff; border-radius: 16px; padding: 25px; text-align: center; box-shadow: 0 4px 10px rgba(0,104,201,0.05);">
-                            
-                            <p style="color: #666; font-size: 0.95em; margin: 0 0 8px 0;">{years_sim}년 뒤 모이는 돈 (세후)</p>
-                            <h2 style="color: #0068c9; font-size: 2.2em; margin: 0; font-weight: 800; line-height: 1.2;">
-                                약 {real_money/10000:,.0f}만원
-                            </h2>
-                            <p style="color: #777; font-size: 0.9em; margin: 8px 0 0 0;">
-                                (투자원금 {final_principal/10000:,.0f}만원 / {tax_msg})
-                            </p>
-                            
-                            <div style="height: 1px; background-color: #d0e8ff; margin: 25px auto; width: 85%;"></div>
-                            
-                            <p style="color: #0068c9; font-weight: bold; font-size: 1.1em; margin: 0 0 12px 0;">
-                                📅 월 예상 배당금: {monthly_pocket/10000:,.1f}만원 (실수령)
-                            </p>
-                            
-                            <div style="background-color: rgba(255,255,255,0.5); padding: 15px; border-radius: 12px; display: inline-block; min-width: 80%;">
-                                <p style="color: #333; font-size: 1.1em; margin: 0; line-height: 1.6;">
-                                    매달 <b>{selected_item['emoji']} {selected_item['name']} {item_count:,}{selected_item['unit']}</b><br>
-                                    마음껏 즐기기 가능! 😋
-                                </p>
-                            </div>
-                            
-                        </div>
-                    """, unsafe_allow_html=True) #
+<div style="background-color: #e7f3ff; border: 1.5px solid #d0e8ff; border-radius: 16px; padding: 25px; text-align: center; box-shadow: 0 4px 10px rgba(0,104,201,0.05);">
+<p style="color: #666; font-size: 0.95em; margin: 0 0 8px 0;">{years_sim}년 뒤 모이는 돈 (세후)</p>
+<h2 style="color: #0068c9; font-size: 2.2em; margin: 0; font-weight: 800; line-height: 1.2;">약 {real_money/10000:,.0f}만원</h2>
+<p style="color: #777; font-size: 0.9em; margin: 8px 0 0 0;">(투자원금 {final_principal/10000:,.0f}만원 / {tax_msg})</p>
+<div style="height: 1px; background-color: #d0e8ff; margin: 25px auto; width: 85%;"></div>
+<p style="color: #0068c9; font-weight: bold; font-size: 1.1em; margin: 0 0 12px 0;">📅 월 예상 배당금: {monthly_pocket/10000:,.1f}만원 (실수령)</p>
+<div style="background-color: rgba(255,255,255,0.5); padding: 15px; border-radius: 12px; display: inline-block; min-width: 80%;">
+<p style="color: #333; font-size: 1.1em; margin: 0; line-height: 1.6;">매달 <b>{selected_item['emoji']} {selected_item['name']} {item_count:,}{selected_item['unit']}</b><br>마음껏 즐기기 가능! 😋</p>
+</div>
+</div>
+""", unsafe_allow_html=True)
 
                     # 금융소득종합과세 경고
                     annual_div_income = monthly_div_final * 12
@@ -596,6 +579,8 @@ def main():
                     2. ISA 계좌의 비과세 한도 및 세율은 세법 개정에 따라 달라질 수 있습니다.
                     3. 실제 배당금은 운용사의 공시 및 환율 상황에 따라 매월 달라질 수 있습니다.
                     """)
+
+           
     # ------------------------------------------
     # 섹션 4: 전체 데이터 테이블 출력
     # ------------------------------------------
@@ -748,6 +733,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
