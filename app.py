@@ -351,14 +351,17 @@ def main():
                     
                     st.markdown("---")
                     st.markdown("**💵 매월 추가 투자금 (선택사항)**")
+
+                    # [수정] 도움말(help) 멘트 구체화
                     monthly_add_sim = st.number_input(
                         "매월 배당금 외에 추가로 더 투자할 금액 (만원)", 
                         min_value=0, max_value=2000, 
                         value=0, 
                         step=5, 
-                        help="이 금액은 매월 원금에 추가되어 복리로 함께 굴러갑니다."
+                        help="매월 초(배당락일 전)에 입금하여 당월 배당수익이 즉시 발생한다고 가정합니다."
                     ) * 10000
-       
+                    
+               
                     # 2. 복리 계산 로직 (개선됨: 월초 적립 -> 당월 배당 반영)
                     months_sim = years_sim * 12
                     current_bal = total_invest
@@ -574,4 +577,5 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
