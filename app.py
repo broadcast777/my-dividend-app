@@ -138,7 +138,8 @@ def load_and_process_data(df_raw):
                 '현재가': price_display, '연배당률': yield_val,
                 '환구분': get_hedge_status(name, category),
                 '배당락일': str(row.get('배당락일', '-')), '분류': category,
-                '자산유형': classify_asset(row), 'pure_name': name
+                '자산유형': classify_asset(row), 'pure_name': name,
+                '신규상장개월수': months  # <--- [중요] 이 줄을 콤마(,) 찍고 꼭 추가해주세요!
             })
     return pd.DataFrame(results).sort_values('연배당률', ascending=False)
 
@@ -281,7 +282,11 @@ def main():
             b_link = f"<a href='{blog_link}' target='_blank' style='color:#0068c9; text-decoration:none; font-weight:bold;'>{row['코드']}</a>"
             stock_name = f"<span style='color:#333; font-weight:500;'>{row['종목명']}</span>"
             f_link = f"<a href='{row['금융링크']}' target='_blank' style='color:#0068c9; text-decoration:none;'>🔗정보</a>"
-            yield_display = f"<span style='color:{'#ff4b4b' if row['연배당률']>=10 else '#333'}; font-weight:{'bold' if row['연배당률']>=10 else 'normal'};'>{row['연배당률']:.2f}%</span>"
+            # [수정] 12개월 미만 신규 상장 종목은 '(추정)' 꼬리표 붙이기
+            is_new = row.get('신규상장개월수', 0)
+            suffix = " (추정)" if (0 < is_new < 12) else ""
+
+            yield_display = f"<span style='color:{'#ff4b4b' if row['연배당률']>=10 else '#333'}; font-weight:{'bold' if row['연배당률']>=10 else 'normal'};'>{row['연배당률']:.2f}%{suffix}</span>"
             
             html_rows.append(f"<tr><td>{b_link}</td><td class='name-cell'>{stock_name}</td><td>{row['현재가']}</td><td>{yield_display}</td><td>{row['환구분']}</td><td>{row['배당락일']}</td><td>{f_link}</td></tr>")
 
@@ -399,6 +404,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
