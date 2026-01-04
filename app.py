@@ -124,35 +124,48 @@ def get_hedge_status(name, category):
         
     return "-"
 
-@st.cache_data(ttl=300, show_spinner=False)
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+@st.cache_data(ttl=600, show_spinner=False)
 def load_and_process_data(df_raw, is_admin=False):
-    """데이터 가공 및 필터링 메인 로직"""
-    results = []
+    """
+    [성능 최적화] 병렬 처리(Threading)를 적용하여 시세 조회 속도 대폭 개선
+    """
     if df_raw.empty: return pd.DataFrame()
+
+    results = [None] * len(df_raw)  # 결과 담을 리스트 미리 생성 (순서 보장용)
     
-    for _, row in df_raw.iterrows():
-        code = str(row.get('종목코드', '')).strip()
-        name = str(row.get('종목명', '')).strip()
-        category = str(row.get('분류', '국내')).strip()
-        price = get_safe_price(code, category)
-        
-        if price:
+    # 1. 병렬 처리를 위한 내부 작업 함수 정의
+    def process_row(idx, row):
+        try:
+            code = str(row.get('종목코드', '')).strip()
+            name = str(row.get('종목명', '')).strip()
+            category = str(row.get('분류', '국내')).strip()
+            
+            # 시세 조회 (여기가 병목 지점 -> 병렬화 효과 큼)
+            price = get_safe_price(code, category)
+            
+            if not price:
+                return idx, None # 실패 시
+            
+            # 데이터 가공 로직
             raw_div = float(row.get('연배당금', 0))
             months = int(row.get('신규상장개월수', 0))
             annual_div = (raw_div / months * 12) if months > 0 else raw_div
             yield_val = (annual_div / price) * 100
             
-            # 관리자 여부에 따른 필터링 (2% ~ 25%)
-            if not is_admin:
-                if yield_val < 2.0 or yield_val > 25.0:
-                    continue 
-            else:
-                if yield_val < 2.0 or yield_val > 25.0:
-                    name = f"🚫 {name} (필터대상)"
+            # 필터링 로직 (관리자 모드 아닐 때)
+            if not is_admin and (yield_val < 2.0 or yield_val > 25.0):
+                return idx, None
+            
+            # 관리자 모드용 표시
+            if is_admin and (yield_val < 2.0 or yield_val > 25.0):
+                name = f"🚫 {name} (필터대상)"
 
             price_display = f"{int(price):,}원" if category == '국내' else f"${price:.2f}"
             
-            results.append({
+            # 결과 딕셔너리 생성
+            return idx, {
                 '코드': code, 
                 '종목명': f"{name} ⭐" if months > 0 else name,
                 '블로그링크': str(row.get('블로그링크', '#')),
@@ -165,9 +178,27 @@ def load_and_process_data(df_raw, is_admin=False):
                 '자산유형': classify_asset(row), 
                 'pure_name': name.replace("🚫 ", "").replace(" (필터대상)", ""),
                 '신규상장개월수': months
-            })
-            
-    return pd.DataFrame(results).sort_values('연배당률', ascending=False)
+            }
+        except Exception as e:
+            # 에러 발생 시 로그만 남기고 패스
+            print(f"Error processing {row.get('종목명')}: {e}")
+            return idx, None
+
+    # 2. ThreadPoolExecutor로 병렬 실행
+    # max_workers=8 정도가 적당합니다. 너무 높으면(20 이상) 네이버가 차단합니다.
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        # 작업 제출
+        futures = {executor.submit(process_row, idx, row): idx for idx, row in df_raw.iterrows()}
+        
+        # 완료되는 대로 결과 수집
+        for future in as_completed(futures):
+            idx, result = future.result()
+            results[idx] = result # 원래 순서(인덱스) 자리에 넣기
+
+    # 3. None 값(실패/필터링) 제거 및 데이터프레임 변환
+    final_data = [r for r in results if r is not None]
+    
+    return pd.DataFrame(final_data).sort_values('연배당률', ascending=False)
 
 # ==========================================
 # [3] 메인 애플리케이션 (UI)
@@ -664,6 +695,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
