@@ -557,7 +557,6 @@ def main():
                     selected_item = random.choice(analogy_items)
                     item_count = int(monthly_pocket // selected_item['price'])
 
-                    # --- [UI: 통합 결과 카드 최종본] ---
                     st.markdown(f"""
                         <div style="background-color: #e7f3ff; border: 1.5px solid #d0e8ff; border-radius: 16px; padding: 25px; text-align: center; box-shadow: 0 4px 10px rgba(0,104,201,0.05);">
                             
@@ -583,8 +582,7 @@ def main():
                             </div>
                             
                         </div>
-                    """, unsafe_allow_html=True)
-                    
+                    """, unsafe_allow_html=True) #
 
                     # 금융소득종합과세 경고
                     annual_div_income = monthly_div_final * 12
@@ -750,6 +748,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
