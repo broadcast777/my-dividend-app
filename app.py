@@ -259,7 +259,7 @@ def main():
                 ).properties(height=350)
                 st.altair_chart(chart, use_container_width=True)
 
-             with res_tab2:
+            with res_tab2:
                 chart_col, table_col = st.columns([1, 1.2])
                 df_ana = pd.DataFrame(all_data)
                 
@@ -477,6 +477,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
