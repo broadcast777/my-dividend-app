@@ -215,14 +215,20 @@ def main():
                     
                     st.caption(f"💰 투자금: **{amt/10000:,.0f}만원**")
                 
-                # 데이터 저장 (들여쓰기 위치 확인: for문 안쪽, if문 바깥쪽)
-                s_row = df[df['pure_name'] == stock].iloc[0]
-                all_data.append({
-                    '종목': stock, 
-                    '비중': weights[stock], 
-                    '자산유형': s_row['자산유형'],
-                    '투자금액_만원': amt / 10000 # 툴팁용 데이터 미리 계산
-                })
+                # [개선 2] 안전한 데이터 조회 로직 (종목이 없을 경우 에러 방지)
+                stock_match = df[df['pure_name'] == stock]
+                
+                if not stock_match.empty:
+                    s_row = stock_match.iloc[0]
+                    all_data.append({
+                        '종목': stock, 
+                        '비중': weights[stock], 
+                        '자산유형': s_row['자산유형'],
+                        '투자금액_만원': amt / 10000 
+                    })
+                else:
+                    # 데이터가 매칭되지 않을 경우 사용자에게 알림 없이 조용히 건너뛰거나 에러 로그 출력
+                    st.error(f"⚠️ '{stock}' 종목의 상세 정보를 불러올 수 없습니다.")
 
 
 
@@ -492,59 +498,66 @@ def main():
     st.caption("© 2025 **배당팽이** | 실시간 데이터 기반 배당 대시보드")
     st.caption("First Released: 2025.12.31 | [📝 배당팽이의 배당 투자 일지 구경가기](https://blog.naver.com/dividenpange)")
 
- # --- [방문자 카운트 로직 개선 버전] ---
-    if 'visited' not in st.session_state:
-        st.session_state.visited = False
-
-    if not st.session_state.visited:
-        try:
-            query_params = st.query_params
-            is_admin = query_params.get("admin", "false").lower() == "true"
+# --- [개선 1] 방문자 카운트 및 로그 (st.fragment 활용) ---
+    @st.fragment
+    def track_visitors():
+        # 1. 세션 초기화
+        if 'visited' not in st.session_state:
+            st.session_state.visited = False
             
-            if not is_admin:
-                source_tag = query_params.get("source", None)
-                from streamlit.web.server.websocket_headers import _get_websocket_headers
-                headers = _get_websocket_headers()
-                referer = headers.get("Referer", "Direct")
+        # 2. DB 기록 (한 세션당 1회만 실행)
+        if not st.session_state.visited:
+            try:
+                query_params = st.query_params
+                is_admin = query_params.get("admin", "false").lower() == "true"
                 
-                log_entry = source_tag if source_tag else referer
-                supabase.table("visit_logs").insert({"referer": log_entry}).execute()
+                if not is_admin:
+                    # 유입 경로 로깅
+                    source_tag = query_params.get("source", None)
+                    from streamlit.web.server.websocket_headers import _get_websocket_headers
+                    headers = _get_websocket_headers()
+                    referer = headers.get("Referer", "Direct")
+                    log_entry = source_tag if source_tag else referer
+                    
+                    supabase.table("visit_logs").insert({"referer": log_entry}).execute()
 
-                response = supabase.table("visit_counts").select("count").eq("id", 1).execute()
-                if response.data:
-                    new_count = response.data[0]['count'] + 1
-                    supabase.table("visit_counts").update({"count": new_count}).eq("id", 1).execute()
-                    st.session_state.display_count = new_count
-            else:
-                response = supabase.table("visit_counts").select("count").eq("id", 1).execute()
-                st.session_state.display_count = response.data[0]['count'] if response.data else "Admin"
+                    # 카운트 증가
+                    response = supabase.table("visit_counts").select("count").eq("id", 1).execute()
+                    if response.data:
+                        new_count = response.data[0]['count'] + 1
+                        supabase.table("visit_counts").update({"count": new_count}).eq("id", 1).execute()
+                        st.session_state.display_count = new_count
+                else:
+                    # 관리자는 카운트 증가 없이 조회만
+                    response = supabase.table("visit_counts").select("count").eq("id", 1).execute()
+                    st.session_state.display_count = response.data[0]['count'] if response.data else "Admin"
 
-            # [핵심] 성공하든 실패하든 '처리 완료'로 표시하여 재요청 방지
-            st.session_state.visited = True
-            
-        except Exception:
-            st.session_state.display_count = "확인 중"
-            st.session_state.visited = True # 에러가 나도 이번 세션은 다시 시도 안 함
-    
-    # --- [개선된 화면 표시부: 위젯만 추가] ---
-    display_num = st.session_state.get('display_count', '집계 중')
-    
-    st.write("") # 상단 여백
-    # 기존에 st.divider()가 중복된다면 하나는 삭제하셔도 됩니다.
-    
-    st.markdown(f"""
-        <div style="display: flex; justify-content: center; align-items: center; gap: 20px; padding: 25px; background: #f8f9fa; border-radius: 15px; border: 1px solid #eee; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 10px;">
-            <div style="text-align: center;">
-                <p style="margin: 0; font-size: 0.9em; color: #666; font-weight: 500;">누적 방문자</p>
-                <p style="margin: 0; font-size: 2.2em; font-weight: 800; color: #0068c9;">{display_num}</p>
+                st.session_state.visited = True
+                
+            except Exception:
+                st.session_state.display_count = "확인 중"
+                st.session_state.visited = True
+
+        # 3. 화면 표시 (위젯)
+        display_num = st.session_state.get('display_count', '집계 중')
+        
+        st.write("") 
+        st.markdown(f"""
+            <div style="display: flex; justify-content: center; align-items: center; gap: 20px; padding: 25px; background: #f8f9fa; border-radius: 15px; border: 1px solid #eee; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 10px;">
+                <div style="text-align: center;">
+                    <p style="margin: 0; font-size: 0.9em; color: #666; font-weight: 500;">누적 방문자</p>
+                    <p style="margin: 0; font-size: 2.2em; font-weight: 800; color: #0068c9;">{display_num}</p>
+                </div>
+                <div style="width: 1px; height: 50px; background: #ddd;"></div>
+                <div style="text-align: left;">
+                    <p style="margin: 2px 0; font-size: 0.85em; color: #555;">🚀 <b>실시간 데이터</b> 연동 중</p>
+                    <p style="margin: 2px 0; font-size: 0.85em; color: #555;">🛡️ <b>보안 비밀번호</b> 적용 완료</p>
+                </div>
             </div>
-            <div style="width: 1px; height: 50px; background: #ddd;"></div>
-            <div style="text-align: left;">
-                <p style="margin: 2px 0; font-size: 0.85em; color: #555;">🚀 <b>실시간 데이터</b> 연동 중</p>
-                <p style="margin: 2px 0; font-size: 0.85em; color: #555;">🛡️ <b>보안 비밀번호</b> 적용 완료</p>
-            </div>
-        </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
+
+    # 함수 실행
+    track_visitors()
     
 # [관리자 전용] 최근 유입 경로 실시간 모니터링 (서울 시간 반영)
     if st.query_params.get("admin", "false").lower() == "true":
@@ -573,6 +586,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
