@@ -373,7 +373,7 @@ def main():
                         else:
                             is_isa_mode = st.toggle("🛡️ ISA (절세) 계좌로 모으기", value=True)
                             if is_isa_mode:
-                                st.caption("💡 **ISA 모드:** 비과세 + 과세이연 효과 (연 2,000만원 한도)")
+                                st.caption("💡 **ISA 모드:** 비과세 + 과세이연 효과 (만기 시 재가입/연장 가정)")
                             else:
                                 st.caption("💡 **일반 모드:** 배당소득세(15.4%) 납부 후 재투자")
 
@@ -664,6 +664,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
