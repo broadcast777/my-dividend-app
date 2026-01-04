@@ -116,20 +116,35 @@ def get_hedge_status(name, category):
     # 5순위: 일반 국내 자산
     return "-"
 
+# 수정된 함수 정의 (is_admin 파라미터 추가)
 @st.cache_data(ttl=300, show_spinner=False)
-def load_and_process_data(df_raw):
+def load_and_process_data(df_raw, is_admin=False):
     results = []
     if df_raw.empty: return pd.DataFrame()
+    
     for _, row in df_raw.iterrows():
         code = str(row.get('종목코드', '')).strip()
         name = str(row.get('종목명', '')).strip()
         category = str(row.get('분류', '국내')).strip()
         price = get_safe_price(code, category)
+        
         if price:
             raw_div = float(row.get('연배당금', 0))
             months = int(row.get('신규상장개월수', 0))
             annual_div = (raw_div / months * 12) if months > 0 else raw_div
             yield_val = (annual_div / price) * 100
+            
+            # --- [필터링 로직 시작] ---
+            # 관리자가 아닐 때만 2% 미만 또는 25% 초과 종목을 걸러냄
+            if not is_admin:
+                if yield_val < 2.0 or yield_val > 25.0:
+                    continue 
+            else:
+                # 관리자일 때는 필터링 대상 종목 이름 옆에 표시만 해줌 (선택 사항)
+                if yield_val < 2.0 or yield_val > 25.0:
+                    name = f"🚫 {name} (필터대상)"
+            # --- [필터링 로직 끝] ---
+
             price_display = f"{int(price):,}원" if category == '국내' else f"${price:.2f}"
             results.append({
                 '코드': code, '종목명': f"{name} ⭐" if months > 0 else name,
@@ -138,20 +153,28 @@ def load_and_process_data(df_raw):
                 '현재가': price_display, '연배당률': yield_val,
                 '환구분': get_hedge_status(name, category),
                 '배당락일': str(row.get('배당락일', '-')), '분류': category,
-                '자산유형': classify_asset(row), 'pure_name': name,
-                '신규상장개월수': months  # <--- [중요] 이 줄을 콤마(,) 찍고 꼭 추가해주세요!
+                '자산유형': classify_asset(row), 'pure_name': name.replace("🚫 ", "").replace(" (필터대상)", ""),
+                '신규상장개월수': months
             })
     return pd.DataFrame(results).sort_values('연배당률', ascending=False)
 
 def main():
     st.title("💰 배당팽이 실시간 연배당률 대시보드")
 
-
     df_raw = load_stock_data_from_csv()
     if df_raw.empty: st.stop()
 
+  
+    is_admin = st.query_params.get("admin", "false").lower() == "true"
+
     with st.spinner('⚙️ 배당 데이터베이스 엔진 가동 중... 실시간 시세를 연동하고 있습니다.'):
-        df = load_and_process_data(df_raw)
+        # 2. 처리 함수에 is_admin 전달
+        df = load_and_process_data(df_raw, is_admin=is_admin)
+
+    if is_admin:
+        st.sidebar.success("✅ 관리자 모드: 필터링 없이 모든 종목을 표시합니다.")
+   
+
 
     st.warning("⚠️ **투자 유의사항:** 본 대시보드의 연배당률은 과거 분배금 데이터를 기반으로 계산된 참고용 지표입니다. 실제 배당금은 운용사의 사정 및 시장 상황에 따라 매월 변동될 수 있습니다.")
 
@@ -404,3 +427,4 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
