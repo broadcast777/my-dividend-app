@@ -419,7 +419,7 @@ def main():
                         else:
                             st.caption("💡 원화 자산 중심의 구성입니다.")
 
-                       # [탭 2] 적립식 시뮬레이션 (HTML 들여쓰기 문제 해결 최종본)
+                   # [탭 2] 적립식 시뮬레이션 (최종: 일반 계좌 세금 합산 로직 추가)
                 with tab_simulation:
                     # 1. 초기 자산 세팅
                     start_money = total_invest
@@ -485,6 +485,9 @@ def main():
 
                     yearly_contribution = 0
                     year_tracker = 0
+                    
+                    # [추가] 일반 계좌일 때 누적된 세금을 추적하기 위한 변수
+                    total_tax_paid_general = 0
 
                     for m in range(1, months_sim + 1):
                         if m // 12 > year_tracker:
@@ -506,7 +509,10 @@ def main():
                         if is_isa_mode:
                             reinvest = div_earned
                         else:
-                            after_tax = div_earned * 0.846
+                            # [수정] 일반 계좌 세금 계산 및 누적
+                            this_tax = div_earned * 0.154
+                            total_tax_paid_general += this_tax
+                            after_tax = div_earned - this_tax
                             reinvest = after_tax * (reinvest_ratio / 100)
                         
                         current_bal += reinvest
@@ -536,11 +542,13 @@ def main():
                         taxable = max(0, profit - (isa_exempt * 10000))
                         tax = taxable * 0.099
                         real_money = final_asset - tax
-                        tax_msg = f"세금 -{tax/10000:,.0f}만원 (9.9%)"
+                        # ISA: 앞으로 낼 세금 (예상)
+                        tax_msg = f"예상 세금 {tax/10000:,.0f}만원 (9.9% 분리과세)"
                         monthly_pocket = monthly_div_final 
                     else:
                         real_money = final_asset
-                        tax_msg = "세금 납부 완료 (15.4%)"
+                        # 일반: 이미 낸 세금 합계 (기납부)
+                        tax_msg = f"기납부 세금 {total_tax_paid_general/10000:,.0f}만원 (15.4% 원천징수)"
                         monthly_pocket = monthly_div_final * 0.846
 
                     import random
@@ -553,7 +561,7 @@ def main():
                     selected_item = random.choice(analogy_items)
                     item_count = int(monthly_pocket // selected_item['price'])
 
-                    # [핵심 수정] HTML 태그 앞의 공백을 모두 제거하여 코드 블록으로 인식되는 문제 해결
+                    # [HTML 들여쓰기 문제 해결 버전]
                     st.markdown(f"""
 <div style="background-color: #e7f3ff; border: 1.5px solid #d0e8ff; border-radius: 16px; padding: 25px; text-align: center; box-shadow: 0 4px 10px rgba(0,104,201,0.05);">
 <p style="color: #666; font-size: 0.95em; margin: 0 0 8px 0;">{years_sim}년 뒤 모이는 돈 (세후)</p>
@@ -579,6 +587,7 @@ def main():
                     2. ISA 계좌의 비과세 한도 및 세율은 세법 개정에 따라 달라질 수 있습니다.
                     3. 실제 배당금은 운용사의 공시 및 환율 상황에 따라 매월 달라질 수 있습니다.
                     """)
+
 
            
     # ------------------------------------------
@@ -733,6 +742,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
