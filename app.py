@@ -528,7 +528,7 @@ def main():
                     line = base.mark_line(color='#ff9f43', strokeDash=[5,5]).encode(y='총원금:Q')
                     st.altair_chart((area + line).properties(height=280), use_container_width=True)
 
-                    # --- [UI: 결과 카드] ---
+                    # --- [UI: 하나로 합쳐진 통합 결과 카드] ---
                     final_row = df_sim_chart.iloc[-1]
                     final_asset = final_row['자산총액'] * 10000
                     final_principal = final_row['총원금'] * 10000
@@ -541,46 +541,43 @@ def main():
                         real_money = final_asset - tax
                         tax_msg = f"세금 -{tax/10000:,.0f}만원 (9.9%)"
                         monthly_pocket = monthly_div_final 
-                        if final_principal >= ISA_TOTAL_CAP:
-                            st.caption("ℹ️ **ISA 총 납입 한도(1억)에 도달**하여, 이후에는 배당금 재투자로만 운용되었습니다.")
                     else:
                         real_money = final_asset
                         tax_msg = "세금 납부 완료 (15.4%)"
                         monthly_pocket = monthly_div_final * 0.846
 
-                    # 비유 아이템
+                    # 비유 아이템 선택
                     import random
                     analogy_items = [
-                        {"name": "☕ 스타벅스", "price": 4500, "unit": "잔"},
-                        {"name": "🍗 치킨", "price": 23000, "unit": "마리"},
-                        {"name": "✈️ 항공권", "price": 60000, "unit": "장"},
-                        {"name": "🏨 호텔 숙박", "price": 150000, "unit": "박"}
+                        {"name": "스타벅스", "unit": "잔", "price": 4500, "emoji": "☕"},
+                        {"name": "치킨", "unit": "마리", "price": 23000, "emoji": "🍗"},
+                        {"name": "제주도 항공권", "unit": "장", "price": 60000, "emoji": "✈️"},
+                        {"name": "특급호텔 숙박", "unit": "박", "price": 200000, "emoji": "🏨"}
                     ]
                     selected_item = random.choice(analogy_items)
                     item_count = int(monthly_pocket // selected_item['price'])
 
-                    col_res1, col_res2 = st.columns(2)
-                    with col_res1:
-                        st.markdown(f"""
-                            <div style="background-color:#f8f9fa; padding:20px; border-radius:15px; border:1px solid #eee; height: 100%;">
-                                <div style="color:#666; font-size:0.9em; margin-bottom:5px;">{years_sim}년 뒤 모이는 돈 (세후)</div>
-                                <h2 style="margin:0; color:#0068c9; font-size: 1.8em;">약 {real_money/10000:,.0f} 만원</h2>
-                                <div style="margin-top:10px; font-size:0.85em; color:#888;">
-                                    💰 원금 {final_principal/10000:,.0f}만원<br>💸 {tax_msg}
-                                </div>
-                            </div>
-                        """, unsafe_allow_html=True)
+                    st.markdown(f"""
+                        <div style="background-color: #e7f3ff; border: 1.5px solid #d0e8ff; border-radius: 16px; padding: 25px; text-align: center; box-shadow: 0 4px 10px rgba(0,104,201,0.05);">
+                            <p style="color: #555; font-size: 0.95em; margin: 0 0 5px 0;">{years_sim}년 뒤 모이는 돈 (세후)</p>
+                            <h2 style="color: #0068c9; font-size: 2.1em; margin: 0; font-weight: 800;">
+                                약 {real_money/10000:,.0f}만원
+                                <span style="font-size: 0.45em; color: #777; font-weight: normal; margin-left: 8px; vertical-align: middle;">
+                                    (투자원금 {final_principal/10000:,.0f}만원)
+                                </span>
+                            </h2>
+                            <p style="color: #888; font-size: 0.85em; margin-top: 5px;">{tax_msg}</p>
+                            
+                            <div style="height: 1px; background-color: #d0e8ff; margin: 20px auto; width: 80%;"></div>
+                            
+                            <p style="color: #0068c9; font-weight: bold; font-size: 1.05em; margin: 0 0 10px 0;">📅 월 예상 배당금: {monthly_pocket/10000:,.1f}만원 (실수령)</p>
+                            <p style="color: #333; font-size: 1.05em; margin: 0; line-height: 1.6;">
+                                매달 <b>{selected_item['emoji']} {selected_item['name']} {item_count:,}{selected_item['unit']}</b><br>
+                                가능해요! 😋
+                            </p>
+                        </div>
+                    """, unsafe_allow_html=True)
                     
-                    with col_res2:
-                        st.markdown(f"""
-                            <div style="background-color: #e7f3ff; padding: 20px; border-radius: 15px; border: 1px solid #d0e8ff; height: 100%;">
-                                <div style="color:#0068c9; font-size:0.9em; font-weight:bold; margin-bottom:5px;">📅 월 예상 배당금 (실수령)</div>
-                                <h2 style="margin:0; color:#0068c9; font-size: 1.8em;">{monthly_pocket/10000:,.1f} 만원</h2>
-                                <p style="margin-top:10px; font-size:0.9em; color:#444;">
-                                    매달 <b>{selected_item['name']} {item_count:,}{selected_item['unit']}</b><br>가능해요! 😋
-                                </p>
-                            </div>
-                        """, unsafe_allow_html=True)
 
                     # 금융소득종합과세 경고
                     annual_div_income = monthly_div_final * 12
@@ -746,6 +743,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
