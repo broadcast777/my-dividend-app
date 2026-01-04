@@ -356,7 +356,7 @@ def main():
                         else:
                             st.caption("💡 원화 자산 중심의 구성입니다.")
 
-                # [탭 2] 복리 재투자 시뮬레이션
+                    # [탭 2] 복리 재투자 시뮬레이션
                 with tab_simulation:
                     st.info("📊 투자 기간과 추가 적립금을 설정하여 미래 자산을 그려보세요.")
                     
@@ -376,51 +376,56 @@ def main():
                     st.markdown("---")
                     st.markdown("**💵 매월 추가 투자금 (선택사항)**")
 
-                    # [수정] 도움말(help) 멘트 구체화
                     monthly_add_sim = st.number_input(
                         "매월 배당금 외에 추가로 더 투자할 금액 (만원)", 
                         min_value=0, max_value=2000, 
                         value=0, 
                         step=5, 
-                        help="매월 초(배당락일 전)에 입금하여 당월 배당수익이 즉시 발생한다고 가정합니다."
+                        help="매월 초에 입금하여 당월 배당수익이 발생한다고 가정합니다."
                     ) * 10000
                     
-                    # (선택사항) 입력창 바로 밑에 한 줄 더 띄우고 싶다면:
                     if monthly_add_sim > 0:
                         st.caption("💡 추가 적립금은 매월 복리 효과를 가속화합니다.")
-                    
-               
-                    # 2. 복리 계산 로직 (개선됨: 월초 적립 -> 당월 배당 반영)
+
+                    # --- [여기서부터 복리 로직 교체 구간] ---
                     months_sim = years_sim * 12
                     current_bal = total_invest
-                    monthly_yld = avg_y / 100 / 12 # 월 수익률
+                    monthly_yld = avg_y / 100 / 12  # 월 수익률
                     
-                    # [중요] 0개월차(시작점) 데이터 미리 기록
                     sim_data = [{
                         "년차": 0,
                         "자산총액": current_bal / 10000,
-                        "실제월배당": 0 # 시작 시점엔 배당 없음
+                        "실제월배당": 0 
                     }]
 
                     for m in range(1, months_sim + 1):
-                        # [순서 변경 1] 월 적립금 먼저 투입 (스노우볼 가속)
+                        # 1. 월 적립금 투입
                         current_bal += monthly_add_sim
                         
-                        # [순서 변경 2] 늘어난 자산 총액 기준으로 이번 달 배당금 계산
+                        # 2. 이번 달 배당금 계산 (세전)
                         div_earned = current_bal * monthly_yld
                         
-                        # [순서 변경 3] 재투자 실행
-                        actual_reinvest = div_earned * (reinvest_ratio / 100)
+                        # 3. 계좌 모드에 따른 재투자금 결정 (세금 분기)
+                        if is_tax_free_sim:
+                            # 절세 계좌: 세전 금액 그대로 재투자
+                            actual_reinvest = div_earned * (reinvest_ratio / 100)
+                        else:
+                            # 일반 계좌: 세후 금액(15.4% 제외) 재투자
+                            actual_reinvest = (div_earned * 0.846) * (reinvest_ratio / 100)
+                        
+                        # 4. 재투자 실행
                         current_bal += actual_reinvest
                         
+                        # 5. 데이터 기록
                         sim_data.append({
                             "년차": m / 12, 
                             "자산총액": current_bal / 10000,
                             "실제월배당": div_earned
                         })
-                
 
                     df_sim_chart = pd.DataFrame(sim_data)
+                    # --- [교체 구간 끝] ---
+                
 
                     # Area Chart 시각화
                     chart_sim = alt.Chart(df_sim_chart).mark_area(
@@ -605,6 +610,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
