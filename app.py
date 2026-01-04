@@ -418,7 +418,7 @@ def main():
                             "자산총액": current_bal / 10000,
                             "실제월배당": div_earned
                         })
-                        current_bal += (actual_reinvest + monthly_add_sim)
+                
 
                     df_sim_chart = pd.DataFrame(sim_data)
 
@@ -605,6 +605,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
