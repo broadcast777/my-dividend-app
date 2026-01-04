@@ -259,8 +259,7 @@ def main():
                 ).properties(height=350)
                 st.altair_chart(chart, use_container_width=True)
 
-      
-            with res_tab2:
+             with res_tab2:
                 chart_col, table_col = st.columns([1, 1.2])
                 df_ana = pd.DataFrame(all_data)
                 
@@ -268,21 +267,27 @@ def main():
                     # 1. 통화 분류 로직 (환노출 종목 완벽 대응)
                     def classify_currency(row):
                         try:
+                            # 원본 데이터(df)에서 해당 종목 정보를 가져옴
                             target = df[df['pure_name'] == row['종목']].iloc[0]
                             hwan = str(target.get('환구분', ''))
                             bunryu = str(target.get('분류', ''))
-                            # '환노출', '달러', '직투' 키워드거나 분류가 '해외'면 달러 자산
+                            
+                            # 환구분에 '환노출/달러/직투'가 있거나 분류가 '해외'면 달러 자산
                             if any(k in hwan for k in ["환노출", "달러", "직투"]) or bunryu == "해외":
                                 return "🇺🇸 달러 자산"
                         except:
                             pass
+                        
+                        # 종목명에 (해외)가 붙어있는 경우 체크
                         if "(해외)" in row['종목']:
                             return "🇺🇸 달러 자산"
                         return "🇰🇷 원화 자산"
 
+                    # 통화 분류 및 달러 비중 합산
                     df_ana['통화'] = df_ana.apply(classify_currency, axis=1)
                     usd_ratio = df_ana[df_ana['통화'] == "🇺🇸 달러 자산"]['비중'].sum()
                     
+                    # 자산유형별 요약 데이터 생성
                     asset_sum = df_ana.groupby('자산유형').agg({
                         '비중': 'sum', 
                         '투자금액_만원': 'sum', 
@@ -290,39 +295,43 @@ def main():
                     }).reset_index()
 
                     with chart_col:
+                        # [A] 자산 유형 도넛 차트 (종목명 툴팁 추가 버전)
                         st.write("💎 **자산 유형 비중**")
                         donut = alt.Chart(asset_sum).mark_arc(innerRadius=60).encode(
                             theta=alt.Theta("비중:Q"),
                             color=alt.Color("자산유형:N", legend=None),
                             tooltip=[
-                                alt.Tooltip("자산유형:N"), 
+                                alt.Tooltip("자산유형:N", title="자산 유형"), 
                                 alt.Tooltip("비중:Q", format=".1f", title="비중(%)"), 
-                                alt.Tooltip("투자금액_만원:Q", format=",d", title="투자금(만원)")
+                                alt.Tooltip("투자금액_만원:Q", format=",d", title="투자금(만원)"),
+                                alt.Tooltip("종목:N", title="포함 종목") # 마우스 올리면 종목 리스트 출력
                             ]
                         ).properties(height=350)
                         st.altair_chart(donut, width='stretch')
 
                     with table_col:
+                        # [B] 우측 상단: 유형별 요약 테이블
                         st.write("📋 **유형별 요약**")
                         st.dataframe(asset_sum.sort_values('비중', ascending=False),
                                      column_config={
                                          "비중": st.column_config.NumberColumn(format="%d%%"),
-                                         "투자금액_만원": st.column_config.NumberColumn("투자금(만원)", format="%d")
+                                         "투자금액_만원": st.column_config.NumberColumn("투자금(만원)", format="%d"),
+                                         "종목": st.column_config.TextColumn("포함 종목", width="large")
                                      },
                                      hide_index=True, width='stretch')
                         
+                        # [C] 우측 하단: 달러 노출도 위젯
                         st.write("---")
                         st.markdown(f"### 🌐 달러 노출도: `{usd_ratio:.1f}%`")
                         st.progress(usd_ratio / 100)
                         
-                        # [핵심 수정] total_m(만원)을 0.5(5000원)로 나누어 정확한 잔수 계산
-                        coffee_count = int(total_m / 0.5) if total_m > 0 else 0
-                        
-                        with st.expander("🎁 이 배당금으로 무엇을 할 수 있을까요?", expanded=True):
-                            st.markdown(f"* ☕ **스타벅스 아메리카노**: 월 **{coffee_count:,}잔** 무료")
-                            st.caption("※ 실시간 환율 및 세전 금액(만원) 기준")
+                        if usd_ratio >= 50:
+                            st.success(f"✅ 포트폴리오의 {usd_ratio:.1f}%가 달러 자산에 노출되어 환율 방어에 유리합니다.")
+                        else:
+                            st.info("ℹ️ 현재 원화 자산 비중이 높습니다. 해외 자산 추가 시 달러 노출도가 상승합니다.")
                 else:
                     st.info("📊 종목을 선택하시면 자산 구성 분석이 나타납니다.")
+             
    
 
             st.error("""
@@ -468,6 +477,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
