@@ -247,7 +247,7 @@ def main():
             if total_y_div > 20000000:
                 st.warning(f"🚨 **주의:** 연간 예상 배당금이 **{total_y_div/10000:,.0f}만원**입니다. 금융소득종합과세 대상에 해당될 수 있습니다.")
 
-            # [탭 섹션]
+ # [🔥 복구된 탭 섹션]
             res_tab1, res_tab2 = st.tabs(["📊 월 배당금 비교", "💎 포트폴리오 자산 구성"])
 
             with res_tab1:
@@ -259,15 +259,13 @@ def main():
                 ).properties(height=350)
                 st.altair_chart(chart, use_container_width=True)
 
-             with res_tab2:
+            with res_tab2:
                 chart_col, table_col = st.columns([1, 1.2])
                 df_ana = pd.DataFrame(all_data)
                 
-                # 데이터가 있는지 먼저 확인
                 if not df_ana.empty:
                     # 1. 통화 분류 로직
                     def classify_currency(row_name):
-                        # df는 메인에서 로드된 전체 데이터프레임
                         target = df[df['pure_name'] == row_name].iloc[0]
                         if target['분류'] == '해외' or "달러" in target['환구분']:
                             return "🇺🇸 달러 자산"
@@ -283,7 +281,6 @@ def main():
                     }).reset_index()
 
                     with chart_col:
-                        # [자산 유형 차트]
                         st.write("💎 **자산 유형 비중**")
                         donut = alt.Chart(asset_sum).mark_arc(innerRadius=60).encode(
                             theta=alt.Theta("비중:Q"),
@@ -296,26 +293,29 @@ def main():
                         ).properties(height=300)
                         st.altair_chart(donut, use_container_width=True)
 
-                        # [통화 비중 차트] - 데이터가 있을 때만 렌더링
-                        if not currency_sum.empty:
-                            st.write("🌐 **통화 노출 비중**")
-                            c_donut = alt.Chart(currency_sum).mark_arc(innerRadius=60, cornerRadius=10).encode(
-                                theta=alt.Theta("비중:Q"),
-                                color=alt.Color("통화:N", scale=alt.Scale(
-                                    domain=['🇰🇷 원화 자산', '🇺🇸 달러 자산'], 
-                                    range=['#3182F6', '#00D084']
-                                )),
-                                tooltip=[alt.Tooltip("통화:N"), alt.Tooltip("비중:Q", format=".1f")],
-                                legend=alt.Legend(orient="bottom", title=None)
-                            ).properties(height=300)
-                            st.altair_chart(c_donut, use_container_width=True)
+                        st.write("🌐 **통화 노출 비중**")
+                        c_donut = alt.Chart(currency_sum).mark_arc(innerRadius=60, cornerRadius=10).encode(
+                            theta=alt.Theta("비중:Q"),
+                            color=alt.Color("통화:N", scale=alt.Scale(
+                                domain=['🇰🇷 원화 자산', '🇺🇸 달러 자산'], 
+                                range=['#3182F6', '#00D084']
+                            )),
+                            tooltip=[alt.Tooltip("통화:N"), alt.Tooltip("비중:Q", format=".1f")],
+                            legend=alt.Legend(orient="bottom", title=None)
+                        ).properties(height=300)
+                        st.altair_chart(c_donut, use_container_width=True)
 
-                with table_col:
-                    st.write("📋 **유형별 요약**")
-                    st.dataframe(asset_sum.sort_values('비중', ascending=False),
-                                 column_config={"비중": st.column_config.NumberColumn(format="%d%%"),
-                                                "종목": st.column_config.TextColumn("종목", width="large")},
-                                 hide_index=True, use_container_width=True)
+                    with table_col:
+                        st.write("📋 **유형별 요약**")
+                        st.dataframe(asset_sum.sort_values('비중', ascending=False),
+                                     column_config={
+                                         "비중": st.column_config.NumberColumn(format="%d%%"),
+                                         "투자금액_만원": st.column_config.NumberColumn("투자금(만원)", format="%d"),
+                                         "종목": st.column_config.TextColumn("종목", width="large")
+                                     },
+                                     hide_index=True, use_container_width=True)
+                else:
+                    st.info("📊 종목을 선택하시면 자산 구성 분석이 나타납니다.")
 
             st.error("""
             **⚠️ 시뮬레이션 활용 시 유의사항**
@@ -460,6 +460,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
