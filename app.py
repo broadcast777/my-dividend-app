@@ -260,17 +260,18 @@ def main():
                 st.altair_chart(chart, use_container_width=True)
 
       
-            with res_tab2:
+           with res_tab2:
                 chart_col, table_col = st.columns([1, 1.2])
                 df_ana = pd.DataFrame(all_data)
                 
                 if not df_ana.empty:
-                    # 1. 통화 분류 로직 (3중 체크)
+                    # 1. 통화 분류 로직 (환노출 종목 완벽 대응)
                     def classify_currency(row):
                         try:
                             target = df[df['pure_name'] == row['종목']].iloc[0]
                             hwan = str(target.get('환구분', ''))
                             bunryu = str(target.get('분류', ''))
+                            # '환노출', '달러', '직투' 키워드거나 분류가 '해외'면 달러 자산
                             if any(k in hwan for k in ["환노출", "달러", "직투"]) or bunryu == "해외":
                                 return "🇺🇸 달러 자산"
                         except:
@@ -314,11 +315,12 @@ def main():
                         st.markdown(f"### 🌐 달러 노출도: `{usd_ratio:.1f}%`")
                         st.progress(usd_ratio / 100)
                         
-                        # [라이프스타일 큐레이션]
+                        # [핵심 수정] total_m(만원)을 0.5(5000원)로 나누어 정확한 잔수 계산
                         coffee_count = int(total_m / 0.5) if total_m > 0 else 0
+                        
                         with st.expander("🎁 이 배당금으로 무엇을 할 수 있을까요?", expanded=True):
-                            st.markdown(f"* ☕ **스타벅스 아메리카노**: 월 **{coffee_count}잔** 무료")
-                            st.caption("※ 실시간 환율 및 세전 금액 기준")
+                            st.markdown(f"* ☕ **스타벅스 아메리카노**: 월 **{coffee_count:,}잔** 무료")
+                            st.caption("※ 실시간 환율 및 세전 금액(만원) 기준")
                 else:
                     st.info("📊 종목을 선택하시면 자산 구성 분석이 나타납니다.")
    
@@ -466,6 +468,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
