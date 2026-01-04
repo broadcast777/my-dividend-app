@@ -356,75 +356,132 @@ def main():
                         else:
                             st.caption("💡 원화 자산 중심의 구성입니다.")
 
-                    # [탭 2] 복리 재투자 시뮬레이션
+                    # [탭 2] 복리 시뮬레이션 (심플 & ISA 강력 추천 버전)
                 with tab_simulation:
-                    st.info("📊 투자 기간과 추가 적립금을 설정하여 미래 자산을 그려보세요.")
-                    
-                    s_col1, s_col2 = st.columns(2)
-                    with s_col1:
-                        is_tax_free_sim = st.toggle("🛡️ 절세 계좌 모드", value=False)
-                    with s_col2:
-                        years_sim = st.select_slider("⏳ 투자 기간 (년)", options=[1, 3, 5, 10, 15, 20, 30], value=10)
+                    st.info("📊 일반 계좌와 절세(ISA) 계좌의 미래 자산을 비교해보세요.")
 
-                    if not is_tax_free_sim:
-                        reinvest_ratio = st.slider("💰 배당금 재투자 비중 (%)", 0, 100, 80, step=10)
-                        st.caption(f"💡 배당금의 {reinvest_ratio}%는 재투자하고, 나머지는 생활비로 씁니다.")
+                    # 1. 심플한 입력 (복잡한 옵션 제거)
+                    col_input1, col_input2 = st.columns(2)
+                    with col_input1:
+                        # 계좌 모드 토글 (심플함의 핵심)
+                        is_isa_mode = st.toggle("🛡️ ISA (절세) 계좌 적용하기", value=True)
+                    with col_input2:
+                        years_sim = st.select_slider("⏳ 투자 기간 (년)", options=[3, 5, 10, 15, 20, 30], value=5)
+
+                    if is_isa_mode:
+                        st.caption("💡 **ISA 모드:** 비과세 혜택 + 과세이연(100% 재투자) + 납입한도(연 2천만원)가 자동 적용됩니다.")
+                        isa_type = st.radio("ISA 유형", ["일반형 (비과세 200만)", "서민형 (비과세 400만)"], horizontal=True, label_visibility="collapsed")
+                        isa_exempt = 400 if "서민형" in isa_type else 200
                     else:
-                        reinvest_ratio = 100
-                        st.caption("💡 절세 계좌는 배당금 100% 재투자를 가정합니다.")
-                    
+                        st.caption("💡 **일반 모드:** 배당소득세(15.4%)를 매월 납부하고 남은 돈만 재투자합니다.")
+
                     st.markdown("---")
-                    st.markdown("**💵 매월 추가 투자금 (선택사항)**")
 
-                    monthly_add_sim = st.number_input(
-                        "매월 배당금 외에 추가로 더 투자할 금액 (만원)", 
-                        min_value=0, max_value=2000, 
-                        value=0, 
-                        step=5, 
-                        help="매월 초에 입금하여 당월 배당수익이 발생한다고 가정합니다."
-                    ) * 10000
-                    
-                    if monthly_add_sim > 0:
-                        st.caption("💡 추가 적립금은 매월 복리 효과를 가속화합니다.")
+                    # 2. 금액 설정 (직관적)
+                    col_money1, col_money2 = st.columns(2)
+                    with col_money1:
+                        # 초기 투자금 (Start Point)
+                        current_bal = st.number_input("💰 초기 투자 금액 (만원)", value=3000, step=100) * 10000
+                    with col_money2:
+                        # 월 적립금
+                        monthly_add = st.number_input("➕ 매월 추가 적립 (만원)", value=150, step=10) * 10000
 
-                    # --- [여기서부터 복리 로직 교체 구간] ---
+                    # 경고 및 팁
+                    if is_isa_mode and monthly_add > 1666666:
+                        st.warning("⚠️ ISA 연간 납입 한도(2,000만원)를 고려해 월 166만원까지만 납입이 인정됩니다.")
+
+                    # --- [핵심 로직] ---
                     months_sim = years_sim * 12
-                    current_bal = total_invest
-                    monthly_yld = avg_y / 100 / 12  # 월 수익률
-                    
-                    sim_data = [{
-                        "년차": 0,
-                        "자산총액": current_bal / 10000,
-                        "실제월배당": 0 
-                    }]
+                    monthly_yld = avg_y / 100 / 12
+                    total_principal = current_bal # 원금 추적용
+
+                    # ISA 한도 상수
+                    ISA_YEARLY_CAP = 20000000
+                    ISA_TOTAL_CAP = 100000000
+
+                    sim_data = [{"년차": 0, "자산총액": current_bal/10000, "총원금": total_principal/10000}]
+
+                    yearly_contribution = 0
+                    year_tracker = 0
 
                     for m in range(1, months_sim + 1):
-                        # 1. 월 적립금 투입
-                        current_bal += monthly_add_sim
-                        
-                        # 2. 이번 달 배당금 계산 (세전)
+                        # 연도 바뀔 때 한도 리셋
+                        if m // 12 > year_tracker:
+                            yearly_contribution = 0
+                            year_tracker = m // 12
+
+                        # 1. 납입 (ISA 한도 컷 로직 내장)
+                        actual_add = monthly_add
+                        if is_isa_mode:
+                            # 연간 한도 체크
+                            remaining_yearly = max(0, ISA_YEARLY_CAP - yearly_contribution)
+                            # 총 한도 체크
+                            remaining_total = max(0, ISA_TOTAL_CAP - total_principal)
+                            
+                            actual_add = min(monthly_add, remaining_yearly, remaining_total)
+
+                        current_bal += actual_add
+                        total_principal += actual_add
+                        yearly_contribution += actual_add
+
+                        # 2. 배당 및 재투자
                         div_earned = current_bal * monthly_yld
                         
-                        # 3. 계좌 모드에 따른 재투자금 결정 (세금 분기)
-                        if is_tax_free_sim:
-                            # 절세 계좌: 세전 금액 그대로 재투자
-                            actual_reinvest = div_earned * (reinvest_ratio / 100)
+                        if is_isa_mode:
+                            # ISA: 세금 없이 100% 재투자
+                            reinvest = div_earned 
                         else:
-                            # 일반 계좌: 세후 금액(15.4% 제외) 재투자
-                            actual_reinvest = (div_earned * 0.846) * (reinvest_ratio / 100)
+                            # 일반: 15.4% 떼고 재투자 (재투자율 100% 가정)
+                            reinvest = div_earned * 0.846
                         
-                        # 4. 재투자 실행
-                        current_bal += actual_reinvest
+                        current_bal += reinvest
                         
-                        # 5. 데이터 기록
                         sim_data.append({
                             "년차": m / 12, 
-                            "자산총액": current_bal / 10000,
+                            "자산총액": current_bal / 10000, 
+                            "총원금": total_principal / 10000,
                             "실제월배당": div_earned
                         })
 
-                    df_sim_chart = pd.DataFrame(sim_data)
-                    # --- [교체 구간 끝] ---
+                    df_sim = pd.DataFrame(sim_data)
+
+                    # --- [차트 시각화] ---
+                    # 영역 차트 (자산) + 라인 차트 (원금)
+                    base = alt.Chart(df_sim).encode(x=alt.X('년차:Q', title='경과 기간 (년)'))
+                    area = base.mark_area(opacity=0.3, color='#0068c9').encode(y=alt.Y('자산총액:Q', title='자산 (만원)'))
+                    line = base.mark_line(color='#ff9f43', strokeDash=[5,5]).encode(y='총원금:Q')
+                    
+                    st.altair_chart((area + line).properties(height=250), use_container_width=True)
+
+                    # --- [결과 카드 (세금 정산)] ---
+                    final_row = df_sim.iloc[-1]
+                    final_asset = final_row['자산총액'] * 10000
+                    final_principal = final_row['총원금'] * 10000
+                    profit = final_asset - final_principal
+                    
+                    tax_display = "0원"
+                    real_money = final_asset
+
+                    if is_isa_mode:
+                        # ISA 최종 과세: (이익 - 비과세) * 9.9%
+                        taxable = max(0, profit - (isa_exempt * 10000))
+                        tax = taxable * 0.099
+                        real_money = final_asset - tax
+                        tax_display = f"-{tax/10000:,.1f} 만원 (9.9% 분리과세)"
+                    else:
+                        tax_display = "납부 완료 (15.4% 원천징수)"
+                        real_money = final_asset
+
+                    st.markdown(f"""
+                        <div style="background-color:#f8f9fa; padding:20px; border-radius:15px; border:1px solid #eee;">
+                            <div style="color:#666; font-size:0.9em; margin-bottom:5px;">{years_sim}년 뒤, 세금 다 떼고 내 손에 쥐는 돈</div>
+                            <h2 style="margin:0; color:#0068c9;">약 {real_money/10000:,.0f} 만원</h2>
+                            <div style="margin-top:15px; font-size:0.85em; color:#888; display:flex; justify-content:space-between;">
+                                <span>💰 총 원금: {final_principal/10000:,.0f}만원</span>
+                                <span>💸 만기 예상 세금: {tax_display}</span>
+                            </div>
+                        </div>
+                    """, unsafe_allow_html=True)
                 
 
                     # Area Chart 시각화
@@ -610,6 +667,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
