@@ -268,7 +268,7 @@ def main():
             chart_compare = alt.Chart(c_data).mark_bar(cornerRadiusTopLeft=10, cornerRadiusTopRight=10).encode(
                 x=alt.X('계좌 종류', sort=None, axis=alt.Axis(labelAngle=0, title=None)),
                 y=alt.Y('월 수령액', title=None),
-                color=alt.Color('계좌 종류', scale=alt.Scale(domain=['일반 계좌 (15.4% 떼감)', 'ISA/연금 (다 받음)'], range=['#95a5a6', '#f1c40f']), legend=None),
+                color=alt.Color('계좌 종류', scale=alt.Scale(domain=['일반 계좌', 'ISA/연금'], range=['#95a5a6', '#f1c40f']), legend=None),
                 tooltip=[alt.Tooltip('계좌 종류'), alt.Tooltip('월 수령액', format=',.0f')]
             ).properties(height=220) # 높이는 적당히 조절
             
@@ -355,7 +355,7 @@ def main():
                         if usd_ratio >= 50:
                             st.caption("💡 포트폴리오의 절반 이상이 환율 변동에 영향을 받습니다.")
                         else:
-                            st.caption("💡 원화 자산 중심의 안정적인 구성입니다.")
+                            st.caption("💡 원화 자산 중심의 구성입니다.")
 
                 # -------------------------------------------------------
                 # [탭 2] 복리 재투자 시뮬레이션 (입력창 이동 및 오해 방지)
@@ -606,6 +606,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
