@@ -224,6 +224,11 @@ def main():
                     '투자금액_만원': amt / 10000 # 툴팁용 데이터 미리 계산
                 })
 
+
+
+
+
+            
             total_y_div = sum([(total_invest * (weights[n]/100) * (df[df['pure_name']==n].iloc[0]['연배당률']/100)) for n in selected])
             total_m = total_y_div / 12
             avg_y = sum([(df[df['pure_name']==n].iloc[0]['연배당률'] * (weights[n]/100)) for n in selected])
@@ -332,7 +337,79 @@ def main():
                 else:
                     st.info("📊 종목을 선택하시면 자산 구성 분석이 나타납니다.")
              
-   
+            # --- [0.2v 신규 기능: 복리 재투자 시뮬레이션 삽입 시작] ---
+            st.divider()
+            st.subheader("🔄 배당금 재투자 시뮬레이션")
+
+            # 1. 시뮬레이션 설정부
+            s_col1, s_col2 = st.columns(2)
+            with s_col1:
+                is_tax_free_sim = st.toggle("🛡️ 절세 계좌 모드", value=False, key="sim_tax_toggle")
+            with s_col2:
+                years_sim = st.select_slider("⏳ 투자 기간", options=[1, 3, 5, 10, 15, 20, 30], value=10, key="sim_years")
+
+            if not is_tax_free_sim:
+                reinvest_ratio = st.slider("💰 배당금 재투자 비중 (%)", 0, 100, 80, step=10, key="sim_reinvest_ratio")
+                st.caption(f"💡 나머지 {100-reinvest_ratio}%는 생활비로 활용하는 시나리오입니다.")
+            else:
+                reinvest_ratio = 100
+                st.info("✨ 절세 계좌 모드: 배당금이 전액(100%) 재투자됩니다.")
+
+            monthly_add_sim = st.number_input("💵 매월 추가 적립 (만원)", 0, 1000, 30, step=5, key="sim_add_money") * 10000
+
+            # 2. 복리 계산 로직
+            months_sim = years_sim * 12
+            current_bal = total_invest
+            monthly_yld = avg_y / 100 / 12
+            sim_data = []
+
+            for m in range(months_sim + 1):
+                div_earned = current_bal * monthly_yld
+                actual_reinvest = div_earned * (reinvest_ratio / 100)
+                sim_data.append({"년차": round(m/12, 1), "자산총액": current_bal / 10000, "월수령액": div_earned / 10000})
+                current_bal += (actual_reinvest + monthly_add_sim)
+
+            df_sim_chart = pd.DataFrame(sim_data)
+
+            # 3. 에어리어 차트 시각화
+            chart_sim = alt.Chart(df_sim_chart).mark_area(
+                line={'color':'#0068c9'},
+                color=alt.Gradient(
+                    gradient='linear',
+                    stops=[alt.GradientStop(color='white', offset=0), alt.GradientStop(color='#0068c9', offset=1)],
+                    x1=1, x2=1, y1=1, y2=0
+                )
+            ).encode(
+                x=alt.X('년차:Q', title='투자 기간 (년)'),
+                y=alt.Y('자산총액:Q', title='자산 가치 (만원)'),
+                tooltip=[alt.Tooltip('년차', title='년차'), alt.Tooltip('자산총액', format=',.0f', title='자산(만원)')]
+            ).properties(height=280)
+            st.altair_chart(chart_sim, use_container_width=True)
+
+            # 4. 랜덤 실생활 비유 로직
+            import random
+            analogy_items = [
+                {"name": "☕ 스타벅스 아메리카노", "price": 4500, "unit": "잔"},
+                {"name": "🍔 빅맥 세트", "price": 7200, "unit": "개"},
+                {"name": "🍗 황금올리브 치킨", "price": 23000, "unit": "마리"}
+            ]
+            selected_item = random.choice(analogy_items)
+            final_monthly_div = df_sim_chart.iloc[-1]['월수령액'] * 10000 * 0.846
+            item_count = int(final_monthly_div // selected_item['price'])
+
+            # 5. 토스 스타일 결과 카드
+            final_assets_val = df_sim_chart.iloc[-1]['자산총액']
+            st.markdown(f"""
+                <div style="background-color: #f8f9fa; padding: 25px; border-radius: 20px; border: 1px solid #e9ecef; text-align: center; margin-top: 10px;">
+                    <p style="margin: 0; font-size: 0.95em; color: #666;">{years_sim}년 뒤 나의 예상 자산</p>
+                    <h1 style="margin: 10px 0; color: #0068c9; font-size: 2.2em;">약 {final_assets_val/10000:,.1f} 억원</h1>
+                    <p style="margin: 15px 0 0 0; font-size: 1em; color: #333; line-height: 1.5;">
+                        그때가 되면 매달 배당금만으로<br>
+                        <b>{selected_item['name']} {item_count:,}{selected_item['unit']}</b>를 즐길 수 있어요! 🎊
+                    </p>
+                </div>
+            """, unsafe_allow_html=True)
+            # --- [0.2v 신규 기능 삽입 끝] ---
 
             st.error("""
             **⚠️ 시뮬레이션 활용 시 유의사항**
@@ -477,6 +554,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
