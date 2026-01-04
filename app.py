@@ -71,7 +71,7 @@ def classify_asset(row):
     
     # 키워드 정의
     covered = ['커버드콜', 'COVERED CALL', '프리미엄', 'PREMIUM', '+10%', '옵션', 'OPTION', 'QYLD', 'JEPI', 'JEPQ', 'XYLD', 'RYLD', 'NVDY', 'TSLY', 'CONY', 'MSTY', 'ULTRA', 'QQQI', 'GPIQ', 'XYLG', 'QYLG', 'TLTW', 'SVOL']
-    bond = ['채권', '국채', 'BOND', '단기채', 'TREASURY', '하이일드', 'HIGH YIELD', 'PFF', '국제금', '골드', 'GOLD']
+    bond = ['채권', '국채', 'BOND', '단기채', 'TREASURY', '하이일드', 'HIGH YIELD', 'PFF', '국제금', '골드', 'GOLD','T-Bill']
     
     # 1순위: 커버드콜 (혼합형이라도 커버드콜 전략이면 커버드콜로 분류)
     if any(k in name for k in covered) or any(k in symbol for k in covered): 
@@ -120,17 +120,34 @@ def get_hedge_status(name, category):
 def load_and_process_data(df_raw):
     results = []
     if df_raw.empty: return pd.DataFrame()
+    
     for _, row in df_raw.iterrows():
         code = str(row.get('종목코드', '')).strip()
         name = str(row.get('종목명', '')).strip()
         category = str(row.get('분류', '국내')).strip()
+        
+        # 가격 조회
         price = get_safe_price(code, category)
+        
         if price:
             raw_div = float(row.get('연배당금', 0))
             months = int(row.get('신규상장개월수', 0))
+            
+            # 연 배당금 계산
             annual_div = (raw_div / months * 12) if months > 0 else raw_div
+            
+            # 배당률 계산
             yield_val = (annual_div / price) * 100
+
+            # [🚨 핵심 필터링 로직] 
+            # 배당률이 2.0% 미만(너무 짬)이거나, 25.0% 초과(데이터 오류 의심)면 
+            # 리스트에 넣지 않고 무시(continue)합니다.
+            if yield_val < 2.0 or yield_val > 25.0:
+                continue 
+
             price_display = f"{int(price):,}원" if category == '국내' else f"${price:.2f}"
+            
+            # 결과 담기 (아까 추가한 '신규상장개월수'도 안전하게 포함됨)
             results.append({
                 '코드': code, '종목명': f"{name} ⭐" if months > 0 else name,
                 '블로그링크': str(row.get('블로그링크', '#')),
@@ -139,8 +156,9 @@ def load_and_process_data(df_raw):
                 '환구분': get_hedge_status(name, category),
                 '배당락일': str(row.get('배당락일', '-')), '분류': category,
                 '자산유형': classify_asset(row), 'pure_name': name,
-                '신규상장개월수': months  # <--- [중요] 이 줄을 콤마(,) 찍고 꼭 추가해주세요!
+                '신규상장개월수': months 
             })
+            
     return pd.DataFrame(results).sort_values('연배당률', ascending=False)
 
 def main():
@@ -404,6 +422,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
