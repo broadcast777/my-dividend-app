@@ -247,7 +247,7 @@ def main():
             if total_y_div > 20000000:
                 st.warning(f"🚨 **주의:** 연간 예상 배당금이 **{total_y_div/10000:,.0f}만원**입니다. 금융소득종합과세 대상에 해당될 수 있습니다.")
 
-            # [🔥 복구된 탭 섹션]
+            # [탭 섹션]
             res_tab1, res_tab2 = st.tabs(["📊 월 배당금 비교", "💎 포트폴리오 자산 구성"])
 
             with res_tab1:
@@ -262,20 +262,57 @@ def main():
             with res_tab2:
                 chart_col, table_col = st.columns([1, 1.2])
                 df_ana = pd.DataFrame(all_data)
-                asset_sum = df_ana.groupby('자산유형').agg({'비중': 'sum', '투자금액_만원': 'sum', '종목': lambda x: ', '.join(x)}).reset_index()
+                
+                # --- [1. 통화 분류 로직 추가] ---
+                def classify_currency(row_name):
+                    target = df[df['pure_name'] == row_name].iloc[0]
+                    # '해외' 분류거나 환구분에 '달러'가 포함되면 달러 자산
+                    if target['분류'] == '해외' or "달러" in target['환구분']:
+                        return "🇺🇸 달러 자산"
+                    return "🇰🇷 원화 자산"
+
+                df_ana['통화'] = df_ana['종목'].apply(classify_currency)
+                currency_sum = df_ana.groupby('통화')['비중'].sum().reset_index()
+                # -------------------------------
+
+                asset_sum = df_ana.groupby('자산유형').agg({
+                    '비중': 'sum', 
+                    '투자금액_만원': 'sum', 
+                    '종목': lambda x: ', '.join(x)
+                }).reset_index()
+
                 with chart_col:
+                    # [A] 자산 유형 비중 (기존 차트 + 툴팁 유지)
+                    st.write("💎 **자산 유형 비중**")
                     donut = alt.Chart(asset_sum).mark_arc(innerRadius=60).encode(
                         theta=alt.Theta("비중:Q"),
                         color=alt.Color("자산유형:N", legend=None),
-                        # 수정 코드 (투자금(만원) 툴팁 추가)
                         tooltip=[
                             alt.Tooltip("자산유형:N"), 
                             alt.Tooltip("비중:Q", format=".1f", title="비중(%)"), 
-                            alt.Tooltip("투자금액_만원:Q", format=",d", title="투자금(만원)"), # 이 줄 추가!
+                            alt.Tooltip("투자금액_만원:Q", format=",d", title="투자금(만원)"),
                             alt.Tooltip("종목:N", title="포함 종목")
-                                ]
-                    ).properties(height=350)
+                        ]
+                    ).properties(height=300)
                     st.altair_chart(donut, use_container_width=True)
+
+                    st.write("") # 한 줄 띄우기
+
+                    # [B] 통화 노출 비중 (0.2v 신규 토스 스타일)
+                    st.write("🌐 **통화 노출 비중**")
+                    c_donut = alt.Chart(currency_sum).mark_arc(innerRadius=60, cornerRadius=10).encode(
+                        theta=alt.Theta("비중:Q"),
+                        color=alt.Color("통화:N", scale=alt.Scale(
+                            domain=['🇰🇷 원화 자산', '🇺🇸 달러 자산'], 
+                            range=['#3182F6', '#00D084'] # 토스 블루 & 토스 그린
+                        )),
+                        tooltip=[
+                            alt.Tooltip("통화:N"), 
+                            alt.Tooltip("비중:Q", format=".1f", title="비중(%)")
+                        ],
+                        legend=alt.Legend(orient="bottom", title=None)
+                    ).properties(height=300)
+                    st.altair_chart(c_donut, use_container_width=True)
 
                 with table_col:
                     st.write("📋 **유형별 요약**")
@@ -427,5 +464,6 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
