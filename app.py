@@ -241,11 +241,8 @@ def main():
                     annual_div_income = monthly_div_final * 12
                     if annual_div_income > 20000000: st.warning(f"🚨 **주의:** {years_sim}년 뒤 연간 배당금이 2,000만원을 초과하여 금융소득종합과세 대상이 될 수 있습니다.")
                     st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**\n1. 본 결과는 주가·환율 변동과 수수료 등을 제외하고, 현재 배당률로만 계산한 결과입니다.\n2. ISA 계좌의 비과세 한도 및 세율은 세법 개정에 따라 달라질 수 있습니다.\n3. 실제 배당금은 운용사의 공시 및 환율 상황에 따라 매월 달라질 수 있습니다.""")
-                    st.write("") 
-                    col_cta1, col_cta2 = st.columns([1, 0.3]) 
-                    with col_cta1:
-                        st.info("💬 **결과가 마음에 드시나요?** 더 필요한 기능이 있다면 알려주세요!")
-                        st.link_button(label="🙋‍♂️ 블로그에 의견 남기러 가기 (주인장과 소통)", url="https://blog.naver.com/dividenpange", help="클릭 시 배당팽이 블로그로 이동합니다.", use_container_width=True)
+                     
+                   
 
     # ------------------------------------------
     # 섹션 4: 전체 데이터 테이블 출력
