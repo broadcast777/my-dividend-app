@@ -356,14 +356,14 @@ def main():
                         else:
                             st.caption("💡 원화 자산 중심의 구성입니다.")
 
-                    # [탭 2] 복리 시뮬레이션 (심플 & ISA 강력 추천 버전)
+                    # [탭 2] 복리 시뮬레이션 (수정 완료: 변수명 NameError 해결)
                 with tab_simulation:
                     st.info("📊 일반 계좌와 절세(ISA) 계좌의 미래 자산을 비교해보세요.")
 
                     # 1. 심플한 입력 (복잡한 옵션 제거)
                     col_input1, col_input2 = st.columns(2)
                     with col_input1:
-                        # 계좌 모드 토글 (심플함의 핵심)
+                        # 계좌 모드 토글
                         is_isa_mode = st.toggle("🛡️ ISA (절세) 계좌 적용하기", value=True)
                     with col_input2:
                         years_sim = st.select_slider("⏳ 투자 기간 (년)", options=[3, 5, 10, 15, 20, 30], value=5)
@@ -377,7 +377,7 @@ def main():
 
                     st.markdown("---")
 
-                    # 2. 금액 설정 (직관적)
+                    # 2. 금액 설정
                     col_money1, col_money2 = st.columns(2)
                     with col_money1:
                         # 초기 투자금 (Start Point)
@@ -431,7 +431,7 @@ def main():
                             # ISA: 세금 없이 100% 재투자
                             reinvest = div_earned 
                         else:
-                            # 일반: 15.4% 떼고 재투자 (재투자율 100% 가정)
+                            # 일반: 15.4% 떼고 재투자
                             reinvest = div_earned * 0.846
                         
                         current_bal += reinvest
@@ -443,18 +443,18 @@ def main():
                             "실제월배당": div_earned
                         })
 
-                    df_sim = pd.DataFrame(sim_data)
+                    # [수정됨] 변수명을 df_sim_chart로 통일
+                    df_sim_chart = pd.DataFrame(sim_data)
 
                     # --- [차트 시각화] ---
-                    # 영역 차트 (자산) + 라인 차트 (원금)
-                    base = alt.Chart(df_sim).encode(x=alt.X('년차:Q', title='경과 기간 (년)'))
+                    base = alt.Chart(df_sim_chart).encode(x=alt.X('년차:Q', title='경과 기간 (년)'))
                     area = base.mark_area(opacity=0.3, color='#0068c9').encode(y=alt.Y('자산총액:Q', title='자산 (만원)'))
                     line = base.mark_line(color='#ff9f43', strokeDash=[5,5]).encode(y='총원금:Q')
                     
                     st.altair_chart((area + line).properties(height=250), use_container_width=True)
 
                     # --- [결과 카드 (세금 정산)] ---
-                    final_row = df_sim.iloc[-1]
+                    final_row = df_sim_chart.iloc[-1]
                     final_asset = final_row['자산총액'] * 10000
                     final_principal = final_row['총원금'] * 10000
                     profit = final_asset - final_principal
@@ -667,6 +667,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
