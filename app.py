@@ -37,33 +37,57 @@ def load_stock_data_from_csv():
     st.error("❌ 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.")
     return pd.DataFrame()
 
-@st.cache_data(ttl=300)
-def get_safe_price(code, category):
-    """현재가 조회 (해외: yfinance / 국내: Naver Crawling)"""
+# --- [개선 2] 재시도 로직이 포함된 시세 조회 함수 ---
+
+# 1. 실제 데이터를 가져오는 내부 함수 (캐시 X, 로직만 담당)
+def _fetch_price_raw(code, category):
+    import time
     try:
         code_str = str(code).strip()
         
-        # 1. 해외 주식 처리
+        # 해외 주식
         if category == '해외':
             ticker = yf.Ticker(code_str)
+            # fast_info 시도
             price = ticker.fast_info.get('last_price')
             if not price:
-                price = ticker.history(period="1d")['Close'].iloc[-1]
+                # 실패 시 history 시도
+                hist = ticker.history(period="1d")
+                if not hist.empty:
+                    price = hist['Close'].iloc[-1]
             return float(price) if price else None
             
-        # 2. 국내 주식 처리
+        # 국내 주식 (네이버 크롤링)
         url = f"https://finance.naver.com/item/main.naver?code={code_str}"
         res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=3)
         soup = BeautifulSoup(res.text, 'html.parser')
         no_today = soup.select_one(".no_today .blind")
         return int(no_today.text.replace(",", "")) if no_today else None
 
-    except requests.exceptions.Timeout:
-        st.warning(f"⏱️ {code} 응답 시간 초과 (서버 지연)")
-        return None
-    except Exception as e:
-        st.error(f"❌ {code} 조회 실패: {str(e)}")
-        return None
+    except Exception:
+        return None # 에러 발생 시 None 반환 (재시도 로직에서 처리)
+
+# 2. 재시도 및 캐싱을 담당하는 메인 함수
+@st.cache_data(ttl=300) 
+def get_safe_price(code, category):
+    import time
+    max_retries = 3 # 최대 3번 시도
+    
+    for attempt in range(max_retries):
+        price = _fetch_price_raw(code, category)
+        
+        if price is not None:
+            return price # 성공하면 즉시 반환
+            
+        # 실패 시 처리
+        if attempt < max_retries - 1:
+            time.sleep(1) # 1초 대기 후 재시도
+        else:
+            # 마지막 시도까지 실패했을 때 (경고 메시지 출력)
+            # st.warning을 너무 많이 띄우면 지저분할 수 있으니, 필요하면 주석 처리 가능
+            # st.warning(f"⚠️ {code}: 현재 시세 조회 지연 (잠시 후 다시 시도됩니다)")
+            return None
+    return None
 
 def classify_asset(row):
     """종목명/코드를 기반으로 자산 유형 분류"""
@@ -581,6 +605,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
