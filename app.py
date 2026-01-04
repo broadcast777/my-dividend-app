@@ -267,6 +267,9 @@ def main():
                 # -------------------------------------------------------
                 # [탭 1] 자산 구성 및 달러 비중 분석
                 # -------------------------------------------------------
+                # -------------------------------------------------------
+                # [탭 1] 자산 구성 및 달러 비중 분석 (테이블 복구 완료)
+                # -------------------------------------------------------
                 with tab_analysis:
                     # 모바일 가독성을 위해 컬럼 비율 조정
                     chart_col, table_col = st.columns([1.2, 1]) 
@@ -274,11 +277,9 @@ def main():
                     # 1. 통화/자산 분류 로직
                     def classify_currency(row):
                         try:
-                            # 원본 데이터(df) 참조
                             target = df[df['pure_name'] == row['종목']].iloc[0]
                             hwan = str(target.get('환구분', ''))
                             bunryu = str(target.get('분류', ''))
-                            # 환노출, 달러, 직투, 해외 분류인 경우 달러 자산으로 간주
                             if any(k in hwan for k in ["환노출", "달러", "직투"]) or bunryu == "해외":
                                 return "🇺🇸 달러 자산"
                         except:
@@ -296,29 +297,41 @@ def main():
                         '종목': lambda x: ', '.join(x)
                     }).reset_index()
 
-                    # [차트] 도넛 차트 그리기
-                    donut = alt.Chart(asset_sum).mark_arc(innerRadius=60).encode(
-                        theta=alt.Theta("비중:Q"),
-                        color=alt.Color("자산유형:N", legend=alt.Legend(orient='bottom', title=None)), 
-                        tooltip=[
-                            alt.Tooltip("자산유형", title="유형"),
-                            alt.Tooltip("비중", format=".1f", title="비중(%)"), 
-                            alt.Tooltip("투자금액_만원", format=",d", title="금액(만원)"),
-                            alt.Tooltip("종목", title="포함종목")
-                        ]
-                    ).properties(height=300)
-                    
-                    st.altair_chart(donut, use_container_width=True)
-                    
-                    # [위젯] 달러 노출도 진행바
-                    st.divider()
-                    st.markdown(f"**🌐 달러 자산 노출도: `{usd_ratio:.1f}%`**")
-                    st.progress(usd_ratio / 100)
-                    
-                    if usd_ratio >= 50:
-                        st.caption("💡 포트폴리오의 절반 이상이 환율 변동에 영향을 받습니다.")
-                    else:
-                        st.caption("💡 원화 자산 중심의 안정적인 구성입니다.")
+                    # [왼쪽] 도넛 차트
+                    with chart_col:
+                        st.write("💎 **자산 유형 비중**")
+                        donut = alt.Chart(asset_sum).mark_arc(innerRadius=60).encode(
+                            theta=alt.Theta("비중:Q"),
+                            color=alt.Color("자산유형:N", legend=alt.Legend(orient='bottom', title=None)), 
+                            tooltip=[
+                                alt.Tooltip("자산유형", title="유형"),
+                                alt.Tooltip("비중", format=".1f", title="비중(%)"), 
+                                alt.Tooltip("투자금액_만원", format=",d", title="금액(만원)"),
+                                alt.Tooltip("종목", title="포함종목")
+                            ]
+                        ).properties(height=320)
+                        st.altair_chart(donut, use_container_width=True)
+
+                    # [오른쪽] 요약 테이블 및 달러 위젯 (여기가 누락됐었습니다!)
+                    with table_col:
+                        st.write("📋 **유형별 요약**")
+                        st.dataframe(asset_sum.sort_values('비중', ascending=False),
+                                     column_config={
+                                         "비중": st.column_config.NumberColumn(format="%d%%"),
+                                         "투자금액_만원": st.column_config.NumberColumn("투자금(만원)", format="%d"),
+                                         "종목": st.column_config.TextColumn("포함 종목", width="large")
+                                     },
+                                     hide_index=True, use_container_width=True)
+                        
+                        # 달러 노출도 위젯
+                        st.divider()
+                        st.markdown(f"**🌐 달러 자산 노출도: `{usd_ratio:.1f}%`**")
+                        st.progress(usd_ratio / 100)
+                        
+                        if usd_ratio >= 50:
+                            st.caption("💡 포트폴리오의 절반 이상이 환율 변동에 영향을 받습니다.")
+                        else:
+                            st.caption("💡 원화 자산 중심의 안정적인 구성입니다.")
 
                 # -------------------------------------------------------
                 # [탭 2] 복리 재투자 시뮬레이션 (입력창 이동 및 오해 방지)
@@ -562,6 +575,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
