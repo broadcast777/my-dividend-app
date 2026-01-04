@@ -357,7 +357,7 @@ def main():
 
             monthly_add_sim = st.number_input("💵 매월 추가 적립 (만원)", 0, 1000, 30, step=5, key="sim_add_money") * 10000
 
-            # 2. 복리 계산 로직
+            # 2. 복리 계산 로직 (스파크 제거 및 미래 배당금 계산 추가)
             months_sim = years_sim * 12
             current_bal = total_invest
             monthly_yld = avg_y / 100 / 12
@@ -366,27 +366,45 @@ def main():
             for m in range(months_sim + 1):
                 div_earned = current_bal * monthly_yld
                 actual_reinvest = div_earned * (reinvest_ratio / 100)
-                sim_data.append({"년차": round(m/12, 1), "자산총액": current_bal / 10000, "월수령액": div_earned / 10000})
+                
+                # 그래프용 데이터 (자산총액만!)
+                sim_data.append({
+                    "년차": m / 12, 
+                    "자산총액": current_bal / 10000,
+                    "실제월배당": div_earned  # 결과 카드 출력용
+                })
+                
+                # 원금 업데이트
                 current_bal += (actual_reinvest + monthly_add_sim)
 
             df_sim_chart = pd.DataFrame(sim_data)
 
-            # 3. 에어리어 차트 시각화
+            # 3. 에어리어 차트 시각화 (y축 고정으로 스파크 방지)
             chart_sim = alt.Chart(df_sim_chart).mark_area(
                 line={'color':'#0068c9'},
                 color=alt.Gradient(
                     gradient='linear',
-                    stops=[alt.GradientStop(color='white', offset=0), alt.GradientStop(color='#0068c9', offset=1)],
+                    stops=[alt.GradientStop(color='white', offset=0),
+                           alt.GradientStop(color='#0068c9', offset=1)],
                     x1=1, x2=1, y1=1, y2=0
                 )
             ).encode(
                 x=alt.X('년차:Q', title='투자 기간 (년)'),
-                y=alt.Y('자산총액:Q', title='자산 가치 (만원)'),
-                tooltip=[alt.Tooltip('년차', title='년차'), alt.Tooltip('자산총액', format=',.0f', title='자산(만원)')]
+                y=alt.Y('자산총액:Q', title='자산 가치 (만원)', stack=None), # stack=None이 핵심!
+                tooltip=[
+                    alt.Tooltip('년차:Q', format='.1f', title='년차'), 
+                    alt.Tooltip('자산총액:Q', format=',.0f', title='자산(만원)')
+                ]
             ).properties(height=280)
+            
             st.altair_chart(chart_sim, use_container_width=True)
 
-            # 4. 랜덤 실생활 비유 로직
+            # 4. 결과값 추출 (최종 시점)
+            final_row = df_sim_chart.iloc[-1]
+            final_assets_val = final_row['자산총액']
+            final_monthly_cash = final_row['실제월배당'] # 최종 시점의 월 배당금(세전)
+
+            # 랜덤 실생활 비유
             import random
             analogy_items = [
                 {"name": "☕ 스타벅스 아메리카노", "price": 4500, "unit": "잔"},
@@ -394,16 +412,19 @@ def main():
                 {"name": "🍗 황금올리브 치킨", "price": 23000, "unit": "마리"}
             ]
             selected_item = random.choice(analogy_items)
-            final_monthly_div = df_sim_chart.iloc[-1]['월수령액'] * 10000 * 0.846
-            item_count = int(final_monthly_div // selected_item['price'])
+            item_count = int((final_monthly_cash * 0.846) // selected_item['price']) # 세후 기준 비유
 
-            # 5. 토스 스타일 결과 카드
-            final_assets_val = df_sim_chart.iloc[-1]['자산총액']
+            # 5. 토스 스타일 결과 카드 (미래 배당금 액수 추가)
             st.markdown(f"""
                 <div style="background-color: #f8f9fa; padding: 25px; border-radius: 20px; border: 1px solid #e9ecef; text-align: center; margin-top: 10px;">
                     <p style="margin: 0; font-size: 0.95em; color: #666;">{years_sim}년 뒤 나의 예상 자산</p>
-                    <h1 style="margin: 10px 0; color: #0068c9; font-size: 2.2em;">약 {final_assets_val/10000:,.1f} 억원</h1>
-                    <p style="margin: 15px 0 0 0; font-size: 1em; color: #333; line-height: 1.5;">
+                    <h1 style="margin: 5px 0; color: #0068c9; font-size: 2.2em;">약 {final_assets_val/10000:,.1f} 억원</h1>
+                    <div style="background-color: #e7f3ff; display: inline-block; padding: 5px 15px; border-radius: 10px; margin-bottom: 15px;">
+                        <span style="color: #0068c9; font-weight: bold; font-size: 1.1em;">
+                            📅 월 예상 배당금: 약 {final_monthly_cash/10000:,.1f} 만원 (세전)
+                        </span>
+                    </div>
+                    <p style="margin: 5px 0 0 0; font-size: 1em; color: #333; line-height: 1.5;">
                         그때가 되면 매달 배당금만으로<br>
                         <b>{selected_item['name']} {item_count:,}{selected_item['unit']}</b>를 즐길 수 있어요! 🎊
                     </p>
@@ -554,6 +575,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
