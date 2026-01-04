@@ -206,12 +206,6 @@ def load_and_process_data(df_raw, is_admin=False):
 def main():
     st.title("💰 배당팽이 실시간 연배당률 대시보드")
 
-    # 데이터 로드
-    df_raw = load_stock_data_from_csv()
-    if df_raw.empty: st.stop()
-
-    def main():
-    st.title("💰 배당팽이 실시간 연배당률 대시보드")
 
     # 데이터 로드
     df_raw = load_stock_data_from_csv()
@@ -728,6 +722,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
