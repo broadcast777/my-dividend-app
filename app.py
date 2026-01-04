@@ -209,8 +209,41 @@ def main():
     # 데이터 로드
     df_raw = load_stock_data_from_csv()
     if df_raw.empty: st.stop()
+
+    def main():
+    st.title("💰 배당팽이 실시간 연배당률 대시보드")
+
+    # 데이터 로드
+    df_raw = load_stock_data_from_csv()
+    if df_raw.empty: st.stop()
     
-    is_admin = st.query_params.get("admin", "false").lower() == "true"
+    is_admin = False
+    
+    # URL 파라미터 체크
+    if st.query_params.get("admin", "false").lower() == "true":
+        import hashlib
+        
+        # 코랩에서 생성하신 해시값을 여기에 넣었습니다.
+        ADMIN_HASH = "c41b0bb392db368a44ce374151794850417b56c9786e3c482f825327c7153182"
+        
+        st.info("🔒 관리자 보안 인증이 필요합니다.")
+        # 비밀번호 입력창 (type="password"로 설정하여 별표로 표시됨)
+        password_input = st.text_input("관리자 비밀번호 입력", type="password")
+        
+        if password_input:
+            # 입력한 비번을 해시화해서 비교
+            if hashlib.sha256(password_input.encode()).hexdigest() == ADMIN_HASH:
+                is_admin = True
+                st.success("✅ 인증되었습니다. 관리자 모드를 시작합니다.")
+            else:
+                st.error("❌ 비밀번호가 틀렸습니다.")
+                st.stop()
+        else:
+            # 비밀번호를 입력하기 전까지는 아무것도 보여주지 않음
+            st.stop()
+
+       
+   
 
     with st.spinner('⚙️ 배당 데이터베이스 엔진 가동 중... 실시간 시세를 연동하고 있습니다.'):
         df = load_and_process_data(df_raw, is_admin=is_admin)
@@ -419,7 +452,7 @@ def main():
                         isa_type = st.radio("ISA 유형", ["일반형 (비과세 200만)", "서민형 (비과세 400만)"], horizontal=True, label_visibility="collapsed")
                         isa_exempt = 400 if "서민형" in isa_type else 200
                         if start_money > 20000000:
-                            st.warning(f"⚠️ 기존에 납입한 {start_money/10000:,.0f}만원은 ISA 총 한도(1억)에서 차감됩니다.")
+                            st.warning(f"⚠️ 기존에 선택한 {start_money/10000:,.0f}만원은 ISA 총 한도(1억)에서 차감됩니다.")
                     else:
                         if not is_over_100m:
                             st.caption("설정한 비율만큼만 재투자하고 나머지는 생활비로 씁니다.")
@@ -695,6 +728,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
