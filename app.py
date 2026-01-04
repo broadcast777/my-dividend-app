@@ -7,10 +7,7 @@ import yfinance as yf
 from datetime import datetime
 import pytz
 import altair as alt
-import time
 
-progress_placeholder = st.empty()
-status_placeholder = st.empty()
 
 # ==========================================
 # [1] 페이지 및 기본 설정
@@ -742,6 +739,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
