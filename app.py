@@ -71,7 +71,7 @@ def classify_asset(row):
     
     # 키워드 정의
     covered = ['커버드콜', 'COVERED CALL', '프리미엄', 'PREMIUM', '+10%', '옵션', 'OPTION', 'QYLD', 'JEPI', 'JEPQ', 'XYLD', 'RYLD', 'NVDY', 'TSLY', 'CONY', 'MSTY', 'ULTRA', 'QQQI', 'GPIQ', 'XYLG', 'QYLG', 'TLTW', 'SVOL']
-    bond = ['채권', '국채', 'BOND', '단기채', 'TREASURY', '하이일드', 'HIGH YIELD', 'PFF', '국제금', '골드', 'GOLD']
+    bond = ['채권', '국채', 'BOND', '단기채', 'TREASURY', '하이일드', 'HIGH YIELD', 'PFF', '국제금', '골드', 'GOLD', 'BIL', 'SHV', 'SGOV', 'T-BILL', 'TLT']
     
     # 1순위: 커버드콜 (혼합형이라도 커버드콜 전략이면 커버드콜로 분류)
     if any(k in name for k in covered) or any(k in symbol for k in covered): 
@@ -427,4 +427,5 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
