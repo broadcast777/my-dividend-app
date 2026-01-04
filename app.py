@@ -358,16 +358,29 @@ def main():
                         step=5, 
                         help="이 금액은 매월 원금에 추가되어 복리로 함께 굴러갑니다."
                     ) * 10000
-
-                    # 복리 계산 로직
+       
+                    # 2. 복리 계산 로직 (개선됨: 월초 적립 -> 당월 배당 반영)
                     months_sim = years_sim * 12
                     current_bal = total_invest
-                    monthly_yld = avg_y / 100 / 12
-                    sim_data = []
+                    monthly_yld = avg_y / 100 / 12 # 월 수익률
+                    
+                    # [중요] 0개월차(시작점) 데이터 미리 기록
+                    sim_data = [{
+                        "년차": 0,
+                        "자산총액": current_bal / 10000,
+                        "실제월배당": 0 # 시작 시점엔 배당 없음
+                    }]
 
-                    for m in range(months_sim + 1):
+                    for m in range(1, months_sim + 1):
+                        # [순서 변경 1] 월 적립금 먼저 투입 (스노우볼 가속)
+                        current_bal += monthly_add_sim
+                        
+                        # [순서 변경 2] 늘어난 자산 총액 기준으로 이번 달 배당금 계산
                         div_earned = current_bal * monthly_yld
+                        
+                        # [순서 변경 3] 재투자 실행
                         actual_reinvest = div_earned * (reinvest_ratio / 100)
+                        current_bal += actual_reinvest
                         
                         sim_data.append({
                             "년차": m / 12, 
@@ -561,3 +574,4 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
