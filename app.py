@@ -166,10 +166,19 @@ def main():
     if df_raw.empty: st.stop()
 
     with st.spinner('⚙️ 배당 데이터베이스 엔진 가동 중...'):
-    # 관리자 모드인지 먼저 확인
+        # 1. 관리자 여부 확인 (with 문 안으로 4칸 들여쓰기)
         is_admin = st.query_params.get("admin", "false").lower() == "true"
-    # 함수에 '관리자야!'라고 알려줌
-    df = load_and_process_data(df_raw, is_admin)
+
+        # 2. 배당률 계산 (현재가가 데이터에 이미 있다고 가정)
+        df['배당률'] = (df['연배당금'] / df['현재가']) * 100
+
+        # 3. 필터링 로직 (if와 else는 같은 세로 라인에 있어야 함)
+        if not is_admin:
+            # 관리자가 아닐 때만 2%~25% 사이만 보여줌
+            df = df[(df['배당률'] >= 2) & (df['배당률'] <= 25)]
+        else:
+            # 관리자면 필터 없이 다 보여줌
+            st.sidebar.success("관리자 모드로 접속 중입니다 (모든 종목 표시)")
 
     st.warning("⚠️ **투자 유의사항:** 본 대시보드의 연배당률은 과거 분배금 데이터를 기반으로 계산된 참고용 지표입니다. 실제 배당금은 운용사의 사정 및 시장 상황에 따라 매월 변동될 수 있습니다.")
 
@@ -422,6 +431,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
