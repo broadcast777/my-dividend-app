@@ -296,8 +296,7 @@ def main():
                             st.altair_chart(donut, use_container_width=True)
 
                         st.write("") # 간격
-
-                        # 2. 통화 비중 차트 (데이터가 있고, currency_sum이 유효할 때만)
+                       # [가장 안전한 긴급 처방 버전]
                         if 'currency_sum' in locals() and not currency_sum.empty:
                             st.write("🌐 **통화 노출 비중**")
                             c_donut = alt.Chart(currency_sum).mark_arc(innerRadius=60, cornerRadius=10).encode(
@@ -306,8 +305,7 @@ def main():
                                     domain=['🇰🇷 원화 자산', '🇺🇸 달러 자산'], 
                                     range=['#3182F6', '#00D084']
                                 )),
-                                tooltip=[alt.Tooltip("통화:N"), alt.Tooltip("비중:Q", format=".1f")],
-                                legend=alt.Legend(orient="bottom", title=None)
+                                tooltip=[alt.Tooltip("통화:N"), alt.Tooltip("비중:Q", format=".1f")]
                             ).properties(height=300)
                             st.altair_chart(c_donut, use_container_width=True)
 
@@ -466,6 +464,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
