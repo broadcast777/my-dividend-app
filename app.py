@@ -264,17 +264,30 @@ def main():
                 chart_col, table_col = st.columns([1, 1.2])
                 df_ana = pd.DataFrame(all_data)
                 
-                if not df_ana.empty:
-                    # 1. 통화 분류 및 비중 계산
-                    def classify_currency(row_name):
-                        target = df[df['pure_name'] == row_name].iloc[0]
-                        if target['분류'] == '해외' or "달러" in target['환구분']:
+            if not df_ana.empty:
+                    # [수정된 분류 로직] 종목명뿐만 아니라 '환구분' 데이터까지 샅샅이 뒤집니다.
+                    def classify_currency(row):
+                        # 1. 종목명에 (해외)가 있거나 자산유형이 해외주식인 경우
+                        if "(해외)" in row['종목'] or row['자산유형'] == '해외주식':
                             return "🇺🇸 달러 자산"
+                        
+                        # 2. 원본 데이터(df)의 '환구분' 컬럼에서 '환노출' 키워드 매칭
+                        try:
+                            # 현재 행의 종목명과 일치하는 원본 데이터 행을 찾음
+                            target = df[df['pure_name'] == row['종목']].iloc[0]
+                            hwan = str(target.get('환구분', '')) # 환구분 데이터 추출
+                            
+                            # '환노출' 혹은 '달러'라는 글자가 있으면 달러 자산으로 인정
+                            if "환노출" in hwan or "달러" in hwan:
+                                return "🇺🇸 달러 자산"
+                        except:
+                            pass
+                            
                         return "🇰🇷 원화 자산"
-
-                    df_ana['통화'] = df_ana['종목'].apply(classify_currency)
-                    # 달러 노출도 계산
+                    # 분류 실행
+                    df_ana['통화'] = df_ana.apply(classify_currency, axis=1)
                     usd_ratio = df_ana[df_ana['통화'] == "🇺🇸 달러 자산"]['비중'].sum()
+            
                     
                     asset_sum = df_ana.groupby('자산유형').agg({
                         '비중': 'sum', 
@@ -459,6 +472,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
