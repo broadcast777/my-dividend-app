@@ -7,6 +7,10 @@ import yfinance as yf
 from datetime import datetime
 import pytz
 import altair as alt
+import time
+
+progress_placeholder = st.empty()
+status_placeholder = st.empty()
 
 # ==========================================
 # [1] 페이지 및 기본 설정
@@ -240,6 +244,7 @@ def main():
    
 
     with st.spinner('⚙️ 배당 데이터베이스 엔진 가동 중... 실시간 시세를 연동하고 있습니다.'):
+        
         df = load_and_process_data(df_raw, is_admin=is_admin)
 
     if is_admin:
@@ -593,9 +598,10 @@ def main():
     # 섹션 4: 전체 데이터 테이블 출력
     # ------------------------------------------
     st.info("💡 **이동 안내:** '코드' 클릭 시 블로그 분석글로, '🔗정보' 클릭 시 네이버/야후 금융 정보로 이동합니다. (**⭐ 표시는 상장 1년 미만 종목입니다.**)")
-  
+       
+    # [수정] 모바일 가로 스크롤 적용된 테이블 렌더링 함수
     def render_custom_table(data_frame):
-        """데이터프레임을 HTML 테이블로 예쁘게 렌더링"""
+        """데이터프레임을 HTML 테이블로 예쁘게 렌더링 (모바일 스크롤 적용)"""
         html_rows = []
         for _, row in data_frame.iterrows():
             blog_link = str(row.get('블로그링크', '')).strip()
@@ -614,16 +620,34 @@ def main():
 
         st.markdown(f"""
         <style>
-            table {{ width:100% !important; border-collapse:collapse; font-size:14px; margin: 0 auto; }}
-            th {{ background:#f0f2f6; padding:12px 8px; border-bottom: 2px solid #ddd; text-align: center; }}
-            td {{ padding:10px 8px; border-bottom:1px solid #eee; text-align: center; }}
-            .name-cell {{ text-align: left !important; white-space: normal !important; min-width: 150px; }}
+            /* 모바일 대응: 표를 감싸는 컨테이너 스타일 */
+            .table-container {{
+                overflow-x: auto;  /* 가로 스크롤 허용 */
+                white-space: nowrap; /* 줄바꿈 방지 */
+                margin-bottom: 20px;
+                border: 1px solid #eee; /* 테두리 추가 */
+                border-radius: 8px;
+            }}
+            
+            table {{ 
+                width: 100%; 
+                border-collapse: collapse; 
+                font-size: 14px; 
+                min-width: 600px; /* 최소 너비 강제 (모바일에서 스크롤 유도) */
+            }}
+            th {{ background: #f0f2f6; padding: 12px 8px; border-bottom: 2px solid #ddd; text-align: center; }}
+            td {{ padding: 10px 8px; border-bottom: 1px solid #eee; text-align: center; }}
+            .name-cell {{ text-align: left !important; min-width: 120px; position: sticky; left: 0; background: white; z-index: 1; border-right: 1px solid #eee; }} /* 종목명 틀고정 */
         </style>
-        <table>
-            <thead><tr><th>코드</th><th style='text-align:left;'>종목명</th><th>현재가</th><th>연배당률</th><th>환구분</th><th>배당락일</th><th>네이버/야후</th></tr></thead>
-            <tbody>{''.join(html_rows)}</tbody>
-        </table>
+        
+        <div class="table-container">
+            <table>
+                <thead><tr><th>코드</th><th style='text-align:left; padding-left:10px;'>종목명</th><th>현재가</th><th>연배당률</th><th>환구분</th><th>배당락일</th><th>정보</th></tr></thead>
+                <tbody>{''.join(html_rows)}</tbody>
+            </table>
+        </div>
         """, unsafe_allow_html=True)
+   
 
     tab_all, tab_kor, tab_usa = st.tabs(["🌎 전체", "🇰🇷 국내", "🇺🇸 해외"])
 
@@ -722,6 +746,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
