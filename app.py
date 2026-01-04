@@ -167,7 +167,7 @@ def main():
 
     with st.spinner('⚙️ 배당 데이터베이스 엔진 가동 중...'):
     # 관리자 모드인지 먼저 확인
-    is_admin = st.query_params.get("admin", "false").lower() == "true"
+        is_admin = st.query_params.get("admin", "false").lower() == "true"
     # 함수에 '관리자야!'라고 알려줌
     df = load_and_process_data(df_raw, is_admin)
 
@@ -422,6 +422,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
