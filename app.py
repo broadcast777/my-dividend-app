@@ -259,67 +259,54 @@ def main():
                 ).properties(height=350)
                 st.altair_chart(chart, use_container_width=True)
 
+      
             with res_tab2:
-                chart_col, table_col = st.columns([1, 1.2])
+                # 상단에 요약 테이블 배치
                 df_ana = pd.DataFrame(all_data)
                 
                 if not df_ana.empty:
-                    # 1. 통화 분류 로직
+                    # 1. 통화 분류 및 비중 계산
                     def classify_currency(row_name):
                         target = df[df['pure_name'] == row_name].iloc[0]
                         if target['분류'] == '해외' or "달러" in target['환구분']:
-                            return "🇺🇸 달러 자산"
-                        return "🇰🇷 원화 자산"
+                            return "USD"
+                        return "KRW"
 
                     df_ana['통화'] = df_ana['종목'].apply(classify_currency)
-                    currency_sum = df_ana.groupby('통화')['비중'].sum().reset_index()
-
+                    # 달러(USD) 자산의 총 비중 합산
+                    usd_ratio = df_ana[df_ana['통화'] == "USD"]['비중'].sum()
+                    
+                    # 2. 유형별 요약 테이블 (상단 전체 너비 사용)
                     asset_sum = df_ana.groupby('자산유형').agg({
                         '비중': 'sum', 
                         '투자금액_만원': 'sum', 
                         '종목': lambda x: ', '.join(x)
                     }).reset_index()
 
-                    with chart_col:
-                        # 1. 자산 유형 차트 (데이터가 있을 때만)
-                        if not asset_sum.empty:
-                            st.write("💎 **자산 유형 비중**")
-                            donut = alt.Chart(asset_sum).mark_arc(innerRadius=60).encode(
-                                theta=alt.Theta("비중:Q"),
-                                color=alt.Color("자산유형:N", legend=None),
-                                tooltip=[
-                                    alt.Tooltip("자산유형:N"), 
-                                    alt.Tooltip("비중:Q", format=".1f", title="비중(%)"), 
-                                    alt.Tooltip("투자금액_만원:Q", format=",d", title="투자금(만원)")
-                                ]
-                            ).properties(height=300)
-                            st.altair_chart(donut, use_container_width=True)
+                    st.write("📋 **유형별 요약**")
+                    st.dataframe(asset_sum.sort_values('비중', ascending=False),
+                                 column_config={
+                                     "비중": st.column_config.NumberColumn(format="%d%%"),
+                                     "투자금액_만원": st.column_config.NumberColumn("투자금(만원)", format="%d"),
+                                     "종목": st.column_config.TextColumn("종목", width="large")
+                                 },
+                                 hide_index=True, width='stretch')
 
-                        st.write("") # 간격
-                       # [가장 안전한 긴급 처방 버전]
-                        if 'currency_sum' in locals() and not currency_sum.empty:
-                            st.write("🌐 **통화 노출 비중**")
-                            c_donut = alt.Chart(currency_sum).mark_arc(innerRadius=60, cornerRadius=10).encode(
-                                theta=alt.Theta("비중:Q"),
-                                color=alt.Color("통화:N", scale=alt.Scale(
-                                    domain=['🇰🇷 원화 자산', '🇺🇸 달러 자산'], 
-                                    range=['#3182F6', '#00D084']
-                                )),
-                                tooltip=[alt.Tooltip("통화:N"), alt.Tooltip("비중:Q", format=".1f")]
-                            ).properties(height=300)
-                            st.altair_chart(c_donut, use_container_width=True)
-
-                    with table_col:
-                        st.write("📋 **유형별 요약**")
-                        st.dataframe(asset_sum.sort_values('비중', ascending=False),
-                                     column_config={
-                                         "비중": st.column_config.NumberColumn(format="%d%%"),
-                                         "투자금액_만원": st.column_config.NumberColumn("투자금(만원)", format="%d"),
-                                         "종목": st.column_config.TextColumn("종목", width="large")
-                                     },
-                                     hide_index=True, use_container_width=True)
+                    # 3. 우측 하단 느낌의 달러 노출도 섹션
+                    st.markdown("---")
+                    col1, col2 = st.columns([2, 1])
+                    with col2: # 우측 배치
+                        st.subheader(f"🌐 달러 노출도: {usd_ratio:.1f}%")
+                        # 토스 스타일 파란색/초록색 진행 바
+                        st.progress(usd_ratio / 100)
+                        if usd_ratio > 50:
+                            st.caption("✅ 달러 자산 비중이 높아 환율 방어에 유리합니다.")
+                        else:
+                            st.caption("ℹ️ 원화 자산 위주의 포트폴리오입니다.")
                 else:
                     st.info("📊 종목을 선택하시면 자산 구성 분석이 나타납니다.")
+
+   
 
             st.error("""
             **⚠️ 시뮬레이션 활용 시 유의사항**
@@ -464,6 +451,7 @@ def main():
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
 
 
 
