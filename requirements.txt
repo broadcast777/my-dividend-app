@@ -9,5 +9,3 @@ altair
 streamlit-analytics2
 supabase
 mojito
-pycryptodome
-
