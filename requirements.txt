@@ -8,3 +8,4 @@ pytz
 altair
 streamlit-analytics2
 supabase
+mojito-public
