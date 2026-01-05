@@ -304,11 +304,67 @@ def main():
                         tax_msg = f"기납부 세금 {total_tax_paid_general/10000:,.0f}만원 (15.4% 원천징수)"
                         monthly_pocket = monthly_div_final * 0.846
 
+                    # -------------------------------------------------------
+                    # [수정됨] 레벨업 시스템 & 게이미피케이션 적용
+                    # -------------------------------------------------------
+                    
+                    # 1. 레벨 결정 로직 (사용자님 목표 반영: 30 / 50 / 100 / 166)
+                    monthly_manwon = monthly_pocket / 10000  # 만원 단위
+                    
+                    level_info = {
+                        "lv": 0, "name": "알 수 없음", "next_goal": 0, "desc": "", "color": "#gray"
+                    }
+
+                    if monthly_manwon < 30:
+                        level_info = {"lv": 1, "name": "🌱 배당 새싹", "next_goal": 30, "desc": "첫 목표인 월 30만 원을 향해!", "color": "#A8D5BA"}
+                    elif monthly_manwon < 50:
+                        level_info = {"lv": 2, "name": "🍗 치킨 대장 (단기 목표)", "next_goal": 50, "desc": "축하합니다! 단기 목표 달성!", "color": "#F9E79F"}
+                    elif monthly_manwon < 100:
+                        level_info = {"lv": 3, "name": "🛡️ 든든한 방패 (중기 목표)", "next_goal": 100, "desc": "월 50 돌파! 이제 든든한 중기 목표 달성입니다.", "color": "#AED6F1"}
+                    elif monthly_manwon < 166.6:
+                        level_info = {"lv": 4, "name": "🚀 경제적 자유 (장기 목표)", "next_goal": 166.6, "desc": "와... 월 100만 원! 진짜 부자의 길로 들어섰습니다.", "color": "#D7BDE2"}
+                    else:
+                        level_info = {"lv": 5, "name": "👑 세금의 제왕 (최종 졸업)", "next_goal": 99999, "desc": "연 배당 2,000만 원 돌파! 더 이상 이룰 게 없습니다. 존경합니다.", "color": "#F5B7B1"}
+
+                    # 2. 진행률 계산
+                    # 이전 단계 목표(prev_goal)를 0으로 잡거나, 구간별로 계산
+                    prev_goal = 0
+                    if level_info["lv"] == 2: prev_goal = 30
+                    elif level_info["lv"] == 3: prev_goal = 50
+                    elif level_info["lv"] == 4: prev_goal = 100
+                    elif level_info["lv"] == 5: prev_goal = 166.6
+                    
+                    if level_info["lv"] < 5:
+                        progress = (monthly_manwon - prev_goal) / (level_info["next_goal"] - prev_goal)
+                        progress = max(0.0, min(progress, 1.0)) # 0~1 사이로 제한
+                        progress_pct = int(progress * 100)
+                        next_msg = f"다음 레벨까지 **{(level_info['next_goal'] - monthly_manwon):,.1f}만원** 남음! ({progress_pct}%)"
+                    else:
+                        progress = 1.0
+                        next_msg = "🏆 최종 목표를 달성하셨습니다!"
+
+                    # 3. 비유 아이템 (기존 로직 유지)
                     import random
                     analogy_items = [{"name": "스타벅스", "unit": "잔", "price": 4500, "emoji": "☕"}, {"name": "치킨", "unit": "마리", "price": 23000, "emoji": "🍗"}, {"name": "제주도 항공권", "unit": "장", "price": 60000, "emoji": "✈️"}, {"name": "특급호텔 숙박", "unit": "박", "price": 200000, "emoji": "🏨"}]
                     selected_item = random.choice(analogy_items)
                     item_count = int(monthly_pocket // selected_item['price'])
 
+                    # 4. 결과 화면 출력 (HTML + Streamlit UI 조합)
+                    st.markdown(f"""
+                    <div style="background-color: #f8f9fa; border: 2px solid {level_info['color']}; border-radius: 15px; padding: 20px; text-align: center; margin-bottom: 20px;">
+                        <p style="color: #666; margin: 0; font-size: 0.9em;">현재 나의 배당 레벨</p>
+                        <h3 style="color: #333; margin: 5px 0; font-size: 1.8em;">{level_info['name']}</h3>
+                        <p style="color: #555; font-size: 0.95em;">"{level_info['desc']}"</p>
+                        <div style="margin: 15px 0;">
+                            <div style="background-color: #e9ecef; border-radius: 10px; height: 15px; width: 100%; overflow: hidden;">
+                                <div style="background-color: {level_info['color'].replace('#f8f9fa', '#007bff')}; width: {int(progress*100)}%; height: 100%; border-radius: 10px; transition: width 0.5s;"></div>
+                            </div>
+                            <p style="font-size: 0.8em; color: #888; margin-top: 5px;">{next_msg}</p>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                    # 기존의 파란색 결과 박스 (금액 보여주는 부분)
                     st.markdown(f"""<div style="background-color: #e7f3ff; border: 1.5px solid #d0e8ff; border-radius: 16px; padding: 25px; text-align: center; box-shadow: 0 4px 10px rgba(0,104,201,0.05);"><p style="color: #666; font-size: 0.95em; margin: 0 0 8px 0;">{years_sim}년 뒤 모이는 돈 (세후)</p><h2 style="color: #0068c9; font-size: 2.2em; margin: 0; font-weight: 800; line-height: 1.2;">약 {real_money/10000:,.0f}만원</h2><p style="color: #777; font-size: 0.9em; margin: 8px 0 0 0;">(투자원금 {final_principal/10000:,.0f}만원 / {tax_msg})</p><div style="height: 1px; background-color: #d0e8ff; margin: 25px auto; width: 85%;"></div><p style="color: #0068c9; font-weight: bold; font-size: 1.1em; margin: 0 0 12px 0;">📅 월 예상 배당금: {monthly_pocket/10000:,.1f}만원 (실수령)</p><div style="background-color: rgba(255,255,255,0.5); padding: 15px; border-radius: 12px; display: inline-block; min-width: 80%;"><p style="color: #333; font-size: 1.1em; margin: 0; line-height: 1.6;">매달 <b>{selected_item['emoji']} {selected_item['name']} {item_count:,}{selected_item['unit']}</b><br>마음껏 즐기기 가능! 😋</p></div></div>""", unsafe_allow_html=True)
                     
                     annual_div_income = monthly_div_final * 12
