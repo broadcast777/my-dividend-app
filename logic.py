@@ -84,7 +84,8 @@ def get_hedge_status(name, category):
     return "-"
 
 # 메인 가공 함수에서 캐시를 사용하되, 내부에서 broker를 생성
-@st.cache_data(ttl=600, show_spinner="데이터를 불러오는 중입니다...")
+# logic.py 수정
+@st.cache_data(ttl=600, show_spinner=False) # show_spinner를 False로 변경
 def load_and_process_data(df_raw, is_admin=False):
     if df_raw.empty: return pd.DataFrame()
     
