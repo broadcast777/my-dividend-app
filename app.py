@@ -21,45 +21,63 @@ supabase = create_client(URL, KEY)
 # [2] 메인 애플리케이션
 # ==========================================
 def main():
-    # --- [추가] 점검 모드 및 개발자 비밀 통로 로직 ---
-    is_dev_mode = st.query_params.get("dev", "false").lower() == "true"
-    MAINTENANCE_MODE = False  # 점검 끝내려면 False로 바꾸면 됨
+    # ---------------------------------------------------------
+    # [수정됨] 통합 관리자 인증 (URL 방식 제거 -> 사이드바 비번 통합)
+    # ---------------------------------------------------------
+    is_admin = False
+    
+    with st.sidebar:
+        st.header("🐌 메뉴 / 관리")
+        # 비밀번호 '1234' 입력 시 관리자 권한 부여
+        if st.text_input("🔐 관리자 접속", type="password", placeholder="비밀번호 입력") == "1234":
+            is_admin = True
+            st.success("관리자 모드 ON 🚀")
 
-    if MAINTENANCE_MODE and not is_dev_mode:
-        st.set_page_config(page_title="점검 중 - 배당팽이", page_icon="🚧") # 점검 시 타이틀 변경
-        st.title("🚧 시스템 정기 점검 중")
-        st.subheader("한투 API 연동 및 데이터 고도화 작업 중입니다.")
-        st.info("더 정확하고 빠른 실시간 시세 연동을 위해 시스템을 개선하고 있습니다. 잠시 후 다시 접속해 주세요!")
-        st.image("https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExNHJueGZ3bmZ3bmZ3bmZ3bmZ3bmZ3bmZ3bmZ3bmZ3bmZ3bmZ3JmVwPXYxX2ludGVybmFsX2dpZl9ieV9pZCZjdD1n/3o7TKMGpxVf7caSBa0/giphy.gif")
-        st.stop() # 일반인 접속 시 여기서 코드 실행 중단
-
-    # 여기서부터 기존 코드 시작 (is_dev_mode가 True면 이 아래가 실행됨)
-    if is_dev_mode:
-        st.sidebar.warning("🛠️ 현재 개발자 테스트 모드로 접속 중입니다.")
-        
     st.title("💰 배당팽이 실시간 연배당률 대시보드")
 
     # [logic.py 호출] 데이터 로드
     df_raw = logic.load_stock_data_from_csv()
     if df_raw.empty: st.stop()
     
-    is_admin = False
-    
-    # 관리자 로그인 로직
-    if st.query_params.get("admin", "false").lower() == "true":
-        ADMIN_HASH = "c41b0bb392db368a44ce374151794850417b56c9786e3c482f825327c7153182"
-        st.info("🔒 관리자 보안 인증이 필요합니다.")
-        password_input = st.text_input("관리자 비밀번호 입력", type="password")
-        
-        if password_input:
-            if hashlib.sha256(password_input.encode()).hexdigest() == ADMIN_HASH:
-                is_admin = True
-                st.success("✅ 인증되었습니다. 관리자 모드를 시작합니다.")
-            else:
-                st.error("❌ 비밀번호가 틀렸습니다.")
-                st.stop()
-        else:
-            st.stop()
+    # ---------------------------------------------------------
+    # [추가됨] 관리자 전용: 배당금 갱신 도구 (사이드바)
+    # ---------------------------------------------------------
+    if is_admin:
+        with st.sidebar:
+            st.markdown("---")
+            st.subheader("🛠️ 배당금 갱신 도구")
+            
+            target_stock = st.selectbox("갱신할 종목 선택", df_raw['종목명'].unique())
+            
+            if target_stock:
+                # 선택한 종목 정보 가져오기
+                row = df_raw[df_raw['종목명'] == target_stock].iloc[0]
+                cur_hist = row.get('배당기록', "")
+                cur_div = row.get('연배당금', 0)
+                cur_months = int(row.get('신규상장개월수', 0))
+
+                # 정보 표시
+                st.caption(f"현재 연배당금: {cur_div}원")
+                if cur_months > 0:
+                    st.warning(f"⭐ 신규 상장 {cur_months}개월차")
+                
+                # 입력 및 계산
+                new_div = st.number_input("이번 달 확정 배당금", value=0, step=10)
+                
+                if st.button("계산 실행"):
+                    new_total, new_hist = logic.update_dividend_rolling(cur_hist, new_div)
+                    
+                    st.success("계산 완료! 아래 내용을 CSV에 복사하세요.")
+                    st.code(new_hist, language="text")
+                    
+                    c1, c2 = st.columns(2)
+                    c1.metric("변경될 연배당금", new_total, delta=new_total-int(cur_div))
+                    
+                    if cur_months > 0:
+                        c2.metric("신규상장개월수 수정", cur_months + 1, "필수!")
+                        st.error(f"⚠️ 신규 종목입니다! '신규상장개월수'를 **{cur_months + 1}**로 수정하세요.")
+                    else:
+                        c2.metric("신규상장개월수", 0, "유지")
 
     # [logic.py 호출] 데이터 처리 및 크롤링
     with st.spinner('⚙️ 배당 데이터베이스 엔진 가동 중... 실시간 시세를 연동하고 있습니다.'):
@@ -267,8 +285,8 @@ def main():
                     annual_div_income = monthly_div_final * 12
                     if annual_div_income > 20000000: st.warning(f"🚨 **주의:** {years_sim}년 뒤 연간 배당금이 2,000만원을 초과하여 금융소득종합과세 대상이 될 수 있습니다.")
                     st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**\n1. 본 결과는 주가·환율 변동과 수수료 등을 제외하고, 현재 배당률로만 계산한 결과입니다.\n2. ISA 계좌의 비과세 한도 및 세율은 세법 개정에 따라 달라질 수 있습니다.\n3. 실제 배당금은 운용사의 공시 및 환율 상황에 따라 매월 달라질 수 있습니다.""")
-                     
-                   
+                      
+                    
 
     # ------------------------------------------
     # 섹션 4: 전체 데이터 테이블 출력
@@ -297,8 +315,9 @@ def main():
         if 'visited' not in st.session_state: st.session_state.visited = False
         if not st.session_state.visited:
             try:
-                is_admin = st.query_params.get("admin", "false").lower() == "true"
-                if not is_admin:
+                # [수정됨] 비밀번호 로그인이 아닌 URL admin 체크 로직은 사실상 무효화되지만 코드 유지
+                is_admin_query = st.query_params.get("admin", "false").lower() == "true"
+                if not is_admin_query:
                     from streamlit.web.server.websocket_headers import _get_websocket_headers
                     headers = _get_websocket_headers()
                     referer = headers.get("Referer", "Direct")
@@ -322,7 +341,8 @@ def main():
 
     track_visitors()
     
-    if st.query_params.get("admin", "false").lower() == "true":
+    # [수정됨] 기존 쿼리 파라미터 체크 -> 새로운 is_admin 변수 체크로 변경 (로그 확인용)
+    if is_admin:
         with st.expander("🛠️ 관리자 전용: 최근 유입 로그 (최근 5건)", expanded=False):
             try:
                 recent_logs = supabase.table("visit_logs").select("referer, created_at").order("created_at", desc=True).limit(5).execute()
