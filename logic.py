@@ -103,7 +103,10 @@ def load_and_process_data(df_raw, is_admin=False):
             
             raw_div = float(row.get('연배당금', 0))
             months = int(row.get('신규상장개월수', 0))
-            annual_div = (raw_div / months * 12) if months > 0 else raw_div
+            
+            # [수정 완료] 이제 CSV에 적힌 '연배당금'을 무조건 1년치로 믿고 그대로 씁니다.
+            annual_div = raw_div 
+            
             yield_val = (annual_div / price) * 100
             
             if not is_admin and (yield_val < 2.0 or yield_val > 25.0): return idx, None
