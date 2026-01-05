@@ -304,44 +304,7 @@ def main():
                         tax_msg = f"기납부 세금 {total_tax_paid_general/10000:,.0f}만원 (15.4% 원천징수)"
                         monthly_pocket = monthly_div_final * 0.846
 
-                    # -------------------------------------------------------
-                    # [수정됨] 레벨업 시스템 & 게이미피케이션 적용
-                    # -------------------------------------------------------
-                    
-                    # 1. 레벨 결정 로직 (사용자님 목표 반영: 30 / 50 / 100 / 166)
-                    monthly_manwon = monthly_pocket / 10000  # 만원 단위
-                    
-                    level_info = {
-                        "lv": 0, "name": "알 수 없음", "next_goal": 0, "desc": "", "color": "#gray"
-                    }
-
-                    if monthly_manwon < 30:
-                        level_info = {"lv": 1, "name": "🌱 배당 새싹", "next_goal": 30, "desc": "첫 목표인 월 30만 원을 향해!", "color": "#A8D5BA"}
-                    elif monthly_manwon < 50:
-                        level_info = {"lv": 2, "name": "🍗 치킨 대장 (단기 목표)", "next_goal": 50, "desc": "축하합니다! 단기 목표 달성!", "color": "#F9E79F"}
-                    elif monthly_manwon < 100:
-                        level_info = {"lv": 3, "name": "🛡️ 든든한 방패 (중기 목표)", "next_goal": 100, "desc": "월 50 돌파! 이제 든든한 중기 목표 달성입니다.", "color": "#AED6F1"}
-                    elif monthly_manwon < 166.6:
-                        level_info = {"lv": 4, "name": "🚀 경제적 자유 (장기 목표)", "next_goal": 166.6, "desc": "와... 월 100만 원! 진짜 부자의 길로 들어섰습니다.", "color": "#D7BDE2"}
-                    else:
-                        level_info = {"lv": 5, "name": "👑 세금의 제왕 (최종 졸업)", "next_goal": 99999, "desc": "연 배당 2,000만 원 돌파! 더 이상 이룰 게 없습니다. 존경합니다.", "color": "#F5B7B1"}
-
-                    # 2. 진행률 계산
-                    # 이전 단계 목표(prev_goal)를 0으로 잡거나, 구간별로 계산
-                    prev_goal = 0
-                    if level_info["lv"] == 2: prev_goal = 30
-                    elif level_info["lv"] == 3: prev_goal = 50
-                    elif level_info["lv"] == 4: prev_goal = 100
-                    elif level_info["lv"] == 5: prev_goal = 166.6
-                    
-                    if level_info["lv"] < 5:
-                        progress = (monthly_manwon - prev_goal) / (level_info["next_goal"] - prev_goal)
-                        progress = max(0.0, min(progress, 1.0)) # 0~1 사이로 제한
-                        progress_pct = int(progress * 100)
-                        next_msg = f"다음 레벨까지 **{(level_info['next_goal'] - monthly_manwon):,.1f}만원** 남음! ({progress_pct}%)"
-                    else:
-                        progress = 1.0
-                        next_msg = "🏆 최종 목표를 달성하셨습니다!"
+                   
 
                     # 3. 비유 아이템 (기존 로직 유지)
                     import random
