@@ -23,7 +23,7 @@ supabase = create_client(URL, KEY)
 def main():
     # --- [추가] 점검 모드 및 개발자 비밀 통로 로직 ---
     is_dev_mode = st.query_params.get("dev", "false").lower() == "true"
-    MAINTENANCE_MODE = True  # 점검 끝내려면 False로 바꾸면 됨
+    MAINTENANCE_MODE = False  # 점검 끝내려면 False로 바꾸면 됨
 
     if MAINTENANCE_MODE and not is_dev_mode:
         st.set_page_config(page_title="점검 중 - 배당팽이", page_icon="🚧") # 점검 시 타이틀 변경
