@@ -33,25 +33,25 @@ def main():
     # ---------------------------------------------------------
     # [1] 관리자 인증 (사이드바)
     # ---------------------------------------------------------
-  is_admin = False
-  if st.query_params.get("admin", "false").lower() == "true":
-    
-    # 기존 비밀번호의 해시값 
-    ADMIN_HASH = "c41b0bb392db368a44ce374151794850417b56c9786e3c482f825327c7153182"
-    
-    with st.sidebar:
-        st.header("🐌 메뉴 / 관리")
+    is_admin = False
+    if st.query_params.get("admin", "false").lower() == "true":
         
-        # 비밀번호 입력창
-        password_input = st.text_input("🔐 관리자 접속", type="password", placeholder="비밀번호 입력")
+        # 기존 비밀번호의 해시값 
+        ADMIN_HASH = "c41b0bb392db368a44ce374151794850417b56c9786e3c482f825327c7153182"
         
-        # 비밀번호 검증
-        if password_input:
-            if hashlib.sha256(password_input.encode()).hexdigest() == ADMIN_HASH:
-                is_admin = True
-                st.success("관리자 모드 ON 🚀")
-            else:
-                st.error("비밀번호 불일치")
+        with st.sidebar:
+            st.header("🐌 메뉴 / 관리")
+            
+            # 비밀번호 입력창
+            password_input = st.text_input("🔐 관리자 접속", type="password", placeholder="비밀번호 입력")
+            
+            # 비밀번호 검증
+            if password_input:
+                if hashlib.sha256(password_input.encode()).hexdigest() == ADMIN_HASH:
+                    is_admin = True
+                    st.success("관리자 모드 ON 🚀")
+                else:
+                    st.error("비밀번호 불일치")
 
     # ---------------------------------------------------------
     # [2] 점검 모드 가동 로직 (관리자가 아니면 여기서 멈춤)
@@ -343,20 +343,25 @@ def main():
             try:
                 # [수정] admin 쿼리가 없어야 방문자 카운팅
                 if st.query_params.get("admin", "false").lower() != "true":
-                    from streamlit.web.server.websocket_headers import _get_websocket_headers
-                    headers = _get_websocket_headers()
-                    referer = headers.get("Referer", "Direct")
-                    source_tag = st.query_params.get("source", referer)
-                    supabase.table("visit_logs").insert({"referer": source_tag}).execute()
-                    response = supabase.table("visit_counts").select("count").eq("id", 1).execute()
-                    if response.data:
-                        new_count = response.data[0]['count'] + 1
-                        supabase.table("visit_counts").update({"count": new_count}).eq("id", 1).execute()
-                        st.session_state.display_count = new_count
+                    if supabase:
+                        from streamlit.web.server.websocket_headers import _get_websocket_headers
+                        headers = _get_websocket_headers()
+                        referer = headers.get("Referer", "Direct")
+                        source_tag = st.query_params.get("source", referer)
+                        supabase.table("visit_logs").insert({"referer": source_tag}).execute()
+                        response = supabase.table("visit_counts").select("count").eq("id", 1).execute()
+                        if response.data:
+                            new_count = response.data[0]['count'] + 1
+                            supabase.table("visit_counts").update({"count": new_count}).eq("id", 1).execute()
+                            st.session_state.display_count = new_count
+                    else:
+                        st.session_state.display_count = "Local"
                 else:
-                    # 관리자가 쿼리로 들어오면 카운트 안 올리고 조회만
-                    response = supabase.table("visit_counts").select("count").eq("id", 1).execute()
-                    st.session_state.display_count = response.data[0]['count'] if response.data else "Admin"
+                    if supabase:
+                        response = supabase.table("visit_counts").select("count").eq("id", 1).execute()
+                        st.session_state.display_count = response.data[0]['count'] if response.data else "Admin"
+                    else:
+                        st.session_state.display_count = "Admin"
                 st.session_state.visited = True
             except Exception:
                 st.session_state.display_count = "확인 중"; st.session_state.visited = True
@@ -367,7 +372,7 @@ def main():
 
     track_visitors()
     
-    if is_admin:
+    if is_admin and supabase:
         with st.expander("🛠️ 관리자 전용: 최근 유입 로그 (최근 5건)", expanded=False):
             try:
                 recent_logs = supabase.table("visit_logs").select("referer, created_at").order("created_at", desc=True).limit(5).execute()
