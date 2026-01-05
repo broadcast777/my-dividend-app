@@ -221,7 +221,7 @@ def main():
                         if usd_ratio >= 50: st.caption("💡 포트폴리오의 절반 이상이 환율 변동에 영향을 받습니다.")
                         else: st.caption("💡 원화 자산 중심의 구성입니다.")
 
-                    # [탭 2] 적립식 시뮬레이션 (레벨업 제거 / 인플레이션 유지)
+                    # [탭 2] 적립식 시뮬레이션
                 with tab_simulation:
                     start_money = total_invest
                     is_over_100m = start_money > 100000000
@@ -238,7 +238,6 @@ def main():
                             else: st.caption("💡 **일반 모드:** 배당소득세(15.4%) 납부 후 재투자")
                     with c2:
                         years_sim = st.select_slider("⏳ 투자 기간", options=[3, 5, 10, 15, 20, 30], value=5, format_func=lambda x: f"{x}년")
-                        # [기능] 인플레이션 스위치
                         apply_inflation = st.toggle("📉 물가상승률(2.5%) 반영", value=False)
                     
                     reinvest_ratio = 100; isa_exempt = 0
@@ -289,7 +288,6 @@ def main():
                     line = base.mark_line(color='#ff9f43', strokeDash=[5,5]).encode(y='총원금:Q')
                     st.altair_chart((area + line).properties(height=280), use_container_width=True)
 
-                    # 결과 데이터 계산
                     final_row = df_sim_chart.iloc[-1]
                     final_asset = final_row['자산총액'] * 10000
                     final_principal = final_row['총원금'] * 10000
@@ -307,50 +305,35 @@ def main():
                         tax_msg = f"기납부 세금 {total_tax_paid_general/10000:,.0f}만원 (15.4% 원천징수)"
                         monthly_pocket = monthly_div_final * 0.846
 
-                    # -------------------------------------------------------
-                    # [기능] 인플레이션 반영 로직 (이것만 남김!)
-                    # -------------------------------------------------------
                     inflation_msg_money = ""
                     inflation_msg_monthly = ""
                     
                     if apply_inflation:
-                        discount_rate = (1.025) ** years_sim # 연 2.5% 가정
+                        discount_rate = (1.025) ** years_sim 
                         pv_money = real_money / discount_rate
                         pv_monthly = monthly_pocket / discount_rate
                         inflation_msg_money = f"<br><span style='font-size:0.6em; color:#ff6b6b;'>(현재가치: 약 {pv_money/10000:,.0f}만원)</span>"
                         inflation_msg_monthly = f"<span style='font-size:0.7em; color:#ff6b6b;'>(현재가치: {pv_monthly/10000:,.1f}만원)</span>"
 
-                              
-
-                    # -------------------------------------------------------
-                    # [유지] 랜덤 비유 아이템 (스타벅스/치킨)
-                    # -------------------------------------------------------
                     import random
                     analogy_items = [{"name": "스타벅스", "unit": "잔", "price": 4500, "emoji": "☕"}, {"name": "치킨", "unit": "마리", "price": 23000, "emoji": "🍗"}, {"name": "제주도 항공권", "unit": "장", "price": 60000, "emoji": "✈️"}, {"name": "특급호텔 숙박", "unit": "박", "price": 200000, "emoji": "🏨"}]
                     selected_item = random.choice(analogy_items)
                     item_count = int(monthly_pocket // selected_item['price'])
 
-                    # -------------------------------------------------------
-                    # [최종 출력] 결과 박스 (레벨업 카드 삭제됨)
-                    # -------------------------------------------------------
                     st.markdown(f"""<div style="background-color: #e7f3ff; border: 1.5px solid #d0e8ff; border-radius: 16px; padding: 25px; text-align: center; box-shadow: 0 4px 10px rgba(0,104,201,0.05);"><p style="color: #666; font-size: 0.95em; margin: 0 0 8px 0;">{years_sim}년 뒤 모이는 돈 (세후)</p><h2 style="color: #0068c9; font-size: 2.2em; margin: 0; font-weight: 800; line-height: 1.2;">약 {real_money/10000:,.0f}만원{inflation_msg_money}</h2><p style="color: #777; font-size: 0.9em; margin: 8px 0 0 0;">(투자원금 {final_principal/10000:,.0f}만원 / {tax_msg})</p><div style="height: 1px; background-color: #d0e8ff; margin: 25px auto; width: 85%;"></div><p style="color: #0068c9; font-weight: bold; font-size: 1.1em; margin: 0 0 12px 0;">📅 월 예상 배당금: {monthly_pocket/10000:,.1f}만원 {inflation_msg_monthly}</p><div style="background-color: rgba(255,255,255,0.5); padding: 15px; border-radius: 12px; display: inline-block; min-width: 80%;"><p style="color: #333; font-size: 1.1em; margin: 0; line-height: 1.6;">매달 <b>{selected_item['emoji']} {selected_item['name']} {item_count:,}{selected_item['unit']}</b><br>마음껏 즐기기 가능! 😋</p></div></div>""", unsafe_allow_html=True)
 
-                    # ... (위쪽 결과 박스 출력 코드 생략) ...
-
-                # [탭 2 전용] 연간 배당금 계산 및 경고
-                annual_div_income = monthly_div_final * 12
-                
-                # 1. 금융소득종합과세 경고
-                if annual_div_income > 20000000:
-                    st.warning(f"🚨 **주의:** {years_sim}년 뒤 연간 배당금이 2,000만원을 초과하여 금융소득종합과세 대상이 될 수 있습니다.")
-                
-                # 2. 공통 유의사항
-                st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**
+                    # [탭 2 전용] 연간 배당금 계산 및 경고
+                    annual_div_income = monthly_div_final * 12
+                    
+                    if annual_div_income > 20000000:
+                        st.warning(f"🚨 **주의:** {years_sim}년 뒤 연간 배당금이 2,000만원을 초과하여 금융소득종합과세 대상이 될 수 있습니다.")
+                    
+                    st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**
 1. 본 결과는 주가·환율 변동과 수수료 등을 제외하고, 현재 배당률로만 계산한 결과입니다.
 2. ISA 계좌의 비과세 한도 및 세율은 세법 개정에 따라 달라질 수 있습니다.
 3. 실제 배당금은 운용사의 공시 및 환율 상황에 따라 매월 달라질 수 있습니다.""")
-                     # [신규] 탭 3: 목표 배당 달성 계산기 (역산기)
-                # -------------------------------------------------------
+
+                # [탭 3] 목표 배당 달성 (역산기)
                 with tab_goal:
                     st.subheader("🎯 목표 배당금 역산기 (은퇴 시뮬레이터)")
                     st.write("원하는 월 배당금을 받기 위해 필요한 자산과 기간을 계산합니다.")
@@ -365,28 +348,22 @@ def main():
                         monthly_add_goal = st.number_input("매월 추가 적립 가능 금액 (만원)", min_value=0, value=150, step=10) * 10000
                         apply_inflation_goal = st.toggle("📈 목표치에 물가상승률 반영", value=False, help="미래의 300만원이 현재의 얼마 가치인지 고려하여 목표를 상향 조정합니다.")
 
-                    # 역산 로직 시작
-                    # 1. 필요 총 자산 계산 (세후 기준)
-                    # 공식: (목표금액 / 세후계수) / (평균배당률/12)
-                    tax_factor = 0.846 # 일반계좌 기준 (ISA 미적용 보수적 계산)
+                    tax_factor = 0.846 
                     required_asset_goal = (target_monthly_goal / tax_factor) / (avg_y / 100) * 12
                     
                     st.markdown("---")
                     
-                    # 2. 결과 출력 박스
                     c_res1, c_res2 = st.columns(2)
                     with c_res1:
                         st.metric("목표 달성 필요 자산", f"{required_asset_goal/100000000:,.2f} 억원")
                         st.caption(f"평균 배당률 {avg_y:.2f}% 및 세금 15.4% 적용 시")
                     
                     with c_res2:
-                        # 기간 계산 (복리 기반 반복문)
                         current_bal_goal = start_bal_goal
                         months_passed = 0
-                        max_months = 600 # 최대 50년 제한
+                        max_months = 600
                         
                         while current_bal_goal < required_asset_goal and months_passed < max_months:
-                            # 매달 적립 + 배당 재투자(전액 재투자 가정)
                             div_reinvest = current_bal_goal * (avg_y / 100 / 12) * tax_factor
                             current_bal_goal += monthly_add_goal + div_reinvest
                             months_passed += 1
@@ -398,7 +375,6 @@ def main():
                             remain_months_goal = months_passed % 12
                             st.metric("목표 달성까지 소요 기간", f"{years_goal}년 {remain_months_goal}개월")
                     
-                    # 3. 인플레이션 반영 시 경고 메시지
                     if apply_inflation_goal:
                         discount_factor = (1.025) ** (months_passed / 12)
                         real_value = target_monthly_goal / discount_factor
@@ -406,17 +382,13 @@ def main():
                         
                     st.info(f"💡 **팁:** 매달 **20만원**을 더 적립하면 달성 기간이 어떻게 변하는지 확인해 보세요!")
                     
-                    # ... (위쪽 목표 달성 결과 박스 출력 코드 생략) ...
+                    # [탭 3 전용] 목표 금액 기준 연간 배당금 계산
+                    target_annual_income = target_monthly_goal * 12
 
-                # [탭 3 전용] 목표 금액 기준 연간 배당금 계산
-                target_annual_income = target_monthly_goal * 12
+                    if target_annual_income > 20000000:
+                        st.warning(f"🚨 **현실적 조언:** 설정하신 목표(월 {target_monthly_goal/10000:,.0f}만원) 달성 시, 연 배당소득이 2,000만원을 넘어 **종합과세 대상**이 됩니다. 세금 전략이 필요합니다.")
 
-                # 1. 금융소득종합과세 경고 (목표 금액 기준)
-                if target_annual_income > 20000000:
-                    st.warning(f"🚨 **현실적 조언:** 설정하신 목표(월 {target_monthly_goal/10000:,.0f}만원) 달성 시, 연 배당소득이 2,000만원을 넘어 **종합과세 대상**이 됩니다. 세금 전략이 필요합니다.")
-
-                # 2. 공통 유의사항
-                st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**
+                    st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**
 1. 이 계산은 현재 시점의 평균 배당률이 미래에도 유지된다고 가정합니다.
 2. 물가상승률 반영 시, 미래의 화폐 가치는 현재보다 낮아질 수 있음을 유의하세요.
 3. ISA 한도 및 세법은 정책 변경에 따라 달라질 수 있습니다.""")
