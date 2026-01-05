@@ -190,7 +190,7 @@ def main():
             df_ana = pd.DataFrame(all_data)
             if not df_ana.empty:
                 st.write("")
-                tab_analysis, tab_simulation = st.tabs(["💎 자산 구성 분석", "💰 10년 뒤 자산 미리보기"])
+                tab_analysis, tab_simulation, tab_goal = st.tabs(["💎 자산 구성 분석", "💰 10년 뒤 자산 미리보기", "🎯 목표 배당 달성"])
                 
                 with tab_analysis:
                     chart_col, table_col = st.columns([1.2, 1])
@@ -319,6 +319,64 @@ def main():
                         pv_monthly = monthly_pocket / discount_rate
                         inflation_msg_money = f"<br><span style='font-size:0.6em; color:#ff6b6b;'>(현재가치: 약 {pv_money/10000:,.0f}만원)</span>"
                         inflation_msg_monthly = f"<span style='font-size:0.7em; color:#ff6b6b;'>(현재가치: {pv_monthly/10000:,.1f}만원)</span>"
+
+                    # -------------------------------------------------------
+                # [신규] 탭 3: 목표 배당 달성 계산기 (역산기)
+                # -------------------------------------------------------
+                with tab_goal:
+                    st.subheader("🎯 목표 배당금 역산기 (은퇴 시뮬레이터)")
+                    st.write("원하는 월 배당금을 받기 위해 필요한 자산과 기간을 계산합니다.")
+                    
+                    col_g1, col_g2 = st.columns(2)
+                    with col_g1:
+                        target_monthly_goal = st.number_input("목표 월 배당금 (만원, 세후)", min_value=10, value=300, step=10) * 10000
+                        use_start_money = st.checkbox("위에서 설정한 초기 자산을 포함하여 계산", value=True)
+                        start_bal_goal = total_invest if use_start_money else 0
+                        
+                    with col_g2:
+                        monthly_add_goal = st.number_input("매월 추가 적립 가능 금액 (만원)", min_value=0, value=150, step=10) * 10000
+                        apply_inflation_goal = st.toggle("📈 목표치에 물가상승률 반영", value=False, help="미래의 300만원이 현재의 얼마 가치인지 고려하여 목표를 상향 조정합니다.")
+
+                    # 역산 로직 시작
+                    # 1. 필요 총 자산 계산 (세후 기준)
+                    # 공식: (목표금액 / 세후계수) / (평균배당률/12)
+                    tax_factor = 0.846 # 일반계좌 기준 (ISA 미적용 보수적 계산)
+                    required_asset_goal = (target_monthly_goal / tax_factor) / (avg_y / 100) * 12
+                    
+                    st.markdown("---")
+                    
+                    # 2. 결과 출력 박스
+                    c_res1, c_res2 = st.columns(2)
+                    with c_res1:
+                        st.metric("목표 달성 필요 자산", f"{required_asset_goal/100000000:,.2f} 억원")
+                        st.caption(f"평균 배당률 {avg_y:.2f}% 및 세금 15.4% 적용 시")
+                    
+                    with c_res2:
+                        # 기간 계산 (복리 기반 반복문)
+                        current_bal_goal = start_bal_goal
+                        months_passed = 0
+                        max_months = 600 # 최대 50년 제한
+                        
+                        while current_bal_goal < required_asset_goal and months_passed < max_months:
+                            # 매달 적립 + 배당 재투자(전액 재투자 가정)
+                            div_reinvest = current_bal_goal * (avg_y / 100 / 12) * tax_factor
+                            current_bal_goal += monthly_add_goal + div_reinvest
+                            months_passed += 1
+                        
+                        if months_passed >= max_months:
+                            st.error("⚠️ 현재 적립액으로는 50년 내 달성이 어렵습니다. 적립금을 늘려보세요!")
+                        else:
+                            years_goal = months_passed // 12
+                            remain_months_goal = months_passed % 12
+                            st.metric("목표 달성까지 소요 기간", f"{years_goal}년 {remain_months_goal}개월")
+                    
+                    # 3. 인플레이션 반영 시 경고 메시지
+                    if apply_inflation_goal:
+                        discount_factor = (1.025) ** (months_passed / 12)
+                        real_value = target_monthly_goal / discount_factor
+                        st.warning(f"⚠️ **물가 반영 시:** {years_goal}년 뒤 {target_monthly_goal/10000:,.0f}만원의 실질 가치는 현재 기준 **약 {real_value/10000:,.1f}만원**입니다.")
+                        
+                    st.info(f"💡 **팁:** 매달 **20만원**을 더 적립하면 달성 기간이 어떻게 변하는지 확인해 보세요!")
 
                     # -------------------------------------------------------
                     # [유지] 랜덤 비유 아이템 (스타벅스/치킨)
