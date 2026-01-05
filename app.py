@@ -221,11 +221,12 @@ def main():
                         if usd_ratio >= 50: st.caption("💡 포트폴리오의 절반 이상이 환율 변동에 영향을 받습니다.")
                         else: st.caption("💡 원화 자산 중심의 구성입니다.")
 
-                # [탭 2] 적립식 시뮬레이션
+                    # [탭 2] 적립식 시뮬레이션 (레벨업 제거 / 인플레이션 유지)
                 with tab_simulation:
                     start_money = total_invest
                     is_over_100m = start_money > 100000000
                     st.info(f"📊 상단에서 설정한 **초기 자산 {start_money/10000:,.0f}만원**으로 시뮬레이션을 시작합니다.")
+                    
                     c1, c2 = st.columns([1.5, 1])
                     with c1:
                         if is_over_100m:
@@ -237,6 +238,7 @@ def main():
                             else: st.caption("💡 **일반 모드:** 배당소득세(15.4%) 납부 후 재투자")
                     with c2:
                         years_sim = st.select_slider("⏳ 투자 기간", options=[3, 5, 10, 15, 20, 30], value=5, format_func=lambda x: f"{x}년")
+                        # [기능] 인플레이션 스위치
                         apply_inflation = st.toggle("📉 물가상승률(2.5%) 반영", value=False)
                     
                     reinvest_ratio = 100; isa_exempt = 0
@@ -305,7 +307,9 @@ def main():
                         tax_msg = f"기납부 세금 {total_tax_paid_general/10000:,.0f}만원 (15.4% 원천징수)"
                         monthly_pocket = monthly_div_final * 0.846
 
-                    # [추가됨] 인플레이션 반영 로직
+                    # -------------------------------------------------------
+                    # [기능] 인플레이션 반영 로직 (이것만 남김!)
+                    # -------------------------------------------------------
                     inflation_msg_money = ""
                     inflation_msg_monthly = ""
                     
@@ -316,36 +320,23 @@ def main():
                         inflation_msg_money = f"<br><span style='font-size:0.6em; color:#ff6b6b;'>(현재가치: 약 {pv_money/10000:,.0f}만원)</span>"
                         inflation_msg_monthly = f"<span style='font-size:0.7em; color:#ff6b6b;'>(현재가치: {pv_monthly/10000:,.1f}만원)</span>"
 
-                   
-
-                    # 3. 비유 아이템 (기존 로직 유지)
+                    # -------------------------------------------------------
+                    # [유지] 랜덤 비유 아이템 (스타벅스/치킨)
+                    # -------------------------------------------------------
                     import random
                     analogy_items = [{"name": "스타벅스", "unit": "잔", "price": 4500, "emoji": "☕"}, {"name": "치킨", "unit": "마리", "price": 23000, "emoji": "🍗"}, {"name": "제주도 항공권", "unit": "장", "price": 60000, "emoji": "✈️"}, {"name": "특급호텔 숙박", "unit": "박", "price": 200000, "emoji": "🏨"}]
                     selected_item = random.choice(analogy_items)
                     item_count = int(monthly_pocket // selected_item['price'])
 
-                    # 4. 결과 화면 출력 (HTML + Streamlit UI 조합)
-                    st.markdown(f"""
-                    <div style="background-color: #f8f9fa; border: 2px solid {level_info['color']}; border-radius: 15px; padding: 20px; text-align: center; margin-bottom: 20px;">
-                        <p style="color: #666; margin: 0; font-size: 0.9em;">현재 나의 배당 레벨</p>
-                        <h3 style="color: #333; margin: 5px 0; font-size: 1.8em;">{level_info['name']}</h3>
-                        <p style="color: #555; font-size: 0.95em;">"{level_info['desc']}"</p>
-                        <div style="margin: 15px 0;">
-                            <div style="background-color: #e9ecef; border-radius: 10px; height: 15px; width: 100%; overflow: hidden;">
-                                <div style="background-color: {level_info['color'].replace('#f8f9fa', '#007bff')}; width: {int(progress*100)}%; height: 100%; border-radius: 10px; transition: width 0.5s;"></div>
-                            </div>
-                            <p style="font-size: 0.8em; color: #888; margin-top: 5px;">{next_msg}</p>
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-
-                    # 기존의 파란색 결과 박스 (금액 보여주는 부분)
-                    st.markdown(f"""<div style="background-color: #e7f3ff; border: 1.5px solid #d0e8ff; border-radius: 16px; padding: 25px; text-align: center; box-shadow: 0 4px 10px rgba(0,104,201,0.05);"><p style="color: #666; font-size: 0.95em; margin: 0 0 8px 0;">{years_sim}년 뒤 모이는 돈 (세후)</p><h2 style="color: #0068c9; font-size: 2.2em; margin: 0; font-weight: 800; line-height: 1.2;">약 {real_money/10000:,.0f}만원</h2><p style="color: #777; font-size: 0.9em; margin: 8px 0 0 0;">(투자원금 {final_principal/10000:,.0f}만원 / {tax_msg})</p><div style="height: 1px; background-color: #d0e8ff; margin: 25px auto; width: 85%;"></div><p style="color: #0068c9; font-weight: bold; font-size: 1.1em; margin: 0 0 12px 0;">📅 월 예상 배당금: {monthly_pocket/10000:,.1f}만원 (실수령)</p><div style="background-color: rgba(255,255,255,0.5); padding: 15px; border-radius: 12px; display: inline-block; min-width: 80%;"><p style="color: #333; font-size: 1.1em; margin: 0; line-height: 1.6;">매달 <b>{selected_item['emoji']} {selected_item['name']} {item_count:,}{selected_item['unit']}</b><br>마음껏 즐기기 가능! 😋</p></div></div>""", unsafe_allow_html=True)
+                    # -------------------------------------------------------
+                    # [최종 출력] 결과 박스 (레벨업 카드 삭제됨)
+                    # -------------------------------------------------------
+                    st.markdown(f"""<div style="background-color: #e7f3ff; border: 1.5px solid #d0e8ff; border-radius: 16px; padding: 25px; text-align: center; box-shadow: 0 4px 10px rgba(0,104,201,0.05);"><p style="color: #666; font-size: 0.95em; margin: 0 0 8px 0;">{years_sim}년 뒤 모이는 돈 (세후)</p><h2 style="color: #0068c9; font-size: 2.2em; margin: 0; font-weight: 800; line-height: 1.2;">약 {real_money/10000:,.0f}만원{inflation_msg_money}</h2><p style="color: #777; font-size: 0.9em; margin: 8px 0 0 0;">(투자원금 {final_principal/10000:,.0f}만원 / {tax_msg})</p><div style="height: 1px; background-color: #d0e8ff; margin: 25px auto; width: 85%;"></div><p style="color: #0068c9; font-weight: bold; font-size: 1.1em; margin: 0 0 12px 0;">📅 월 예상 배당금: {monthly_pocket/10000:,.1f}만원 {inflation_msg_monthly}</p><div style="background-color: rgba(255,255,255,0.5); padding: 15px; border-radius: 12px; display: inline-block; min-width: 80%;"><p style="color: #333; font-size: 1.1em; margin: 0; line-height: 1.6;">매달 <b>{selected_item['emoji']} {selected_item['name']} {item_count:,}{selected_item['unit']}</b><br>마음껏 즐기기 가능! 😋</p></div></div>""", unsafe_allow_html=True)
                     
                     annual_div_income = monthly_div_final * 12
                     if annual_div_income > 20000000: st.warning(f"🚨 **주의:** {years_sim}년 뒤 연간 배당금이 2,000만원을 초과하여 금융소득종합과세 대상이 될 수 있습니다.")
                     st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**\n1. 본 결과는 주가·환율 변동과 수수료 등을 제외하고, 현재 배당률로만 계산한 결과입니다.\n2. ISA 계좌의 비과세 한도 및 세율은 세법 개정에 따라 달라질 수 있습니다.\n3. 실제 배당금은 운용사의 공시 및 환율 상황에 따라 매월 달라질 수 있습니다.""")
-
+                     
     # ------------------------------------------
     # 섹션 4: 전체 데이터 테이블 출력
     # ------------------------------------------
