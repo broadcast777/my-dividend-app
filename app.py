@@ -24,14 +24,27 @@ def main():
     # ---------------------------------------------------------
     # [수정됨] 통합 관리자 인증 (URL 방식 제거 -> 사이드바 비번 통합)
     # ---------------------------------------------------------
+    # ---------------------------------------------------------
+    # [1] 통합 관리자 인증 (사이드바 + 해시 보안 적용 버전)
+    # ---------------------------------------------------------
     is_admin = False
     
     with st.sidebar:
         st.header("🐌 메뉴 / 관리")
-        # 비밀번호 '1234' 입력 시 관리자 권한 부여
-        if st.text_input("🔐 관리자 접속", type="password", placeholder="비밀번호 입력") == "1234":
-            is_admin = True
-            st.success("관리자 모드 ON 🚀")
+        
+        # 1. 비밀번호 입력 받기
+        password_input = st.text_input("🔐 관리자 접속", type="password", placeholder="비밀번호 입력")
+        
+        # 2. 기존에 쓰시던 해시값 (암호화된 비밀번호)
+        ADMIN_HASH = "c41b0bb392db368a44ce374151794850417b56c9786e3c482f825327c7153182"
+        
+        # 3. 입력한 비번을 암호화해서 비교
+        if password_input:
+            if hashlib.sha256(password_input.encode()).hexdigest() == ADMIN_HASH:
+                is_admin = True
+                st.success("관리자 모드 ON 🚀")
+            else:
+                st.error("비밀번호 불일치")
 
     st.title("💰 배당팽이 실시간 연배당률 대시보드")
 
