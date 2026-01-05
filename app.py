@@ -13,47 +13,54 @@ import ui
 # ==========================================
 st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
 
-URL = st.secrets["SUPABASE_URL"]
-KEY = st.secrets["SUPABASE_KEY"]
-supabase = create_client(URL, KEY)
+try:
+    URL = st.secrets["SUPABASE_URL"]
+    KEY = st.secrets["SUPABASE_KEY"]
+    supabase = create_client(URL, KEY)
+except:
+    st.error("Supabase 설정이 누락되었습니다.")
+    st.stop()
 
 # ==========================================
 # [2] 메인 애플리케이션
 # ==========================================
 def main():
     # ---------------------------------------------------------
-    # [수정됨] 통합 관리자 인증 (URL 방식 제거 -> 사이드바 비번 통합)
-    # ---------------------------------------------------------
-    # ---------------------------------------------------------
-    # [1] 통합 관리자 인증 (사이드바 + 해시 보안 적용 버전)
+    # [수정됨] 관리자 인증 로직 (URL에 ?admin=true 있을 때만 입력창 노출)
     # ---------------------------------------------------------
     is_admin = False
     
-    with st.sidebar:
-        st.header("🐌 메뉴 / 관리")
-        
-        # 1. 비밀번호 입력 받기
-        password_input = st.text_input("🔐 관리자 접속", type="password", placeholder="비밀번호 입력")
-        
-        # 2. 기존에 쓰시던 해시값 (암호화된 비밀번호)
-        ADMIN_HASH = "c41b0bb392db368a44ce374151794850417b56c9786e3c482f825327c7153182"
-        
-        # 3. 입력한 비번을 암호화해서 비교
-        if password_input:
-            if hashlib.sha256(password_input.encode()).hexdigest() == ADMIN_HASH:
-                is_admin = True
-                st.success("관리자 모드 ON 🚀")
-            else:
-                st.error("비밀번호 불일치")
-
-    st.title("💰 배당팽이 실시간 연배당률 대시보드")
+    # 1. URL에 admin=true가 있는지 먼저 확인
+    if st.query_params.get("admin", "false").lower() == "true":
+        with st.sidebar:
+            st.header("🐌 관리자 접속")
+            
+            # 2. 비밀번호 입력창 표시 (URL 파라미터가 있을 때만 보임)
+            ADMIN_HASH = "c41b0bb392db368a44ce374151794850417b56c9786e3c482f825327c7153182"
+            password_input = st.text_input("비밀번호", type="password", key="admin_pw")
+            
+            # 3. 비밀번호 검증
+            if password_input:
+                if hashlib.sha256(password_input.encode()).hexdigest() == ADMIN_HASH:
+                    is_admin = True
+                    st.success("인증 성공 🚀")
+                else:
+                    st.error("비밀번호 불일치")
+    
+    # ---------------------------------------------------------
+    # 메인 타이틀
+    # ---------------------------------------------------------
+    if is_admin:
+        st.title("💰 배당팽이 대시보드 (관리자 모드)")
+    else:
+        st.title("💰 배당팽이 실시간 연배당률 대시보드")
 
     # [logic.py 호출] 데이터 로드
     df_raw = logic.load_stock_data_from_csv()
     if df_raw.empty: st.stop()
     
     # ---------------------------------------------------------
-    # [추가됨] 관리자 전용: 배당금 갱신 도구 (사이드바)
+    # [관리자 전용] 배당금 갱신 도구 (인증 성공 시에만 보임)
     # ---------------------------------------------------------
     if is_admin:
         with st.sidebar:
@@ -63,41 +70,38 @@ def main():
             target_stock = st.selectbox("갱신할 종목 선택", df_raw['종목명'].unique())
             
             if target_stock:
-                # 선택한 종목 정보 가져오기
                 row = df_raw[df_raw['종목명'] == target_stock].iloc[0]
                 cur_hist = row.get('배당기록', "")
                 cur_div = row.get('연배당금', 0)
                 cur_months = int(row.get('신규상장개월수', 0))
 
-                # 정보 표시
-                st.caption(f"현재 연배당금: {cur_div}원")
+                st.caption(f"💰 연배당금: {cur_div}원")
                 if cur_months > 0:
                     st.warning(f"⭐ 신규 상장 {cur_months}개월차")
                 
-                # 입력 및 계산
                 new_div = st.number_input("이번 달 확정 배당금", value=0, step=10)
                 
                 if st.button("계산 실행"):
                     new_total, new_hist = logic.update_dividend_rolling(cur_hist, new_div)
                     
-                    st.success("계산 완료! 아래 내용을 CSV에 복사하세요.")
+                    st.success("완료! CSV에 복사하세요.")
                     st.code(new_hist, language="text")
                     
                     c1, c2 = st.columns(2)
-                    c1.metric("변경될 연배당금", new_total, delta=new_total-int(cur_div))
+                    c1.metric("수정 연배당금", new_total, delta=new_total-int(cur_div))
                     
                     if cur_months > 0:
-                        c2.metric("신규상장개월수 수정", cur_months + 1, "필수!")
-                        st.error(f"⚠️ 신규 종목입니다! '신규상장개월수'를 **{cur_months + 1}**로 수정하세요.")
+                        c2.metric("개월수 수정필요", cur_months + 1, "CSV 수정!")
+                        st.error(f"⚠️ 신규 종목! '신규상장개월수'를 **{cur_months + 1}**로 꼭 고치세요.")
                     else:
                         c2.metric("신규상장개월수", 0, "유지")
 
-    # [logic.py 호출] 데이터 처리 및 크롤링
-    with st.spinner('⚙️ 배당 데이터베이스 엔진 가동 중... 실시간 시세를 연동하고 있습니다.'):
+    # [logic.py 호출] 데이터 처리 (관리자면 필터링 해제)
+    with st.spinner('⚙️ 배당 데이터베이스 엔진 가동 중...'):
         df = logic.load_and_process_data(df_raw, is_admin=is_admin)
 
     if is_admin:
-        st.sidebar.success("✅ 관리자 모드: 필터링 없이 모든 종목을 표시합니다.")
+        st.sidebar.success("✅ 관리자 모드 작동 중")
     
     st.warning("⚠️ **투자 유의사항:** 본 대시보드의 연배당률은 과거 분배금 데이터를 기반으로 계산된 참고용 지표입니다.")
 
@@ -259,15 +263,9 @@ def main():
                     base = alt.Chart(df_sim_chart).encode(x=alt.X('년차:Q', title='경과 기간 (년)'))
                     area = base.mark_area(opacity=0.3, color='#0068c9').encode(y=alt.Y('자산총액:Q', title='자산 (만원)'))
                     line = base.mark_line(color='#ff9f43', strokeDash=[5,5]).encode(y='총원금:Q')
-
-                    # ---------------- [원복] 기존 디자인 (상하 배치) ----------------
-                    # 1. 그래프 출력
-                    base = alt.Chart(df_sim_chart).encode(x=alt.X('년차:Q', title='경과 기간 (년)'))
-                    area = base.mark_area(opacity=0.3, color='#0068c9').encode(y=alt.Y('자산총액:Q', title='자산 (만원)'))
-                    line = base.mark_line(color='#ff9f43', strokeDash=[5,5]).encode(y='총원금:Q')
                     st.altair_chart((area + line).properties(height=280), use_container_width=True)
 
-                    # 2. 결과 데이터 계산
+                    # 결과 데이터 계산
                     final_row = df_sim_chart.iloc[-1]
                     final_asset = final_row['자산총액'] * 10000
                     final_principal = final_row['총원금'] * 10000
@@ -290,16 +288,11 @@ def main():
                     selected_item = random.choice(analogy_items)
                     item_count = int(monthly_pocket // selected_item['price'])
 
-                    # 3. 결과 박스 출력 (HTML 스타일)
                     st.markdown(f"""<div style="background-color: #e7f3ff; border: 1.5px solid #d0e8ff; border-radius: 16px; padding: 25px; text-align: center; box-shadow: 0 4px 10px rgba(0,104,201,0.05);"><p style="color: #666; font-size: 0.95em; margin: 0 0 8px 0;">{years_sim}년 뒤 모이는 돈 (세후)</p><h2 style="color: #0068c9; font-size: 2.2em; margin: 0; font-weight: 800; line-height: 1.2;">약 {real_money/10000:,.0f}만원</h2><p style="color: #777; font-size: 0.9em; margin: 8px 0 0 0;">(투자원금 {final_principal/10000:,.0f}만원 / {tax_msg})</p><div style="height: 1px; background-color: #d0e8ff; margin: 25px auto; width: 85%;"></div><p style="color: #0068c9; font-weight: bold; font-size: 1.1em; margin: 0 0 12px 0;">📅 월 예상 배당금: {monthly_pocket/10000:,.1f}만원 (실수령)</p><div style="background-color: rgba(255,255,255,0.5); padding: 15px; border-radius: 12px; display: inline-block; min-width: 80%;"><p style="color: #333; font-size: 1.1em; margin: 0; line-height: 1.6;">매달 <b>{selected_item['emoji']} {selected_item['name']} {item_count:,}{selected_item['unit']}</b><br>마음껏 즐기기 가능! 😋</p></div></div>""", unsafe_allow_html=True)
-
-                        
                     
                     annual_div_income = monthly_div_final * 12
                     if annual_div_income > 20000000: st.warning(f"🚨 **주의:** {years_sim}년 뒤 연간 배당금이 2,000만원을 초과하여 금융소득종합과세 대상이 될 수 있습니다.")
                     st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**\n1. 본 결과는 주가·환율 변동과 수수료 등을 제외하고, 현재 배당률로만 계산한 결과입니다.\n2. ISA 계좌의 비과세 한도 및 세율은 세법 개정에 따라 달라질 수 있습니다.\n3. 실제 배당금은 운용사의 공시 및 환율 상황에 따라 매월 달라질 수 있습니다.""")
-                      
-                    
 
     # ------------------------------------------
     # 섹션 4: 전체 데이터 테이블 출력
@@ -309,7 +302,6 @@ def main():
     tab_all, tab_kor, tab_usa = st.tabs(["🌎 전체", "🇰🇷 국내", "🇺🇸 해외"])
 
     with tab_all:
-        # [ui.py 호출] 테이블 렌더링
         ui.render_custom_table(df)
     with tab_kor:
         ui.render_custom_table(df[df['분류'] == '국내'])
@@ -328,9 +320,8 @@ def main():
         if 'visited' not in st.session_state: st.session_state.visited = False
         if not st.session_state.visited:
             try:
-                # [수정됨] 비밀번호 로그인이 아닌 URL admin 체크 로직은 사실상 무효화되지만 코드 유지
-                is_admin_query = st.query_params.get("admin", "false").lower() == "true"
-                if not is_admin_query:
+                # [수정] admin 쿼리가 없어야 방문자 카운팅
+                if st.query_params.get("admin", "false").lower() != "true":
                     from streamlit.web.server.websocket_headers import _get_websocket_headers
                     headers = _get_websocket_headers()
                     referer = headers.get("Referer", "Direct")
@@ -342,6 +333,7 @@ def main():
                         supabase.table("visit_counts").update({"count": new_count}).eq("id", 1).execute()
                         st.session_state.display_count = new_count
                 else:
+                    # 관리자가 쿼리로 들어오면 카운트 안 올리고 조회만
                     response = supabase.table("visit_counts").select("count").eq("id", 1).execute()
                     st.session_state.display_count = response.data[0]['count'] if response.data else "Admin"
                 st.session_state.visited = True
@@ -354,7 +346,6 @@ def main():
 
     track_visitors()
     
-    # [수정됨] 기존 쿼리 파라미터 체크 -> 새로운 is_admin 변수 체크로 변경 (로그 확인용)
     if is_admin:
         with st.expander("🛠️ 관리자 전용: 최근 유입 로그 (최근 5건)", expanded=False):
             try:
