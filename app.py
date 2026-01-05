@@ -228,8 +228,9 @@ def main():
                     base = alt.Chart(df_sim_chart).encode(x=alt.X('년차:Q', title='경과 기간 (년)'))
                     area = base.mark_area(opacity=0.3, color='#0068c9').encode(y=alt.Y('자산총액:Q', title='자산 (만원)'))
                     line = base.mark_line(color='#ff9f43', strokeDash=[5,5]).encode(y='총원금:Q')
-                    st.altair_chart((area + line).properties(height=280), use_container_width=True)
 
+                    # ---------------- [수정 시작] 레이아웃 적용 구간 ----------------
+                    # 1. 계산 로직을 먼저 수행 (오른쪽 컬럼에 수치를 띄우기 위함)
                     final_row = df_sim_chart.iloc[-1]
                     final_asset = final_row['자산총액'] * 10000
                     final_principal = final_row['총원금'] * 10000
@@ -252,7 +253,39 @@ def main():
                     selected_item = random.choice(analogy_items)
                     item_count = int(monthly_pocket // selected_item['price'])
 
-                    st.markdown(f"""<div style="background-color: #e7f3ff; border: 1.5px solid #d0e8ff; border-radius: 16px; padding: 25px; text-align: center; box-shadow: 0 4px 10px rgba(0,104,201,0.05);"><p style="color: #666; font-size: 0.95em; margin: 0 0 8px 0;">{years_sim}년 뒤 모이는 돈 (세후)</p><h2 style="color: #0068c9; font-size: 2.2em; margin: 0; font-weight: 800; line-height: 1.2;">약 {real_money/10000:,.0f}만원</h2><p style="color: #777; font-size: 0.9em; margin: 8px 0 0 0;">(투자원금 {final_principal/10000:,.0f}만원 / {tax_msg})</p><div style="height: 1px; background-color: #d0e8ff; margin: 25px auto; width: 85%;"></div><p style="color: #0068c9; font-weight: bold; font-size: 1.1em; margin: 0 0 12px 0;">📅 월 예상 배당금: {monthly_pocket/10000:,.1f}만원 (실수령)</p><div style="background-color: rgba(255,255,255,0.5); padding: 15px; border-radius: 12px; display: inline-block; min-width: 80%;"><p style="color: #333; font-size: 1.1em; margin: 0; line-height: 1.6;">매달 <b>{selected_item['emoji']} {selected_item['name']} {item_count:,}{selected_item['unit']}</b><br>마음껏 즐기기 가능! 😋</p></div></div>""", unsafe_allow_html=True)
+                    # 2. 화면 분할 (왼쪽: 그래프 1.5 / 오른쪽: 결과 1)
+                    col_chart, col_result = st.columns([1.5, 1], gap="medium")
+
+                    with col_chart:
+                        st.markdown("##### 📈 자산 성장 그래프")
+                        # 그래프 높이를 조금 조절하여 비율을 맞춤
+                        st.altair_chart((area + line).properties(height=350), use_container_width=True)
+
+                    with col_result:
+                        st.markdown("##### 📊 5년 뒤 예상 결과")
+                        with st.container(border=True):
+                            # 자산 결과
+                            st.metric(
+                                label=f"모이는 돈 (세후)",
+                                value=f"{real_money/10000:,.0f}만원",
+                                delta=f"투자원금 {final_principal/10000:,.0f}만원"
+                            )
+                            st.caption(f"({tax_msg})")
+                            
+                            st.divider() # 구분선
+                            
+                            # 월 배당 결과
+                            st.metric(
+                                label="월 예상 배당금 (실수령)",
+                                value=f"{monthly_pocket/10000:,.1f}만원",
+                                delta=f"매달 {selected_item['name']} {item_count} {selected_item['unit']}!"
+                            )
+                            st.caption(f"마음껏 즐기기 가능! {selected_item['emoji']}")
+                    # ---------------- [수정 끝] ----------------
+
+
+
+
                     
                     annual_div_income = monthly_div_final * 12
                     if annual_div_income > 20000000: st.warning(f"🚨 **주의:** {years_sim}년 뒤 연간 배당금이 2,000만원을 초과하여 금융소득종합과세 대상이 될 수 있습니다.")
