@@ -8,4 +8,4 @@ pytz
 altair
 streamlit-analytics2
 supabase
-mojito
+git+https://github.com/sharebook-kr/mojito.git
