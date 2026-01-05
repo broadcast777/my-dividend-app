@@ -74,7 +74,7 @@ def main():
     if is_admin:
         st.title("💰 배당팽이 대시보드 (관리자 모드)")
     else:
-        st.title("💰 배당팽이 실시간 연배당률 대시보드")
+        st.title("💰 배당팽이 월배당 계산기")
 
     # [logic.py 호출] 데이터 로드
     df_raw = logic.load_stock_data_from_csv()
