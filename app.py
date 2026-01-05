@@ -237,6 +237,7 @@ def main():
                             else: st.caption("💡 **일반 모드:** 배당소득세(15.4%) 납부 후 재투자")
                     with c2:
                         years_sim = st.select_slider("⏳ 투자 기간", options=[3, 5, 10, 15, 20, 30], value=5, format_func=lambda x: f"{x}년")
+                        apply_inflation = st.toggle("📉 물가상승률(2.5%) 반영", value=False)
                     
                     reinvest_ratio = 100; isa_exempt = 0
                     if is_isa_mode:
@@ -303,6 +304,17 @@ def main():
                         real_money = final_asset
                         tax_msg = f"기납부 세금 {total_tax_paid_general/10000:,.0f}만원 (15.4% 원천징수)"
                         monthly_pocket = monthly_div_final * 0.846
+
+                    # [추가됨] 인플레이션 반영 로직
+                    inflation_msg_money = ""
+                    inflation_msg_monthly = ""
+                    
+                    if apply_inflation:
+                        discount_rate = (1.025) ** years_sim # 연 2.5% 가정
+                        pv_money = real_money / discount_rate
+                        pv_monthly = monthly_pocket / discount_rate
+                        inflation_msg_money = f"<br><span style='font-size:0.6em; color:#ff6b6b;'>(현재가치: 약 {pv_money/10000:,.0f}만원)</span>"
+                        inflation_msg_monthly = f"<span style='font-size:0.7em; color:#ff6b6b;'>(현재가치: {pv_monthly/10000:,.1f}만원)</span>"
 
                    
 
