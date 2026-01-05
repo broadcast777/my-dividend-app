@@ -21,6 +21,22 @@ supabase = create_client(URL, KEY)
 # [2] 메인 애플리케이션
 # ==========================================
 def main():
+    # --- [추가] 점검 모드 및 개발자 비밀 통로 로직 ---
+    is_dev_mode = st.query_params.get("dev", "false").lower() == "true"
+    MAINTENANCE_MODE = True  # 점검 끝내려면 False로 바꾸면 됨
+
+    if MAINTENANCE_MODE and not is_dev_mode:
+        st.set_page_config(page_title="점검 중 - 배당팽이", page_icon="🚧") # 점검 시 타이틀 변경
+        st.title("🚧 시스템 정기 점검 중")
+        st.subheader("한투 API 연동 및 데이터 고도화 작업 중입니다.")
+        st.info("더 정확하고 빠른 실시간 시세 연동을 위해 시스템을 개선하고 있습니다. 잠시 후 다시 접속해 주세요!")
+        st.image("https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExNHJueGZ3bmZ3bmZ3bmZ3bmZ3bmZ3bmZ3bmZ3bmZ3bmZ3bmZ3JmVwPXYxX2ludGVybmFsX2dpZl9ieV9pZCZjdD1n/3o7TKMGpxVf7caSBa0/giphy.gif")
+        st.stop() # 일반인 접속 시 여기서 코드 실행 중단
+
+    # 여기서부터 기존 코드 시작 (is_dev_mode가 True면 이 아래가 실행됨)
+    if is_dev_mode:
+        st.sidebar.warning("🛠️ 현재 개발자 테스트 모드로 접속 중입니다.")
+        
     st.title("💰 배당팽이 실시간 연배당률 대시보드")
 
     # [logic.py 호출] 데이터 로드
