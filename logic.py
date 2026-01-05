@@ -5,7 +5,7 @@ from bs4 import BeautifulSoup
 import yfinance as yf
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
-import mojito # 한투 API 라이브러리
+import mojito 
 
 # --- 1. 기본 데이터 로드 (기존 유지) ---
 @st.cache_data(ttl=600)
@@ -21,12 +21,11 @@ def load_stock_data_from_csv():
             continue
     return pd.DataFrame()
 
-# --- 2. 시세 조회 로직 (broker 인자 전달 흐름 수정) ---
+# --- 2. 시세 조회 로직 ---
 def _fetch_price_raw(broker, code, category):
     try:
         code_str = str(code).strip()
         
-        # [해외 주식] 기존 yfinance 로직
         if category == '해외':
             ticker = yf.Ticker(code_str)
             price = ticker.fast_info.get('last_price')
@@ -37,28 +36,29 @@ def _fetch_price_raw(broker, code, category):
             return float(price) if price else None
         
         # [국내 주식] 한투 API 사용
+        # 멀티스레드 환경에서 안전하게 응답 확인
         resp = broker.fetch_price(code_str)
-        if resp and 'output' in resp and resp['output']['stck_prpr']:
-            return int(resp['output']['stck_prpr'])
+        if resp and isinstance(resp, dict) and 'output' in resp:
+            if resp['output'] and 'stck_prpr' in resp['output']:
+                return int(resp['output']['stck_prpr'])
         return None
         
     except Exception:
         return None
 
-# [수정] broker 인자 추가 및 전달
-@st.cache_data(ttl=300) 
+# [수정] broker 같은 객체가 포함된 함수에는 cache_data를 쓰지 않거나, 
+# broker를 인자에서 제외해야 합니다. 여기서는 캐시를 제거하여 안정성을 높입니다.
 def get_safe_price(broker, code, category):
-    max_retries = 3
+    max_retries = 2
     for attempt in range(max_retries):
-        # broker 전달
         price = _fetch_price_raw(broker, code, category)
         if price is not None:
             return price
         if attempt < max_retries - 1:
-            time.sleep(1)
+            time.sleep(0.5) # 대기 시간 단축
     return None
 
-# --- 3. 자산 분류 및 데이터 가공 (기존 로직 100% 유지) ---
+# --- 3. 자산 분류 및 데이터 가공 ---
 def classify_asset(row):
     name = str(row.get('종목명', '')).upper()
     symbol = str(row.get('종목코드', '')).upper()
@@ -83,27 +83,31 @@ def get_hedge_status(name, category):
     if any(x in name_str for x in ['미국', 'GLOBAL', 'S&P500', '나스닥', '빅테크', '국제금', '골드', 'GOLD']): return "⚡환노출"
     return "-"
 
-@st.cache_data(ttl=600, show_spinner=False)
+# 메인 가공 함수에서 캐시를 사용하되, 내부에서 broker를 생성
+@st.cache_data(ttl=600, show_spinner="데이터를 불러오는 중입니다...")
 def load_and_process_data(df_raw, is_admin=False):
     if df_raw.empty: return pd.DataFrame()
+    
+    # [인증] 여기서 단 한 번만 생성
+    try:
+        broker = mojito.KoreaInvestment(
+            api_key=st.secrets["kis"]["app_key"],
+            api_secret=st.secrets["kis"]["app_secret"],
+            acc_no=st.secrets["kis"]["acc_no"],
+            mock=True
+        )
+    except Exception as e:
+        st.error(f"API 인증 실패: {e}")
+        return pd.DataFrame()
+
     results = [None] * len(df_raw)
     
-    # [추가] 한투 API 연결 (Secret 사용)
-    broker = mojito.KoreaInvestment(
-        api_key=st.secrets["kis"]["app_key"],
-        api_secret=st.secrets["kis"]["app_secret"],
-        acc_no=st.secrets["kis"]["acc_no"],
-        mock=True
-    )
-    
-    # [수정] process_row 함수가 broker를 받도록 변경
-    def process_row(idx, row, broker):
+    def process_row(idx, row):
         try:
             code = str(row.get('종목코드', '')).strip()
             name = str(row.get('종목명', '')).strip()
             category = str(row.get('분류', '국내')).strip()
             
-            # [수정] broker 전달
             price = get_safe_price(broker, code, category)
             
             if not price: return idx, None
@@ -135,12 +139,13 @@ def load_and_process_data(df_raw, is_admin=False):
         except Exception:
             return idx, None
 
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        # [수정] process_row 호출 시 broker 전달
-        futures = {executor.submit(process_row, idx, row, broker): idx for idx, row in df_raw.iterrows()}
+    # 너무 많은 worker는 한투 서버에서 차단될 수 있으므로 4~5개 권장
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(process_row, idx, row): idx for idx, row in df_raw.iterrows()}
         for future in as_completed(futures):
             idx, result = future.result()
             results[idx] = result
 
     final_data = [r for r in results if r is not None]
+    if not final_data: return pd.DataFrame()
     return pd.DataFrame(final_data).sort_values('연배당률', ascending=False)
