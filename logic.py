@@ -5,8 +5,9 @@ from bs4 import BeautifulSoup
 import yfinance as yf
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
+import mojito # 한투 API 라이브러리
 
-# --- 1. 기본 데이터 로드 ---
+# --- 1. 기본 데이터 로드 (기존 유지) ---
 @st.cache_data(ttl=600)
 def load_stock_data_from_csv():
     url = "https://raw.githubusercontent.com/broadcast777/my-dividend-app/main/stocks.csv"
@@ -20,10 +21,12 @@ def load_stock_data_from_csv():
             continue
     return pd.DataFrame()
 
-# --- 2. 시세 조회 로직 (재시도 포함) ---
-def _fetch_price_raw(code, category):
+# --- 2. 시세 조회 로직 (broker 인자 전달 흐름 수정) ---
+def _fetch_price_raw(broker, code, category):
     try:
         code_str = str(code).strip()
+        
+        # [해외 주식] 기존 yfinance 로직
         if category == '해외':
             ticker = yf.Ticker(code_str)
             price = ticker.fast_info.get('last_price')
@@ -33,27 +36,29 @@ def _fetch_price_raw(code, category):
                     price = hist['Close'].iloc[-1]
             return float(price) if price else None
         
-        # 국내 주식
-        url = f"https://finance.naver.com/item/main.naver?code={code_str}"
-        res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=3)
-        soup = BeautifulSoup(res.text, 'html.parser')
-        no_today = soup.select_one(".no_today .blind")
-        return int(no_today.text.replace(",", "")) if no_today else None
+        # [국내 주식] 한투 API 사용
+        resp = broker.fetch_price(code_str)
+        if resp and 'output' in resp and resp['output']['stck_prpr']:
+            return int(resp['output']['stck_prpr'])
+        return None
+        
     except Exception:
         return None
 
+# [수정] broker 인자 추가 및 전달
 @st.cache_data(ttl=300) 
-def get_safe_price(code, category):
+def get_safe_price(broker, code, category):
     max_retries = 3
     for attempt in range(max_retries):
-        price = _fetch_price_raw(code, category)
+        # broker 전달
+        price = _fetch_price_raw(broker, code, category)
         if price is not None:
             return price
         if attempt < max_retries - 1:
             time.sleep(1)
     return None
 
-# --- 3. 자산 분류 및 데이터 가공 ---
+# --- 3. 자산 분류 및 데이터 가공 (기존 로직 100% 유지) ---
 def classify_asset(row):
     name = str(row.get('종목명', '')).upper()
     symbol = str(row.get('종목코드', '')).upper()
@@ -83,12 +88,23 @@ def load_and_process_data(df_raw, is_admin=False):
     if df_raw.empty: return pd.DataFrame()
     results = [None] * len(df_raw)
     
-    def process_row(idx, row):
+    # [추가] 한투 API 연결 (Secret 사용)
+    broker = mojito.KoreaInvestment(
+        api_key=st.secrets["kis"]["app_key"],
+        api_secret=st.secrets["kis"]["app_secret"],
+        acc_no=st.secrets["kis"]["acc_no"],
+        mock=True
+    )
+    
+    # [수정] process_row 함수가 broker를 받도록 변경
+    def process_row(idx, row, broker):
         try:
             code = str(row.get('종목코드', '')).strip()
             name = str(row.get('종목명', '')).strip()
             category = str(row.get('분류', '국내')).strip()
-            price = get_safe_price(code, category)
+            
+            # [수정] broker 전달
+            price = get_safe_price(broker, code, category)
             
             if not price: return idx, None
             
@@ -120,7 +136,8 @@ def load_and_process_data(df_raw, is_admin=False):
             return idx, None
 
     with ThreadPoolExecutor(max_workers=8) as executor:
-        futures = {executor.submit(process_row, idx, row): idx for idx, row in df_raw.iterrows()}
+        # [수정] process_row 호출 시 broker 전달
+        futures = {executor.submit(process_row, idx, row, broker): idx for idx, row in df_raw.iterrows()}
         for future in as_completed(futures):
             idx, result = future.result()
             results[idx] = result
