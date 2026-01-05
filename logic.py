@@ -35,13 +35,43 @@ def _fetch_price_raw(broker, code, category):
                     price = hist['Close'].iloc[-1]
             return float(price) if price else None
         
-        # [국내 주식] 한투 API 사용
-        # 멀티스레드 환경에서 안전하게 응답 확인
-        resp = broker.fetch_price(code_str)
-        if resp and isinstance(resp, dict) and 'output' in resp:
-            if resp['output'] and 'stck_prpr' in resp['output']:
-                return int(resp['output']['stck_prpr'])
-        return None
+        def _fetch_price_raw(broker, code, category):
+    try:
+        code_str = str(code).strip()
+        
+        # --- [1단계] 국내 종목: 한투 API 우선 시도 ---
+        if category == '국내':
+            try:
+                resp = broker.fetch_price(code_str)
+                if resp and isinstance(resp, dict) and 'output' in resp:
+                    if resp['output'] and resp['output'].get('stck_prpr'):
+                        return int(resp['output']['stck_prpr'])
+            except Exception as e:
+                # 한투 API 실패 시 에러를 출력하지 않고 2단계(백업)로 넘어가게 함
+                pass
+
+        # --- [2단계] 백업 로직: yfinance 사용 ---
+        # 한투 API가 실패했거나, 카테고리가 '해외'인 경우 실행됨
+        
+        # 종목코드 포맷팅
+        if category == '국내':
+            # 국내 종목은 코드 뒤에 .KS를 붙여야 yfinance에서 인식함 (대부분 ETF는 .KS)
+            ticker_code = f"{code_str}.KS"
+        else:
+            ticker_code = code_str
+            
+        ticker = yf.Ticker(ticker_code)
+        
+        # fast_info 시도
+        price = ticker.fast_info.get('last_price')
+        
+        # fast_info 실패 시 history 시도
+        if not price:
+            hist = ticker.history(period="1d")
+            if not hist.empty:
+                price = hist['Close'].iloc[-1]
+                
+        return float(price) if price else None
         
     except Exception:
         return None
