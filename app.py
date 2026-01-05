@@ -18,34 +18,54 @@ try:
     KEY = st.secrets["SUPABASE_KEY"]
     supabase = create_client(URL, KEY)
 except:
-    st.error("Supabase 설정이 누락되었습니다.")
-    st.stop()
+    # 로컬 테스트 등 시크릿이 없을 경우를 대비해 예외 처리
+    supabase = None
 
 # ==========================================
 # [2] 메인 애플리케이션
 # ==========================================
 def main():
+    # 🔥 [점검 모드 스위치] 작업할 때 True로 바꾸세요!
+    # True: 일반 사용자에게는 '점검 중' 화면이 뜸 (관리자는 접속 가능)
+    # False: 정상 서비스 운영
+    MAINTENANCE_MODE = False 
+
     # ---------------------------------------------------------
-    # [수정됨] 관리자 인증 로직 (URL에 ?admin=true 있을 때만 입력창 노출)
+    # [1] 관리자 인증 (사이드바)
     # ---------------------------------------------------------
     is_admin = False
     
-    # 1. URL에 admin=true가 있는지 먼저 확인
-    if st.query_params.get("admin", "false").lower() == "true":
-        with st.sidebar:
-            st.header("🐌 관리자 접속")
-            
-            # 2. 비밀번호 입력창 표시 (URL 파라미터가 있을 때만 보임)
-            ADMIN_HASH = "c41b0bb392db368a44ce374151794850417b56c9786e3c482f825327c7153182"
-            password_input = st.text_input("비밀번호", type="password", key="admin_pw")
-            
-            # 3. 비밀번호 검증
-            if password_input:
-                if hashlib.sha256(password_input.encode()).hexdigest() == ADMIN_HASH:
-                    is_admin = True
-                    st.success("인증 성공 🚀")
-                else:
-                    st.error("비밀번호 불일치")
+    # 기존 비밀번호의 해시값 
+    ADMIN_HASH = "c41b0bb392db368a44ce374151794850417b56c9786e3c482f825327c7153182"
+    
+    with st.sidebar:
+        st.header("🐌 메뉴 / 관리")
+        
+        # 비밀번호 입력창
+        password_input = st.text_input("🔐 관리자 접속", type="password", placeholder="비밀번호 입력")
+        
+        # 비밀번호 검증
+        if password_input:
+            if hashlib.sha256(password_input.encode()).hexdigest() == ADMIN_HASH:
+                is_admin = True
+                st.success("관리자 모드 ON 🚀")
+            else:
+                st.error("비밀번호 불일치")
+
+    # ---------------------------------------------------------
+    # [2] 점검 모드 가동 로직 (관리자가 아니면 여기서 멈춤)
+    # ---------------------------------------------------------
+    if MAINTENANCE_MODE and not is_admin:
+        st.title("🚧 시스템 정기 점검 중")
+        st.subheader("현재 서비스 기능 개선 및 데이터 안정화 작업 중입니다.")
+        st.info("관리자(개발자)는 사이드바에 비밀번호를 입력하면 접속 가능합니다.")
+        st.markdown("---")
+        st.write("잠시 후 다시 접속해 주세요! 🙇‍♂️")
+        
+        # 귀여운 공사 중 움짤 (선택 사항)
+        st.image("https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExNHJueGZ3bmZ3bmZ3bmZ3bmZ3bmZ3bmZ3bmZ3bmZ3bmZ3bmZ3JmVwPXYxX2ludGVybmFsX2dpZl9ieV9pZCZjdD1n/3o7TKMGpxVf7caSBa0/giphy.gif", width=400)
+        
+        st.stop() # 🛑 여기서 코드 실행을 강제로 중단시킴 (아래 내용 안 보임)
     
     # ---------------------------------------------------------
     # 메인 타이틀
