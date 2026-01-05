@@ -34,6 +34,8 @@ def main():
     # [1] 관리자 인증 (사이드바)
     # ---------------------------------------------------------
     is_admin = False
+
+    if st.query_params.get("admin", "false").lower() == "true":
     
     # 기존 비밀번호의 해시값 
     ADMIN_HASH = "c41b0bb392db368a44ce374151794850417b56c9786e3c482f825327c7153182"
