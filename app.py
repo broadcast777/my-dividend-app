@@ -13,6 +13,14 @@ import ui
 # ==========================================
 st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
 
+import streamlit as st
+
+# 세션에 로그인 정보가 없으면 초기화
+if "is_logged_in" not in st.session_state:
+    st.session_state.is_logged_in = False
+if "user_info" not in st.session_state:
+    st.session_state.user_info = None
+
 try:
     URL = st.secrets["SUPABASE_URL"]
     KEY = st.secrets["SUPABASE_KEY"]
