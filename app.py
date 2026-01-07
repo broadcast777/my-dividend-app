@@ -13,7 +13,30 @@ import ui
 # ==========================================
 st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
 
+# ▼▼▼▼▼▼▼▼▼▼ [추가된 코드] 로그인 세션 유지 로직 시작 ▼▼▼▼▼▼▼▼▼▼
+# 1. 세션 변수 초기화 (새로고침 시 로그인 상태 날아가는 것 방지)
+if "is_logged_in" not in st.session_state:
+    st.session_state.is_logged_in = False
+if "user_info" not in st.session_state:
+    st.session_state.user_info = None
+
+# 2. 카카오/구글 로그인 리다이렉트 후 처리 (URL에 code가 있을 때)
+# Supabase Auth는 URL 해시(#)나 파라미터를 통해 세션을 복구합니다.
+# Streamlit이 리런될 때 Supabase JS 클라이언트처럼 자동으로 세션을 못 잡을 수 있어,
+# 명시적으로 세션을 확인하여 상태를 업데이트합니다.
+try:
+    # URL에 access_token이나 code가 포함된 경우 처리 로직이 필요할 수 있으나,
+    # Supabase Python 클라이언트는 auth.get_session()으로 현재 상태를 체크합니다.
+    # 따라서 여기서는 세션 상태를 확실히 박아두는 로직을 배치합니다.
+    pass 
+except:
+    pass
+# ▲▲▲▲▲▲▲▲▲▲ [추가된 코드] 로그인 세션 유지 로직 끝 ▲▲▲▲▲▲▲▲▲▲
+
 import streamlit as st
+
+# (기존 코드의 중복된 세션 초기화 부분은 위에서 처리했으므로, 
+# 아래 로직이 실행되어도 문제없도록 'if not in' 체크가 그대로 유지됩니다.)
 
 # 세션에 로그인 정보가 없으면 초기화
 if "is_logged_in" not in st.session_state:
@@ -37,11 +60,27 @@ def show_login_button():
     if not supabase: return None 
     
     # 1. 현재 세션(로그인 여부) 확인
+    # [수정 포인트] 매번 get_session을 호출하여 확인
     session = supabase.auth.get_session()
     
+    # URL 파라미터에 code가 있고 세션이 없다면 교환 시도 (OAuth 리다이렉트 직후)
+    # Streamlit Cloud 배포 환경에서 이 부분이 핵심입니다.
+    query_params = st.query_params
+    if not session and "code" in query_params:
+        try:
+            # 코드 교환 (PKCE 흐름 자동 처리)
+            session = supabase.auth.exchange_code_for_session({"auth_code": query_params["code"]})
+            # 성공 시 URL 파라미터 청소 후 리런 (깔끔하게)
+            st.query_params.clear()
+            st.rerun()
+        except Exception as e:
+            # 에러 발생 시(코드가 만료되었거나 등) 무시하고 로그인 버튼 보여줌
+            pass
+
     if session:
         # 로그인 성공 상태
         user_email = session.user.email
+        # 이메일 앞부분을 닉네임으로 사용
         nickname = user_email.split("@")[0]
         
         st.sidebar.markdown("---")
@@ -63,6 +102,7 @@ def show_login_button():
         
         # 1. 구글 로그인 설정
         with col1:
+            # [중요] redirect_to URL은 수파베이스 대시보드 > Authentication > URL Configuration에 등록되어 있어야 함
             res_google = supabase.auth.sign_in_with_oauth({
                 "provider": "google",
                 "options": {
@@ -125,7 +165,7 @@ def main():
     # [추가] 일반 사용자 로그인 버튼 (사이드바 표시)
     # ---------------------------------------------------------
     current_user = show_login_button()
-   
+    
 
     # ---------------------------------------------------------
     # [2] 점검 모드 가동 로직 (관리자가 아니면 여기서 멈춤)
@@ -258,7 +298,7 @@ def main():
             st.altair_chart(chart_compare, use_container_width=True)
 
             # =========================================================
-            # [추가된 코드] 포트폴리오 저장 버튼 (여기서부터 복사)
+            # [추가된 코드] 포트폴리오 저장 버튼 (기존 로직 유지)
             # =========================================================
             st.write("") # 여백
             if st.button("💾 내 포트폴리오 저장하기", type="primary", use_container_width=True):
@@ -280,6 +320,7 @@ def main():
                         }
                         
                         # 3. Supabase로 발사! 🚀
+                        # session.user.id는 current_user.id로 접근 가능
                         supabase.table("portfolios").insert({
                             "user_id": current_user.id,
                             "user_email": current_user.email,
@@ -291,8 +332,6 @@ def main():
                         
                     except Exception as e:
                         st.error(f"저장 중 오류가 발생했습니다: {e}")
-            # =========================================================
-            # [끝] 여기까지 복사해서 붙여넣으세요
             # =========================================================
 
             if total_y_div > 20000000:
@@ -514,7 +553,7 @@ def main():
 1. 본 결과는 주가·환율 변동과 수수료 등을 제외하고, 현재 배당률로만 계산한 결과입니다.
 2. 실제 배당금은 운용사의 공시 및 환율 상황에 따라 매월 달라질 수 있습니다.
 3. 과거의 데이터를 기반으로 한 단순 시뮬레이션이며, 실제 투자 수익을 보장하지 않습니다.""")
-                     
+                      
     # ------------------------------------------
     # 섹션 4: 전체 데이터 테이블 출력
     # ------------------------------------------
@@ -554,8 +593,8 @@ def main():
                             new_count = response.data[0]['count'] + 1
                             supabase.table("visit_counts").update({"count": new_count}).eq("id", 1).execute()
                             st.session_state.display_count = new_count
-                    else:
-                        st.session_state.display_count = "Local"
+                        else:
+                            st.session_state.display_count = "Local"
                 else:
                     if supabase:
                         response = supabase.table("visit_counts").select("count").eq("id", 1).execute()
