@@ -78,21 +78,6 @@ class StreamlitStorage:
 try:
     URL = st.secrets["SUPABASE_URL"]
     KEY = st.secrets["SUPABASE_KEY"]
-
-    # ✅ 정확히 여기! (Supabase 초기화 직후)
-# ---------------------------------------------------------
-# 세션 상태 변수 초기화
-# ---------------------------------------------------------
-if "is_logged_in" not in st.session_state:
-    st.session_state.is_logged_in = False
-if "user_info" not in st.session_state:
-    st.session_state.user_info = None
-if "code_processed" not in st.session_state:
-    st.session_state.code_processed = False
-if "supabase_storage" not in st.session_state:
-    st.session_state.supabase_storage = {}
-
-print("[INIT] 세션 변수 초기화 완료")
     
     supabase = create_client(
         URL, 
@@ -110,12 +95,18 @@ except Exception as e:
     print(f"[Supabase] 연결 실패: {e}")
     supabase = None
 
-# ---------------------------------------------------------
-# 세션 상태 변수 초기화
-# ---------------------------------------------------------
-for key in ["is_logged_in", "user_info", "code_processed"]:
-    if key not in st.session_state:
-        st.session_state[key] = False if key != "user_info" else None
+if "is_logged_in" not in st.session_state:
+    st.session_state.is_logged_in = False
+if "user_info" not in st.session_state:
+    st.session_state.user_info = None
+if "code_processed" not in st.session_state:
+    st.session_state.code_processed = False
+if "supabase_storage" not in st.session_state:
+    st.session_state.supabase_storage = {}
+
+print("[INIT] 세션 변수 초기화 완료")
+
+
 
 # ==========================================
 # [2] 인증 상태 체크 (최상단 실행)
@@ -202,7 +193,7 @@ def render_sidebar_login_ui():
     if is_logged_in and user_info:
         # ✅ 로그인 상태
         email = user_info.email if user_info.email else "User"
-        nickname = email.split("@")
+        nickname = email.split("@")[0]  # 'user'
         
         st.sidebar.success(f"👋 반가워요! **{nickname}**님")
         
