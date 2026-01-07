@@ -23,13 +23,12 @@ class StreamlitStorage:
     """Streamlit + 파일 하이브리드 저장소 (PKCE 보존용)"""
     
     def __init__(self):
-        # 저장 경로 설정 (Streamlit Cloud 호환)
+        # Streamlit Cloud에서도 작동하는 경로
         self.storage_dir = Path.home() / ".streamlit_auth"
         self.storage_dir.mkdir(exist_ok=True)
         self.storage_file = self.storage_dir / "auth_storage.json"
         
-        # ★ 수정됨: 여기서 무조건 파일 내용을 먼저 확인해서 세션에 넣습니다.
-        # (밖에서 {}로 초기화해버리면 파일 내용이 무시되는 문제를 해결)
+        # 세션에 저장소가 없으면 파일에서 로드 시도
         if "supabase_storage" not in st.session_state:
             st.session_state.supabase_storage = self._load_from_file()
 
@@ -52,21 +51,17 @@ class StreamlitStorage:
             print(f"[Storage] 파일 저장 실패: {e}")
 
     def get_item(self, key: str) -> str | None:
-        # 1. session_state에 있으면 반환
+        # 1. session_state 확인
         if key in st.session_state.supabase_storage:
             return st.session_state.supabase_storage[key]
         
-        # 2. 없으면 파일에서 다시 읽어서 확인 (이중 체크)
+        # 2. 파일에서 다시 로드 시도
         file_data = self._load_from_file()
-        if key in file_data:
-            # 메모리에도 동기화
-            st.session_state.supabase_storage[key] = file_data[key]
-            return file_data[key]
-        return None
+        return file_data.get(key)
 
     def set_item(self, key: str, value: str) -> None:
         st.session_state.supabase_storage[key] = value
-        self._save_to_file()  # ← 즉시 파일에 저장 (중요!)
+        self._save_to_file()
         print(f"[Storage] 저장됨: {key}")
 
     def remove_item(self, key: str) -> None:
@@ -77,9 +72,8 @@ class StreamlitStorage:
 
 
 # ---------------------------------------------------------
-# 세션 상태 변수 초기화 (순서 중요!)
+# 세션 상태 변수 초기화 (Supabase 연결 전 실행)
 # ---------------------------------------------------------
-# 'supabase_storage'는 위 클래스에서 처리하므로 여기서는 건드리지 않습니다.
 for key in ["is_logged_in", "user_info", "code_processed"]:
     if key not in st.session_state:
         st.session_state[key] = False if key != "user_info" else None
@@ -98,10 +92,9 @@ try:
         URL, 
         KEY,
         options=ClientOptions(
-            storage=StreamlitStorage(), # 우리가 만든 저장소 연결
+            storage=StreamlitStorage(),
             auto_refresh_token=True,
             persist_session=True,
-            # local_storage 옵션은 제거했습니다 (에러 원인)
         )
     )
     print("[Supabase] 클라이언트 초기화 성공")
@@ -112,23 +105,36 @@ except Exception as e:
 
 
 # ==========================================
-# [2] 인증 상태 체크 (최상단 실행)
+# [2] 인증 상태 체크 (에러 방지 로직 적용됨)
 # ==========================================
 def check_auth_status():
-    """OAuth 플로우를 안전하게 처리 + 디버깅 로그"""
+    """OAuth 플로우를 안전하게 처리 + 불필요한 에러 숨김"""
     if not supabase: return
 
+    # 🔍 [1단계] 이미 로그인된 상태인지 먼저 확인 (가장 중요!)
+    # 이미 로그인이 되어 있다면, URL에 있는 code는 옛날 것이므로 무시해야 합니다.
+    try:
+        session = supabase.auth.get_session()
+        if session and session.user:
+            print(f"[AUTH] ✅ 이미 로그인됨: {session.user.email}")
+            st.session_state.is_logged_in = True
+            st.session_state.user_info = session.user
+            
+            # URL에 code가 남아있다면 보기 싫으니까 지워줍니다.
+            if "code" in st.query_params:
+                st.query_params.clear()
+            return # 여기서 함수 종료! (아래 코드 실행 안 함)
+    except Exception as e:
+        print(f"[AUTH] 세션 확인 중 경미한 오류: {e}")
+
+    # 🔍 [2단계] 로그인이 안 된 상태에서만 '코드 교환' 시도
     query_params = st.query_params
-    
-    # 1️⃣ URL에 코드가 있으면 교환 시도
     if "code" in query_params and not st.session_state.get("code_processed", False):
         try:
             auth_code = query_params["code"]
             print(f"[AUTH] 🔄 OAuth 코드 교환 시작... (code: {auth_code[:10]}...)")
             
-            # [중요] 로컬 테스트 중이라면 http://localhost:8501 주소를 써야 합니다.
-            # 하지만 에러 로그(/mount/src/...)를 보니 스트림릿 클라우드 환경이신 것 같아 
-            # 배포용 주소로 설정해두었습니다.
+            # 배포된 주소 (로컬 테스트 시에는 http://localhost:8501)
             redirect_url = "https://dividend-pange.streamlit.app/"
             
             auth_response = supabase.auth.exchange_code_for_session({
@@ -138,62 +144,50 @@ def check_auth_status():
             session = auth_response.session
             
             if session and session.user:
-                print(f"[AUTH] ✅ 로그인 성공: {session.user.email}")
+                print(f"[AUTH] ✅ 로그인 성공 (New): {session.user.email}")
                 st.session_state.is_logged_in = True
                 st.session_state.user_info = session.user
-            else:
-                print(f"[AUTH] ❌ 세션 없음")
             
-            # URL 정리 및 처리 완료 표시
+            # 성공했으므로 URL 정리
             st.query_params.clear()
             st.session_state.code_processed = True
-            st.success("✅ 로그인 성공!")
+            st.success("✅ 로그인되었습니다!")
             st.rerun()
             
         except Exception as e:
             error_msg = str(e)
-            print(f"[AUTH] ❌ 로그인 실패: {error_msg}")
+            print(f"[AUTH] ❌ 교환 실패: {error_msg}")
             
-            # 실패 시 저장소 파일이 꼬였을 수 있으므로 초기화 버튼 제공
-            st.error(f"🔐 로그인 실패: {error_msg}")
-            if st.button("🔄 로그인 정보 초기화 (문제 해결용)"):
-                st.session_state.supabase_storage = {}
-                st.session_state.code_processed = True # 루프 방지
-                Path(Path.home() / ".streamlit_auth/auth_storage.json").unlink(missing_ok=True)
-                st.rerun()
-            
-            st.session_state.code_processed = True
-            # st.query_params.clear() # 에러 확인을 위해 주석 처리
-            return
+            # ★ 핵심: 'verifier' 에러나 'grant' 에러는
+            # 보통 "새로고침 되면서 이미 처리된 코드를 또 넣어서" 나는 에러입니다.
+            # 사용자에게 보여주지 말고 조용히 처리합니다.
+            if "code verifier" in error_msg or "invalid_grant" in error_msg:
+                # 에러는 났지만, 혹시 세션은 살아있나? 마지막 확인
+                session = supabase.auth.get_session()
+                if session and session.user:
+                    st.session_state.is_logged_in = True
+                    st.session_state.user_info = session.user
+                    st.query_params.clear() # URL 청소하고 모른 척 넘어가기
+                    return
 
-    # 2️⃣ 저장된 세션 확인
-    else:
-        try:
-            session = supabase.auth.get_session()
-            if session and session.user:
-                print(f"[AUTH] 📌 기존 세션 발견: {session.user.email}")
-                st.session_state.is_logged_in = True
-                st.session_state.user_info = session.user
-            else:
-                st.session_state.is_logged_in = False
-                st.session_state.user_info = None
-        except Exception as e:
-            print(f"[AUTH] ⚠️ 세션 확인 실패: {e}")
-            st.session_state.is_logged_in = False
-            st.session_state.user_info = None
-        
+            # 진짜 심각한 에러만 보여주기
+            if not st.session_state.is_logged_in:
+                st.error("로그인 시간이 만료되었습니다. 다시 시도해주세요.")
+                # st.error(f"디버그용 에러 메시지: {error_msg}") # 필요할 때만 주석 해제
+                
+            st.session_state.code_processed = True
+            st.query_params.clear()
+
 # ✅ 페이지 로드 시 인증 상태 확인 실행
 check_auth_status()
 
 
 # ==========================================
-# [3] 사이드바 로그인 UI 함수 (수정됨)
+# [3] 사이드바 로그인 UI 함수
 # ==========================================
 def render_sidebar_login_ui():
     """사이드바 인증 UI"""
-    if not supabase:
-        st.sidebar.error("🚨 Supabase 연결 실패")
-        return
+    if not supabase: return
 
     is_logged_in = st.session_state.get("is_logged_in", False)
     user_info = st.session_state.get("user_info", None)
@@ -221,9 +215,7 @@ def render_sidebar_login_ui():
         col1, col2 = st.sidebar.columns(2)
         callback_url = "https://dividend-pange.streamlit.app/"
         
-        # [핵심 변경] 링크 버튼(LinkButton) 대신 일반 버튼(Button)을 사용
-        # 버튼을 눌렀을 때만 sign_in 함수를 실행하여 '암호 덮어쓰기' 방지
-        
+        # 버튼 클릭 시에만 로그인 시도 (암호 덮어쓰기 방지)
         with col1:
             if st.button("🔵 Google", key="btn_google", use_container_width=True):
                 try:
@@ -232,7 +224,6 @@ def render_sidebar_login_ui():
                         "options": {"redirect_to": callback_url}
                     })
                     if res.url:
-                        # 자바스크립트로 즉시 이동
                         st.markdown(f'<meta http-equiv="refresh" content="0;url={res.url}">', unsafe_allow_html=True)
                 except Exception as e:
                     st.error(f"오류: {e}")
