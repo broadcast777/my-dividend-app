@@ -5,6 +5,7 @@ import altair as alt
 import hashlib
 import json
 import os
+from pathlib import Path
 
 # [모듈화] 분리한 파일들을 불러옵니다
 import logic 
@@ -21,39 +22,55 @@ st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
 
 
 class StreamlitStorage:
+    """Streamlit + 파일 하이브리드 저장소 (PKCE 보존용)"""
+    
     def __init__(self):
-        self.storage_file = ".streamlit/.supabase_storage.json"
-        os.makedirs(".streamlit", exist_ok=True)
+        # Streamlit Cloud에서도 작동하는 경로
+        self.storage_dir = Path.home() / ".streamlit_auth"
+        self.storage_dir.mkdir(exist_ok=True)
+        self.storage_file = self.storage_dir / "auth_storage.json"
+        
         if "supabase_storage" not in st.session_state:
             st.session_state.supabase_storage = self._load_from_file()
 
-    def _load_from_file(self):
-        if os.path.exists(self.storage_file):
-            try:
-                with open(self.storage_file, 'r') as f:
+    def _load_from_file(self) -> dict:
+        """파일에서 로드"""
+        try:
+            if self.storage_file.exists():
+                with open(self.storage_file, 'r', encoding='utf-8') as f:
                     return json.load(f)
-            except:
-                return {}
+        except Exception as e:
+            print(f"[Storage] 파일 로드 실패: {e}")
         return {}
 
-    def _save_to_file(self):
-        with open(self.storage_file, 'w') as f:
-            json.dump(st.session_state.supabase_storage, f)
+    def _save_to_file(self) -> None:
+        """파일에 저장 (즉시 동기화)"""
+        try:
+            with open(self.storage_file, 'w', encoding='utf-8') as f:
+                json.dump(st.session_state.supabase_storage, f)
+        except Exception as e:
+            print(f"[Storage] 파일 저장 실패: {e}")
 
     def get_item(self, key: str) -> str | None:
-        value = st.session_state.supabase_storage.get(key)
-        if value: return value
+        # 1. session_state 확인
+        if key in st.session_state.supabase_storage:
+            return st.session_state.supabase_storage[key]
+        
+        # 2. 파일에서 다시 로드 시도
         file_data = self._load_from_file()
         return file_data.get(key)
 
     def set_item(self, key: str, value: str) -> None:
         st.session_state.supabase_storage[key] = value
-        self._save_to_file()
+        self._save_to_file()  # ← 즉시 파일에 저장 (중요!)
+        print(f"[Storage] 저장됨: {key}")
 
     def remove_item(self, key: str) -> None:
         if key in st.session_state.supabase_storage:
             del st.session_state.supabase_storage[key]
         self._save_to_file()
+        print(f"[Storage] 삭제됨: {key}")
+
 
 # ---------------------------------------------------------
 # Supabase 클라이언트 연결 (저장소 옵션 필수 적용)
@@ -61,18 +78,36 @@ class StreamlitStorage:
 try:
     URL = st.secrets["SUPABASE_URL"]
     KEY = st.secrets["SUPABASE_KEY"]
-    # storage 옵션을 넣어야 'Verifier' 에러가 안 납니다.
+
+    # ✅ 정확히 여기! (Supabase 초기화 직후)
+# ---------------------------------------------------------
+# 세션 상태 변수 초기화
+# ---------------------------------------------------------
+if "is_logged_in" not in st.session_state:
+    st.session_state.is_logged_in = False
+if "user_info" not in st.session_state:
+    st.session_state.user_info = None
+if "code_processed" not in st.session_state:
+    st.session_state.code_processed = False
+if "supabase_storage" not in st.session_state:
+    st.session_state.supabase_storage = {}
+
+print("[INIT] 세션 변수 초기화 완료")
+    
     supabase = create_client(
-    URL, 
-    KEY,
-    options=ClientOptions(
-        storage=StreamlitStorage(),
-        auto_refresh_token=True,
-        persist_session=True,
+        URL, 
+        KEY,
+        options=ClientOptions(
+            storage=StreamlitStorage(),
+            auto_refresh_token=True,
+            persist_session=True,
+            local_storage={},
+        )
     )
-)
+    print("[Supabase] 클라이언트 초기화 성공")
 except Exception as e:
-    # 로컬 테스트 등 시크릿이 없을 경우를 대비해 예외 처리
+    st.error(f"🚨 Supabase 연결 오류: {e}")
+    print(f"[Supabase] 연결 실패: {e}")
     supabase = None
 
 # ---------------------------------------------------------
@@ -86,90 +121,147 @@ for key in ["is_logged_in", "user_info", "code_processed"]:
 # [2] 인증 상태 체크 (최상단 실행)
 # ==========================================
 def check_auth_status():
+    """OAuth 플로우를 안전하게 처리 + 디버깅 로그"""
     if not supabase:
+        print("[AUTH] Supabase 클라이언트 없음")
         return
 
-    session = supabase.auth.get_session()
-    
     query_params = st.query_params
     
-    # ✅ 코드가 이미 처리됐는지 확인
+    print(f"[AUTH] URL params: {dict(query_params)}")
+    print(f"[AUTH] code_processed: {st.session_state.get('code_processed', False)}")
+    
+    # 1️⃣ URL에 코드가 있으면 교환 시도
     if "code" in query_params and not st.session_state.get("code_processed", False):
         try:
-            # ✅ redirect_to 파라미터 추가 (필수!)
+            auth_code = query_params["code"]
+            print(f"[AUTH] 🔄 OAuth 코드 교환 시작... (code: {auth_code[:10]}...)")
+            
             auth_response = supabase.auth.exchange_code_for_session({
-                "auth_code": query_params["code"],
+                "auth_code": auth_code,
                 "redirect_to": "https://dividend-pange.streamlit.app/"
             })
             session = auth_response.session
             
+            if session and session.user:
+                print(f"[AUTH] ✅ 로그인 성공: {session.user.email}")
+                st.session_state.is_logged_in = True
+                st.session_state.user_info = session.user
+            else:
+                print(f"[AUTH] ❌ 세션 없음")
+            
+            # URL 정리 및 처리 완료 표시
             st.query_params.clear()
             st.session_state.code_processed = True
             st.success("✅ 로그인 성공!")
             st.rerun()
             
         except Exception as e:
-            st.error(f"🔐 로그인 실패: {str(e)}")
+            error_msg = str(e)
+            print(f"[AUTH] ❌ 로그인 실패: {error_msg}")
+            
+            st.error(f"🔐 로그인 실패: {error_msg}")
             st.session_state.code_processed = True
+            st.query_params.clear()
             return
 
-    if session:
-        st.session_state.is_logged_in = True
-        st.session_state.user_info = session.user
+    # 2️⃣ 저장된 세션 확인
     else:
-        st.session_state.is_logged_in = False
-        st.session_state.user_info = None
+        try:
+            session = supabase.auth.get_session()
+            if session and session.user:
+                print(f"[AUTH] 📌 기존 세션 발견: {session.user.email}")
+                st.session_state.is_logged_in = True
+                st.session_state.user_info = session.user
+            else:
+                print(f"[AUTH] ❌ 세션 없음")
+                st.session_state.is_logged_in = False
+                st.session_state.user_info = None
+        except Exception as e:
+            print(f"[AUTH] ⚠️ 세션 확인 실패: {e}")
+            st.session_state.is_logged_in = False
+            st.session_state.user_info = None
         
-# 페이지 로드 시 무조건 1회 실행하여 상태 동기화
+# ✅ 딱 이것만 있으면 됨!
 check_auth_status()
 
 # ==========================================
 # [3] 사이드바 로그인 UI 함수 (그리기만 함)
 # ==========================================
 def render_sidebar_login_ui():
-    # 저장 버튼 등에서 사용할 수 있게 현재 유저 정보를 리턴하지 않고, 
-    # 오직 사이드바 UI만 그립니다.
-    
-    if not supabase: return
+    """사이드바 인증 UI"""
+    if not supabase:
+        st.sidebar.error("🚨 Supabase 연결 실패")
+        return
 
-    # 이미 check_auth_status에서 갱신된 session_state를 사용
-    if st.session_state.is_logged_in and st.session_state.user_info:
-        user = st.session_state.user_info
-        email = user.email if user.email else "User"
-        nickname = email.split("@")[0]
+    is_logged_in = st.session_state.get("is_logged_in", False)
+    user_info = st.session_state.get("user_info", None)
+    
+    st.sidebar.markdown("---")
+    
+    if is_logged_in and user_info:
+        # ✅ 로그인 상태
+        email = user_info.email if user_info.email else "User"
+        nickname = email.split("@")
         
-        st.sidebar.markdown("---")
         st.sidebar.success(f"👋 반가워요! **{nickname}**님")
         
-        if st.sidebar.button("로그아웃", key="logout_btn"):
+        if st.sidebar.button("🚪 로그아웃", key="logout_btn", use_container_width=True):
             supabase.auth.sign_out()
             st.session_state.is_logged_in = False
             st.session_state.user_info = None
+            st.session_state.code_processed = False
+            print("[AUTH] 로그아웃 완료")
             st.rerun()
-            
     else:
-        st.sidebar.markdown("---")
+        # ❌ 미로그인 상태
         st.sidebar.info("💾 포트폴리오 저장을 위해 로그인")
         
         col1, col2 = st.sidebar.columns(2)
-        callback_url = "https://dividend-pange.streamlit.app"
+        callback_url = "https://dividend-pange.streamlit.app/"
         
         with col1:
-            res_google = supabase.auth.sign_in_with_oauth({
-                "provider": "google",
-                "options": {"redirect_to": "https://dividend-pange.streamlit.app"}
-            })
-            if res_google.url:
-                st.link_button("G 구글", res_google.url, type="primary", use_container_width=True)
+            try:
+                print("[OAUTH] 구글 OAuth URL 생성 중...")
+                res_google = supabase.auth.sign_in_with_oauth({
+                    "provider": "google",
+                    "options": {"redirect_to": callback_url}
+                })
+                if res_google.url:
+                    print(f"[OAUTH] 구글 URL 생성 성공")
+                    st.link_button(
+                        "🔵 Google", 
+                        res_google.url, 
+                        type="primary", 
+                        use_container_width=True
+                    )
+                else:
+                    st.error("Google OAuth URL 생성 실패")
+            except Exception as e:
+                print(f"[OAUTH] 구글 에러: {e}")
+                st.error(f"❌ {str(e)}")
 
         with col2:
-            res_kakao = supabase.auth.sign_in_with_oauth({
-                "provider": "kakao",
-                "options": {"redirect_to": "https://dividend-pange.streamlit.app"}
-            })
-            if res_kakao.url:
-                st.link_button("💬 카카오", res_kakao.url, type="secondary", use_container_width=True)
-            
+            try:
+                print("[OAUTH] 카카오 OAuth URL 생성 중...")
+                res_kakao = supabase.auth.sign_in_with_oauth({
+                    "provider": "kakao",
+                    "options": {"redirect_to": callback_url}
+                })
+                if res_kakao.url:
+                    print(f"[OAUTH] 카카오 URL 생성 성공")
+                    st.link_button(
+                        "💬 Kakao", 
+                        res_kakao.url, 
+                        type="secondary", 
+                        use_container_width=True
+                    )
+                else:
+                    st.error("Kakao OAuth URL 생성 실패")
+            except Exception as e:
+                print(f"[OAUTH] 카카오 에러: {e}")
+                st.error(f"❌ {str(e)}")
+        
         st.sidebar.caption("🔒 안전하게 로그인됩니다.")
 
 
