@@ -187,11 +187,13 @@ check_auth_status()
 
 
 # ==========================================
-# [3] 사이드바 로그인 UI 함수 (그리기만 함)
+# [3] 사이드바 로그인 UI 함수 (수정됨)
 # ==========================================
 def render_sidebar_login_ui():
     """사이드바 인증 UI"""
-    if not supabase: return
+    if not supabase:
+        st.sidebar.error("🚨 Supabase 연결 실패")
+        return
 
     is_logged_in = st.session_state.get("is_logged_in", False)
     user_info = st.session_state.get("user_info", None)
@@ -219,37 +221,33 @@ def render_sidebar_login_ui():
         col1, col2 = st.sidebar.columns(2)
         callback_url = "https://dividend-pange.streamlit.app/"
         
+        # [핵심 변경] 링크 버튼(LinkButton) 대신 일반 버튼(Button)을 사용
+        # 버튼을 눌렀을 때만 sign_in 함수를 실행하여 '암호 덮어쓰기' 방지
+        
         with col1:
-            try:
-                res_google = supabase.auth.sign_in_with_oauth({
-                    "provider": "google",
-                    "options": {"redirect_to": callback_url}
-                })
-                if res_google.url:
-                    st.link_button(
-                        "🔵 Google", 
-                        res_google.url, 
-                        type="primary", 
-                        use_container_width=True
-                    )
-            except Exception as e:
-                st.error(f"구글 오류: {e}")
+            if st.button("🔵 Google", key="btn_google", use_container_width=True):
+                try:
+                    res = supabase.auth.sign_in_with_oauth({
+                        "provider": "google",
+                        "options": {"redirect_to": callback_url}
+                    })
+                    if res.url:
+                        # 자바스크립트로 즉시 이동
+                        st.markdown(f'<meta http-equiv="refresh" content="0;url={res.url}">', unsafe_allow_html=True)
+                except Exception as e:
+                    st.error(f"오류: {e}")
 
         with col2:
-            try:
-                res_kakao = supabase.auth.sign_in_with_oauth({
-                    "provider": "kakao",
-                    "options": {"redirect_to": callback_url}
-                })
-                if res_kakao.url:
-                    st.link_button(
-                        "💬 Kakao", 
-                        res_kakao.url, 
-                        type="secondary", 
-                        use_container_width=True
-                    )
-            except Exception as e:
-                st.error(f"카카오 오류: {e}")
+            if st.button("💬 Kakao", key="btn_kakao", use_container_width=True):
+                try:
+                    res = supabase.auth.sign_in_with_oauth({
+                        "provider": "kakao",
+                        "options": {"redirect_to": callback_url}
+                    })
+                    if res.url:
+                        st.markdown(f'<meta http-equiv="refresh" content="0;url={res.url}">', unsafe_allow_html=True)
+                except Exception as e:
+                    st.error(f"오류: {e}")
         
         st.sidebar.caption("🔒 안전하게 로그인됩니다.")
 
