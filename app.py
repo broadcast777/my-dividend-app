@@ -13,40 +13,69 @@ import ui
 # ==========================================
 st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
 
+# ▼▼▼▼▼▼▼▼▼▼ [수정된 코드 시작] ▼▼▼▼▼▼▼▼▼▼
+from supabase import ClientOptions
+
+# [핵심 해결책] Supabase의 인증 정보를 스트림릿 세션에 저장하는 클래스
+# 이걸 추가해야 'verifier' 에러가 사라집니다.
+class StreamlitStorage:
+    def __init__(self):
+        if "supabase_storage" not in st.session_state:
+            st.session_state.supabase_storage = {}
+
+    def get_item(self, key: str) -> str | None:
+        if "supabase_storage" not in st.session_state:
+            st.session_state.supabase_storage = {}
+        return st.session_state.supabase_storage.get(key)
+
+    def set_item(self, key: str, value: str) -> None:
+        if "supabase_storage" not in st.session_state:
+            st.session_state.supabase_storage = {}
+        st.session_state.supabase_storage[key] = value
+
+    def remove_item(self, key: str) -> None:
+        if "supabase_storage" in st.session_state and key in st.session_state.supabase_storage:
+            del st.session_state.supabase_storage[key]
+
+# 1. Supabase 연결 (Storage 옵션 추가)
 try:
     URL = st.secrets["SUPABASE_URL"]
     KEY = st.secrets["SUPABASE_KEY"]
-    supabase = create_client(URL, KEY)
-except:
-    # 로컬 테스트 등 시크릿이 없을 경우를 대비해 예외 처리
+    # 여기서 storage=StreamlitStorage()를 연결해야 새로고침 되어도 기억합니다.
+    supabase = create_client(URL, KEY, options=ClientOptions(storage=StreamlitStorage()))
+except Exception as e:
+    st.error(f"DB 연결 실패: {e}")
     supabase = None
+
 # 2. 세션 상태 초기화
 if "is_logged_in" not in st.session_state:
     st.session_state.is_logged_in = False
 if "user_info" not in st.session_state:
     st.session_state.user_info = None
 
-# 3. [핵심] 카카오/구글 로그인 후 '코드(Code)' 교환 로직
-# 화면 그리기 전에 가장 먼저 토큰을 받아와야 합니다.
+# 3. [최상단] 인증 상태 체크 및 토큰 교환
 def check_auth_status():
-    # 1) 이미 로그인 된 상태인지 확인
+    if not supabase: return
+
+    # 1) 현재 세션 확인 (StreamlitStorage 덕분에 정보가 남아있음)
     session = supabase.auth.get_session()
     
-    # 2) URL에 'code'가 있다면 로그인 시도 (카카오 갔다 온 직후)
+    # 2) URL에 code가 있고, 세션이 확실치 않을 때 교환 시도
     query_params = st.query_params
-    if "code" in query_params and not session:
+    if "code" in query_params:
         try:
-            # 인증 코드 교환
+            # 코드 교환 (이제 Verifier가 저장소에 있어서 에러 안 남)
             auth_response = supabase.auth.exchange_code_for_session({"auth_code": query_params["code"]})
             session = auth_response.session
             
-            # URL 청소 (code가 남으면 새로고침할 때마다 에러 남) 및 리런
+            # URL 청소 및 리런 (로그인 완료 상태로 새로고침)
             st.query_params.clear()
             st.rerun()
-        except Exception as e:
-            st.error(f"로그인 처리 중 오류가 발생했습니다: {e}")
+        except Exception:
+            # 이미 사용된 코드거나 만료된 경우 무시
+            pass
 
-    # 3) 세션 정보 상태값에 저장
+    # 3) 최종 상태 저장
     if session:
         st.session_state.is_logged_in = True
         st.session_state.user_info = session.user
@@ -54,85 +83,62 @@ def check_auth_status():
         st.session_state.is_logged_in = False
         st.session_state.user_info = None
 
-# 위에서 만든 함수 즉시 실행
-if supabase:
-    check_auth_status()
+# 페이지 로드 시 즉시 실행
+check_auth_status()
+
 # ==========================================
-# [수정] 로그인 기능 함수 (구글 + 카카오)
+# [수정] 로그인 UI 함수 (로직 제거, UI 표시만 담당)
 # ==========================================
 def show_login_button():
-    # supabase 클라이언트가 생성되지 않았으면 중단
     if not supabase: return None 
     
-    # 1. 현재 세션(로그인 여부) 확인
-    # [수정 포인트] 매번 get_session을 호출하여 확인
-    session = supabase.auth.get_session()
-    
-    # URL 파라미터에 code가 있고 세션이 없다면 교환 시도 (OAuth 리다이렉트 직후)
-    # Streamlit Cloud 배포 환경에서 이 부분이 핵심입니다.
-    query_params = st.query_params
-    if not session and "code" in query_params:
-        try:
-            # 코드 교환 (PKCE 흐름 자동 처리)
-            session = supabase.auth.exchange_code_for_session({"auth_code": query_params["code"]})
-            # 성공 시 URL 파라미터 청소 후 리런 (깔끔하게)
-            st.query_params.clear()
-            st.rerun()
-        except Exception as e:
-            # 에러 발생 시(코드가 만료되었거나 등) 무시하고 로그인 버튼 보여줌
-            pass
-
-    if session:
-        # 로그인 성공 상태
-        user_email = session.user.email
-        # 이메일 앞부분을 닉네임으로 사용
-        nickname = user_email.split("@")[0]
+    # 위 check_auth_status에서 처리된 결과를 그대로 가져옴
+    if st.session_state.is_logged_in and st.session_state.user_info:
+        user = st.session_state.user_info
+        
+        # 닉네임 파싱
+        email = user.email if user.email else "게스트"
+        nickname = email.split("@")[0]
         
         st.sidebar.markdown("---")
         st.sidebar.success(f"👋 반가워요! **{nickname}**님")
         
-        # 로그아웃 버튼
+        # 로그아웃
         if st.sidebar.button("로그아웃", key="logout_btn"):
             supabase.auth.sign_out()
-            st.rerun() # 화면 새로고침
-        return session.user
+            st.session_state.is_logged_in = False
+            st.session_state.user_info = None
+            st.rerun()
+        return user
         
     else:
-        # 로그인 안 된 상태
+        # 로그인 안 된 상태 -> 버튼 표시
         st.sidebar.markdown("---")
         st.sidebar.info("💾 포트폴리오 저장을 위해 로그인")
         
-        # 버튼을 가로로 2개 배치 (왼쪽: 구글, 오른쪽: 카카오)
         col1, col2 = st.sidebar.columns(2)
+        callback_url = "https://dividend-pange.streamlit.app"
         
-        # 1. 구글 로그인 설정
         with col1:
-            # [중요] redirect_to URL은 수파베이스 대시보드 > Authentication > URL Configuration에 등록되어 있어야 함
             res_google = supabase.auth.sign_in_with_oauth({
                 "provider": "google",
-                "options": {
-                    "redirect_to": "https://dividend-pange.streamlit.app"
-                }
+                "options": {"redirect_to": callback_url}
             })
             if res_google.url:
                 st.link_button("G 구글", res_google.url, type="primary", use_container_width=True)
 
-        # 2. 카카오 로그인 설정
         with col2:
             res_kakao = supabase.auth.sign_in_with_oauth({
                 "provider": "kakao",
-                "options": {
-                    "redirect_to": "https://dividend-pange.streamlit.app"
-                }
+                "options": {"redirect_to": callback_url}
             })
             if res_kakao.url:
-                # 카카오 버튼 (이모지로 포인트 줌)
                 st.link_button("💬 카카오", res_kakao.url, type="secondary", use_container_width=True)
             
-        # 보안 문구 추가
-        st.sidebar.caption("🔒 본 서비스는 구글/카카오 및 Supabase의 보안 인증을 통해 안전하게 로그인됩니다.")
-        
+        st.sidebar.caption("🔒 안전하게 로그인됩니다.")
         return None
+# ▲▲▲▲▲▲▲▲▲▲ [수정된 코드 끝] ▲▲▲▲▲▲▲▲▲▲
+
 # ==========================================
 # [2] 메인 애플리케이션
 # ==========================================
