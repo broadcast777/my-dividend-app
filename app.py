@@ -3,6 +3,8 @@ from supabase import create_client, ClientOptions
 import pandas as pd
 import altair as alt
 import hashlib
+import json
+import os
 
 # [모듈화] 분리한 파일들을 불러옵니다
 import logic 
@@ -16,24 +18,42 @@ st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
 # ---------------------------------------------------------
 # [핵심] 새로고침해도 로그인이 풀리지 않게 잡아주는 저장소 클래스
 # ---------------------------------------------------------
+
+
 class StreamlitStorage:
     def __init__(self):
+        self.storage_file = ".streamlit/.supabase_storage.json"
+        os.makedirs(".streamlit", exist_ok=True)
         if "supabase_storage" not in st.session_state:
-            st.session_state.supabase_storage = {}
+            st.session_state.supabase_storage = self._load_from_file()
+
+    def _load_from_file(self):
+        if os.path.exists(self.storage_file):
+            try:
+                with open(self.storage_file, 'r') as f:
+                    return json.load(f)
+            except:
+                return {}
+        return {}
+
+    def _save_to_file(self):
+        with open(self.storage_file, 'w') as f:
+            json.dump(st.session_state.supabase_storage, f)
 
     def get_item(self, key: str) -> str | None:
-        if "supabase_storage" not in st.session_state:
-            st.session_state.supabase_storage = {}
-        return st.session_state.supabase_storage.get(key)
+        value = st.session_state.supabase_storage.get(key)
+        if value: return value
+        file_data = self._load_from_file()
+        return file_data.get(key)
 
     def set_item(self, key: str, value: str) -> None:
-        if "supabase_storage" not in st.session_state:
-            st.session_state.supabase_storage = {}
         st.session_state.supabase_storage[key] = value
+        self._save_to_file()
 
     def remove_item(self, key: str) -> None:
-        if "supabase_storage" in st.session_state and key in st.session_state.supabase_storage:
+        if key in st.session_state.supabase_storage:
             del st.session_state.supabase_storage[key]
+        self._save_to_file()
 
 # ---------------------------------------------------------
 # Supabase 클라이언트 연결 (저장소 옵션 필수 적용)
@@ -42,7 +62,15 @@ try:
     URL = st.secrets["SUPABASE_URL"]
     KEY = st.secrets["SUPABASE_KEY"]
     # storage 옵션을 넣어야 'Verifier' 에러가 안 납니다.
-    supabase = create_client(URL, KEY, options=ClientOptions(storage=StreamlitStorage()))
+    supabase = create_client(
+    URL, 
+    KEY,
+    options=ClientOptions(
+        storage=StreamlitStorage(),
+        auto_refresh_token=True,
+        persist_session=True,
+    )
+)
 except Exception as e:
     # 로컬 테스트 등 시크릿이 없을 경우를 대비해 예외 처리
     supabase = None
@@ -50,39 +78,48 @@ except Exception as e:
 # ---------------------------------------------------------
 # 세션 상태 변수 초기화
 # ---------------------------------------------------------
-if "is_logged_in" not in st.session_state:
-    st.session_state.is_logged_in = False
-if "user_info" not in st.session_state:
-    st.session_state.user_info = None
+for key in ["is_logged_in", "user_info", "code_processed"]:
+    if key not in st.session_state:
+        st.session_state[key] = False if key != "user_info" else None
 
 # ==========================================
 # [2] 인증 상태 체크 (최상단 실행)
 # ==========================================
 def check_auth_status():
-    if not supabase: return
+    if not supabase:
+        return
 
-    # 1. 현재 저장된 세션 확인
     session = supabase.auth.get_session()
     
-    # 2. URL에 코드가 있다면 교환 시도 (로그인 직후)
     query_params = st.query_params
-    if "code" in query_params:
+    
+    # ✅ 코드가 이미 처리됐는지 확인
+    if "code" in query_params and not st.session_state.get("code_processed", False):
         try:
-            auth_response = supabase.auth.exchange_code_for_session({"auth_code": query_params["code"]})
+            # ✅ redirect_to 파라미터 추가 (필수!)
+            auth_response = supabase.auth.exchange_code_for_session({
+                "auth_code": query_params["code"],
+                "redirect_to": "https://dividend-pange.streamlit.app/"
+            })
             session = auth_response.session
-            st.query_params.clear() # URL 청소
-            st.rerun()              # 화면 새로고침
-        except Exception:
-            pass # 코드 만료 등 에러는 무시
+            
+            st.query_params.clear()
+            st.session_state.code_processed = True
+            st.success("✅ 로그인 성공!")
+            st.rerun()
+            
+        except Exception as e:
+            st.error(f"🔐 로그인 실패: {str(e)}")
+            st.session_state.code_processed = True
+            return
 
-    # 3. 세션 상태 업데이트 (Source of Truth)
     if session:
         st.session_state.is_logged_in = True
         st.session_state.user_info = session.user
     else:
         st.session_state.is_logged_in = False
         st.session_state.user_info = None
-
+        
 # 페이지 로드 시 무조건 1회 실행하여 상태 동기화
 check_auth_status()
 
@@ -120,7 +157,7 @@ def render_sidebar_login_ui():
         with col1:
             res_google = supabase.auth.sign_in_with_oauth({
                 "provider": "google",
-                "options": {"redirect_to": callback_url}
+                "options": {"redirect_to": "https://dividend-pange.streamlit.app"}
             })
             if res_google.url:
                 st.link_button("G 구글", res_google.url, type="primary", use_container_width=True)
@@ -128,7 +165,7 @@ def render_sidebar_login_ui():
         with col2:
             res_kakao = supabase.auth.sign_in_with_oauth({
                 "provider": "kakao",
-                "options": {"redirect_to": callback_url}
+                "options": {"redirect_to": "https://dividend-pange.streamlit.app"}
             })
             if res_kakao.url:
                 st.link_button("💬 카카오", res_kakao.url, type="secondary", use_container_width=True)
