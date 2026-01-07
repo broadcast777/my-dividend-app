@@ -22,46 +22,64 @@ except:
     supabase = None
 
 # ==========================================
-# [추가] 로그인 기능 함수
+# [수정] 로그인 기능 함수 (구글 + 카카오)
 # ==========================================
 def show_login_button():
-    # supabase가 없으면(로컬 등) 중단
+    # supabase 클라이언트가 생성되지 않았으면 중단
     if not supabase: return None 
     
-    # 1. 세션(로그인 상태) 확인
+    # 1. 현재 세션(로그인 여부) 확인
     session = supabase.auth.get_session()
     
     if session:
-        # 로그인 성공 시
+        # 로그인 성공 상태
         user_email = session.user.email
         nickname = user_email.split("@")[0]
         
         st.sidebar.markdown("---")
         st.sidebar.success(f"👋 반가워요! **{nickname}**님")
         
+        # 로그아웃 버튼
         if st.sidebar.button("로그아웃", key="logout_btn"):
             supabase.auth.sign_out()
-            st.rerun()
+            st.rerun() # 화면 새로고침
         return session.user
+        
     else:
         # 로그인 안 된 상태
         st.sidebar.markdown("---")
         st.sidebar.info("💾 포트폴리오 저장을 위해 로그인")
         
-        # 구글 로그인 URL 생성
-        res = supabase.auth.sign_in_with_oauth({
-            "provider": "google",
-            "options": {
-                # ★ 중요: 배포 주소와 일치해야 함
-                "redirect_to": "https://dividend-pange.streamlit.app"
-            }
-        })
+        # 버튼을 가로로 2개 배치 (왼쪽: 구글, 오른쪽: 카카오)
+        col1, col2 = st.sidebar.columns(2)
         
-        if res.url:
-            st.sidebar.link_button("G 구글 로그인", res.url, type="primary")
-            st.sidebar.caption("🔒 본 서비스는 Google 및 Supabase의 보안 인증을 통해 안전하게 로그인됩니다.")
-        return None
+        # 1. 구글 로그인 설정
+        with col1:
+            res_google = supabase.auth.sign_in_with_oauth({
+                "provider": "google",
+                "options": {
+                    "redirect_to": "https://dividend-pange.streamlit.app"
+                }
+            })
+            if res_google.url:
+                st.link_button("G 구글", res_google.url, type="primary", use_container_width=True)
 
+        # 2. 카카오 로그인 설정
+        with col2:
+            res_kakao = supabase.auth.sign_in_with_oauth({
+                "provider": "kakao",
+                "options": {
+                    "redirect_to": "https://dividend-pange.streamlit.app"
+                }
+            })
+            if res_kakao.url:
+                # 카카오 버튼 (이모지로 포인트 줌)
+                st.link_button("💬 카카오", res_kakao.url, type="secondary", use_container_width=True)
+            
+        # 보안 문구 추가
+        st.sidebar.caption("🔒 본 서비스는 구글/카카오 및 Supabase의 보안 인증을 통해 안전하게 로그인됩니다.")
+        
+        return None
 # ==========================================
 # [2] 메인 애플리케이션
 # ==========================================
