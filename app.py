@@ -59,6 +59,7 @@ def show_login_button():
         
         if res.url:
             st.sidebar.link_button("G 구글 로그인", res.url, type="primary")
+            st.sidebar.caption("🔒 본 서비스는 Google 및 Supabase의 보안 인증을 통해 안전하게 로그인됩니다.")
         return None
 
 # ==========================================
