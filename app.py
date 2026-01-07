@@ -12,24 +12,24 @@ import logic
 import ui
 
 # ==========================================
-# [1] 기본 설정 및 Supabase 인증 저장소 설정
+# [1] 기본 설정
 # ==========================================
 st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
 
 # ---------------------------------------------------------
 # [핵심] 새로고침해도 로그인이 풀리지 않게 잡아주는 저장소 클래스
 # ---------------------------------------------------------
-
-
 class StreamlitStorage:
     """Streamlit + 파일 하이브리드 저장소 (PKCE 보존용)"""
     
     def __init__(self):
-        # Streamlit Cloud에서도 작동하는 경로
+        # 저장 경로 설정 (Streamlit Cloud 호환)
         self.storage_dir = Path.home() / ".streamlit_auth"
         self.storage_dir.mkdir(exist_ok=True)
         self.storage_file = self.storage_dir / "auth_storage.json"
         
+        # ★ 수정됨: 여기서 무조건 파일 내용을 먼저 확인해서 세션에 넣습니다.
+        # (밖에서 {}로 초기화해버리면 파일 내용이 무시되는 문제를 해결)
         if "supabase_storage" not in st.session_state:
             st.session_state.supabase_storage = self._load_from_file()
 
@@ -52,13 +52,17 @@ class StreamlitStorage:
             print(f"[Storage] 파일 저장 실패: {e}")
 
     def get_item(self, key: str) -> str | None:
-        # 1. session_state 확인
+        # 1. session_state에 있으면 반환
         if key in st.session_state.supabase_storage:
             return st.session_state.supabase_storage[key]
         
-        # 2. 파일에서 다시 로드 시도
+        # 2. 없으면 파일에서 다시 읽어서 확인 (이중 체크)
         file_data = self._load_from_file()
-        return file_data.get(key)
+        if key in file_data:
+            # 메모리에도 동기화
+            st.session_state.supabase_storage[key] = file_data[key]
+            return file_data[key]
+        return None
 
     def set_item(self, key: str, value: str) -> None:
         st.session_state.supabase_storage[key] = value
@@ -73,7 +77,18 @@ class StreamlitStorage:
 
 
 # ---------------------------------------------------------
-# Supabase 클라이언트 연결 (저장소 옵션 필수 적용)
+# 세션 상태 변수 초기화 (순서 중요!)
+# ---------------------------------------------------------
+# 'supabase_storage'는 위 클래스에서 처리하므로 여기서는 건드리지 않습니다.
+for key in ["is_logged_in", "user_info", "code_processed"]:
+    if key not in st.session_state:
+        st.session_state[key] = False if key != "user_info" else None
+
+print("[INIT] 세션 변수 초기화 완료")
+
+
+# ---------------------------------------------------------
+# Supabase 클라이언트 연결
 # ---------------------------------------------------------
 try:
     URL = st.secrets["SUPABASE_URL"]
@@ -83,10 +98,10 @@ try:
         URL, 
         KEY,
         options=ClientOptions(
-            storage=StreamlitStorage(),
+            storage=StreamlitStorage(), # 우리가 만든 저장소 연결
             auto_refresh_token=True,
             persist_session=True,
-            
+            # local_storage 옵션은 제거했습니다 (에러 원인)
         )
     )
     print("[Supabase] 클라이언트 초기화 성공")
@@ -95,32 +110,15 @@ except Exception as e:
     print(f"[Supabase] 연결 실패: {e}")
     supabase = None
 
-if "is_logged_in" not in st.session_state:
-    st.session_state.is_logged_in = False
-if "user_info" not in st.session_state:
-    st.session_state.user_info = None
-if "code_processed" not in st.session_state:
-    st.session_state.code_processed = False
-if "supabase_storage" not in st.session_state:
-    st.session_state.supabase_storage = {}
-
-print("[INIT] 세션 변수 초기화 완료")
-
-
 
 # ==========================================
 # [2] 인증 상태 체크 (최상단 실행)
 # ==========================================
 def check_auth_status():
     """OAuth 플로우를 안전하게 처리 + 디버깅 로그"""
-    if not supabase:
-        print("[AUTH] Supabase 클라이언트 없음")
-        return
+    if not supabase: return
 
     query_params = st.query_params
-    
-    print(f"[AUTH] URL params: {dict(query_params)}")
-    print(f"[AUTH] code_processed: {st.session_state.get('code_processed', False)}")
     
     # 1️⃣ URL에 코드가 있으면 교환 시도
     if "code" in query_params and not st.session_state.get("code_processed", False):
@@ -128,9 +126,14 @@ def check_auth_status():
             auth_code = query_params["code"]
             print(f"[AUTH] 🔄 OAuth 코드 교환 시작... (code: {auth_code[:10]}...)")
             
+            # [중요] 로컬 테스트 중이라면 http://localhost:8501 주소를 써야 합니다.
+            # 하지만 에러 로그(/mount/src/...)를 보니 스트림릿 클라우드 환경이신 것 같아 
+            # 배포용 주소로 설정해두었습니다.
+            redirect_url = "https://dividend-pange.streamlit.app/"
+            
             auth_response = supabase.auth.exchange_code_for_session({
                 "auth_code": auth_code,
-                "redirect_to": "https://dividend-pange.streamlit.app/"
+                "redirect_to": redirect_url
             })
             session = auth_response.session
             
@@ -151,9 +154,16 @@ def check_auth_status():
             error_msg = str(e)
             print(f"[AUTH] ❌ 로그인 실패: {error_msg}")
             
+            # 실패 시 저장소 파일이 꼬였을 수 있으므로 초기화 버튼 제공
             st.error(f"🔐 로그인 실패: {error_msg}")
+            if st.button("🔄 로그인 정보 초기화 (문제 해결용)"):
+                st.session_state.supabase_storage = {}
+                st.session_state.code_processed = True # 루프 방지
+                Path(Path.home() / ".streamlit_auth/auth_storage.json").unlink(missing_ok=True)
+                st.rerun()
+            
             st.session_state.code_processed = True
-            st.query_params.clear()
+            # st.query_params.clear() # 에러 확인을 위해 주석 처리
             return
 
     # 2️⃣ 저장된 세션 확인
@@ -165,7 +175,6 @@ def check_auth_status():
                 st.session_state.is_logged_in = True
                 st.session_state.user_info = session.user
             else:
-                print(f"[AUTH] ❌ 세션 없음")
                 st.session_state.is_logged_in = False
                 st.session_state.user_info = None
         except Exception as e:
@@ -173,17 +182,16 @@ def check_auth_status():
             st.session_state.is_logged_in = False
             st.session_state.user_info = None
         
-# ✅ 딱 이것만 있으면 됨!
+# ✅ 페이지 로드 시 인증 상태 확인 실행
 check_auth_status()
+
 
 # ==========================================
 # [3] 사이드바 로그인 UI 함수 (그리기만 함)
 # ==========================================
 def render_sidebar_login_ui():
     """사이드바 인증 UI"""
-    if not supabase:
-        st.sidebar.error("🚨 Supabase 연결 실패")
-        return
+    if not supabase: return
 
     is_logged_in = st.session_state.get("is_logged_in", False)
     user_info = st.session_state.get("user_info", None)
@@ -193,7 +201,7 @@ def render_sidebar_login_ui():
     if is_logged_in and user_info:
         # ✅ 로그인 상태
         email = user_info.email if user_info.email else "User"
-        nickname = email.split("@")[0]  # 'user'
+        nickname = email.split("@")[0]
         
         st.sidebar.success(f"👋 반가워요! **{nickname}**님")
         
@@ -213,51 +221,41 @@ def render_sidebar_login_ui():
         
         with col1:
             try:
-                print("[OAUTH] 구글 OAuth URL 생성 중...")
                 res_google = supabase.auth.sign_in_with_oauth({
                     "provider": "google",
                     "options": {"redirect_to": callback_url}
                 })
                 if res_google.url:
-                    print(f"[OAUTH] 구글 URL 생성 성공")
                     st.link_button(
                         "🔵 Google", 
                         res_google.url, 
                         type="primary", 
                         use_container_width=True
                     )
-                else:
-                    st.error("Google OAuth URL 생성 실패")
             except Exception as e:
-                print(f"[OAUTH] 구글 에러: {e}")
-                st.error(f"❌ {str(e)}")
+                st.error(f"구글 오류: {e}")
 
         with col2:
             try:
-                print("[OAUTH] 카카오 OAuth URL 생성 중...")
                 res_kakao = supabase.auth.sign_in_with_oauth({
                     "provider": "kakao",
                     "options": {"redirect_to": callback_url}
                 })
                 if res_kakao.url:
-                    print(f"[OAUTH] 카카오 URL 생성 성공")
                     st.link_button(
                         "💬 Kakao", 
                         res_kakao.url, 
                         type="secondary", 
                         use_container_width=True
                     )
-                else:
-                    st.error("Kakao OAuth URL 생성 실패")
             except Exception as e:
-                print(f"[OAUTH] 카카오 에러: {e}")
-                st.error(f"❌ {str(e)}")
+                st.error(f"카카오 오류: {e}")
         
         st.sidebar.caption("🔒 안전하게 로그인됩니다.")
 
 
 # ==========================================
-# [4] 메인 애플리케이션 (기존 코드 복원 완료)
+# [4] 메인 애플리케이션
 # ==========================================
 def main():
     MAINTENANCE_MODE = False
@@ -382,23 +380,20 @@ def main():
                     s_row = stock_match.iloc[0]
                     
                     all_data.append({
-                    # 1. 기본 분석용 데이터
-                    '종목': stock, 
-                    '비중': weights[stock], 
-                    '자산유형': s_row['자산유형'], 
-                    '투자금액_만원': amt / 10000,
-                    
-                    # 2. UI 테이블 렌더링 필수 데이터 (이게 없어서 에러 남)
-                    '종목명': stock,              
-                    '코드': s_row.get('코드', ''),
-                    '분류': s_row.get('분류', '국내'),
-                    '연배당률': s_row.get('연배당률', 0),
-                    '금융링크': s_row.get('금융링크', '#'),
-                    '신규상장개월수': s_row.get('신규상장개월수', 0),
-                    '현재가': s_row.get('현재가', 0),      # ★ 추가됨
-                    '환구분': s_row.get('환구분', '-'),    # ★ 추가됨
-                    '배당락일': s_row.get('배당락일', '-')  # ★ 추가됨
-                })
+                        '종목': stock, 
+                        '비중': weights[stock], 
+                        '자산유형': s_row['자산유형'], 
+                        '투자금액_만원': amt / 10000,
+                        '종목명': stock,              
+                        '코드': s_row.get('코드', ''),
+                        '분류': s_row.get('분류', '국내'),
+                        '연배당률': s_row.get('연배당률', 0),
+                        '금융링크': s_row.get('금융링크', '#'),
+                        '신규상장개월수': s_row.get('신규상장개월수', 0),
+                        '현재가': s_row.get('현재가', 0),
+                        '환구분': s_row.get('환구분', '-'),
+                        '배당락일': s_row.get('배당락일', '-')
+                    })
 
             # 결과 계산
             total_y_div = sum([(total_invest * (weights[n]/100) * (df[df['pure_name']==n].iloc[0]['연배당률']/100)) for n in selected])
@@ -420,11 +415,10 @@ def main():
             st.altair_chart(chart_compare, use_container_width=True)
 
             # =========================================================
-            # [포트폴리오 저장 로직] 세션 정보를 올바르게 참조하도록 수정됨
+            # [포트폴리오 저장 로직]
             # =========================================================
             st.write("") 
             if st.button("💾 내 포트폴리오 저장하기", type="primary", use_container_width=True):
-                # check_auth_status에 의해 설정된 세션값 확인
                 if not st.session_state.is_logged_in or not st.session_state.user_info:
                     st.toast("⚠️ 로그인이 필요한 기능입니다. 사이드바를 확인해주세요!")
                     st.warning("로그인을 하셔야 '나만의 포트폴리오'를 저장할 수 있습니다.")
@@ -466,7 +460,6 @@ def main():
                     chart_col, table_col = st.columns([1.2, 1])
                     def classify_currency(row):
                         try:
-                            # 여기서도 분류 정보를 쓰므로 안전하게
                             bunryu = str(row.get('분류', ''))
                             if bunryu == "해외" or "(해외)" in row['종목']: return "🇺🇸 달러 자산"
                             return "🇰🇷 원화 자산"
@@ -489,7 +482,6 @@ def main():
                         if usd_ratio >= 50: st.caption("💡 포트폴리오의 절반 이상이 환율 변동에 영향을 받습니다.")
                         else: st.caption("💡 원화 자산 중심의 구성입니다.")
                     
-                    # [여기서 에러가 났던 부분: 이제 코드 컬럼이 있어서 정상 작동함]
                     st.write("📋 **상세 포트폴리오**")
                     ui.render_custom_table(df_ana)
 
