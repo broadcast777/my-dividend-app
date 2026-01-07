@@ -13,37 +13,6 @@ import ui
 # ==========================================
 st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
 
-# ▼▼▼▼▼▼▼▼▼▼ [추가된 코드] 로그인 세션 유지 로직 시작 ▼▼▼▼▼▼▼▼▼▼
-# 1. 세션 변수 초기화 (새로고침 시 로그인 상태 날아가는 것 방지)
-if "is_logged_in" not in st.session_state:
-    st.session_state.is_logged_in = False
-if "user_info" not in st.session_state:
-    st.session_state.user_info = None
-
-# 2. 카카오/구글 로그인 리다이렉트 후 처리 (URL에 code가 있을 때)
-# Supabase Auth는 URL 해시(#)나 파라미터를 통해 세션을 복구합니다.
-# Streamlit이 리런될 때 Supabase JS 클라이언트처럼 자동으로 세션을 못 잡을 수 있어,
-# 명시적으로 세션을 확인하여 상태를 업데이트합니다.
-try:
-    # URL에 access_token이나 code가 포함된 경우 처리 로직이 필요할 수 있으나,
-    # Supabase Python 클라이언트는 auth.get_session()으로 현재 상태를 체크합니다.
-    # 따라서 여기서는 세션 상태를 확실히 박아두는 로직을 배치합니다.
-    pass 
-except:
-    pass
-# ▲▲▲▲▲▲▲▲▲▲ [추가된 코드] 로그인 세션 유지 로직 끝 ▲▲▲▲▲▲▲▲▲▲
-
-import streamlit as st
-
-# (기존 코드의 중복된 세션 초기화 부분은 위에서 처리했으므로, 
-# 아래 로직이 실행되어도 문제없도록 'if not in' 체크가 그대로 유지됩니다.)
-
-# 세션에 로그인 정보가 없으면 초기화
-if "is_logged_in" not in st.session_state:
-    st.session_state.is_logged_in = False
-if "user_info" not in st.session_state:
-    st.session_state.user_info = None
-
 try:
     URL = st.secrets["SUPABASE_URL"]
     KEY = st.secrets["SUPABASE_KEY"]
@@ -51,7 +20,43 @@ try:
 except:
     # 로컬 테스트 등 시크릿이 없을 경우를 대비해 예외 처리
     supabase = None
+# 2. 세션 상태 초기화
+if "is_logged_in" not in st.session_state:
+    st.session_state.is_logged_in = False
+if "user_info" not in st.session_state:
+    st.session_state.user_info = None
 
+# 3. [핵심] 카카오/구글 로그인 후 '코드(Code)' 교환 로직
+# 화면 그리기 전에 가장 먼저 토큰을 받아와야 합니다.
+def check_auth_status():
+    # 1) 이미 로그인 된 상태인지 확인
+    session = supabase.auth.get_session()
+    
+    # 2) URL에 'code'가 있다면 로그인 시도 (카카오 갔다 온 직후)
+    query_params = st.query_params
+    if "code" in query_params and not session:
+        try:
+            # 인증 코드 교환
+            auth_response = supabase.auth.exchange_code_for_session({"auth_code": query_params["code"]})
+            session = auth_response.session
+            
+            # URL 청소 (code가 남으면 새로고침할 때마다 에러 남) 및 리런
+            st.query_params.clear()
+            st.rerun()
+        except Exception as e:
+            st.error(f"로그인 처리 중 오류가 발생했습니다: {e}")
+
+    # 3) 세션 정보 상태값에 저장
+    if session:
+        st.session_state.is_logged_in = True
+        st.session_state.user_info = session.user
+    else:
+        st.session_state.is_logged_in = False
+        st.session_state.user_info = None
+
+# 위에서 만든 함수 즉시 실행
+if supabase:
+    check_auth_status()
 # ==========================================
 # [수정] 로그인 기능 함수 (구글 + 카카오)
 # ==========================================
