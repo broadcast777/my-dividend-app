@@ -260,20 +260,25 @@ def main():
                 stock_match = df[df['pure_name'] == stock]
                 if not stock_match.empty:
                     s_row = stock_match.iloc[0]
-                    # ▼▼▼▼▼ [에러 수정 완료] '코드' 컬럼 추가 ▼▼▼▼▼
+                    
                     all_data.append({
+                    # 1. 기본 분석용 데이터
                     '종목': stock, 
-                    '종목명': stock,              # ★ 추가: UI 함수가 '종목명'을 찾습니다
                     '비중': weights[stock], 
                     '자산유형': s_row['자산유형'], 
                     '투자금액_만원': amt / 10000,
+                    
+                    # 2. UI 테이블 렌더링 필수 데이터 (이게 없어서 에러 남)
+                    '종목명': stock,              
                     '코드': s_row.get('코드', ''),
                     '분류': s_row.get('분류', '국내'),
                     '연배당률': s_row.get('연배당률', 0),
-                    '금융링크': s_row.get('금융링크', '#'),    # ★ 추가: 클릭 시 이동할 링크
-                    '신규상장개월수': s_row.get('신규상장개월수', 0) # ★ 추가: 신규 뱃지 표시용
+                    '금융링크': s_row.get('금융링크', '#'),
+                    '신규상장개월수': s_row.get('신규상장개월수', 0),
+                    '현재가': s_row.get('현재가', 0),      # ★ 추가됨
+                    '환구분': s_row.get('환구분', '-'),    # ★ 추가됨
+                    '배당락일': s_row.get('배당락일', '-')  # ★ 추가됨
                 })
-                    # ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
             # 결과 계산
             total_y_div = sum([(total_invest * (weights[n]/100) * (df[df['pure_name']==n].iloc[0]['연배당률']/100)) for n in selected])
