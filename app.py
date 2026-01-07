@@ -249,6 +249,44 @@ def main():
             chart_compare = alt.Chart(c_data).mark_bar(cornerRadiusTopLeft=10, cornerRadiusTopRight=10).encode(x=alt.X('계좌 종류', sort=None, axis=alt.Axis(labelAngle=0, title=None)), y=alt.Y('월 수령액', title=None), color=alt.Color('계좌 종류', scale=alt.Scale(domain=['일반 계좌', 'ISA/연금계좌'], range=['#95a5a6', '#f1c40f']), legend=None), tooltip=[alt.Tooltip('계좌 종류'), alt.Tooltip('월 수령액', format=',.0f')]).properties(height=220)
             st.altair_chart(chart_compare, use_container_width=True)
 
+            # =========================================================
+            # [추가된 코드] 포트폴리오 저장 버튼 (여기서부터 복사)
+            # =========================================================
+            st.write("") # 여백
+            if st.button("💾 내 포트폴리오 저장하기", type="primary", use_container_width=True):
+                # 1. 로그인 체크 (상단에서 정의한 current_user 활용)
+                if not current_user:
+                    st.toast("⚠️ 로그인이 필요한 기능입니다. 사이드바를 확인해주세요!")
+                    st.warning("로그인을 하셔야 '나만의 포트폴리오'를 저장할 수 있습니다.")
+                else:
+                    try:
+                        # 2. 저장할 데이터 포장 (JSON)
+                        # 나중에 불러오기 쉽게 '구성(composition)' 위주로 저장합니다.
+                        save_data = {
+                            "total_money": total_invest,       # 총 투자금
+                            "composition": weights,            # {종목명: 비중(%)} 딕셔너리
+                            "summary": {                       # 요약 정보 (표시용)
+                                "monthly_income": total_m,     # 월 수령액
+                                "yield": avg_y                 # 평균 배당률
+                            }
+                        }
+                        
+                        # 3. Supabase로 발사! 🚀
+                        supabase.table("portfolios").insert({
+                            "user_id": current_user.id,
+                            "user_email": current_user.email,
+                            "ticker_data": save_data  # 위에서 만든 JSON 데이터
+                        }).execute()
+                        
+                        st.success("짐 싸기 완료! 포트폴리오가 안전하게 저장되었습니다. 🧳")
+                        st.balloons() # 축하 풍선 🎈
+                        
+                    except Exception as e:
+                        st.error(f"저장 중 오류가 발생했습니다: {e}")
+            # =========================================================
+            # [끝] 여기까지 복사해서 붙여넣으세요
+            # =========================================================
+
             if total_y_div > 20000000:
                 st.warning(f"🚨 **주의:** 연간 예상 배당금이 **{total_y_div/10000:,.0f}만원**입니다. 금융소득종합과세 대상에 해당될 수 있습니다.")
 
