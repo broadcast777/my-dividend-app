@@ -86,7 +86,7 @@ try:
             storage=StreamlitStorage(),
             auto_refresh_token=True,
             persist_session=True,
-            local_storage={},
+            
         )
     )
     print("[Supabase] 클라이언트 초기화 성공")
