@@ -22,6 +22,46 @@ except:
     supabase = None
 
 # ==========================================
+# [추가] 로그인 기능 함수
+# ==========================================
+def show_login_button():
+    # supabase가 없으면(로컬 등) 중단
+    if not supabase: return None 
+    
+    # 1. 세션(로그인 상태) 확인
+    session = supabase.auth.get_session()
+    
+    if session:
+        # 로그인 성공 시
+        user_email = session.user.email
+        nickname = user_email.split("@")[0]
+        
+        st.sidebar.markdown("---")
+        st.sidebar.success(f"👋 반가워요! **{nickname}**님")
+        
+        if st.sidebar.button("로그아웃", key="logout_btn"):
+            supabase.auth.sign_out()
+            st.rerun()
+        return session.user
+    else:
+        # 로그인 안 된 상태
+        st.sidebar.markdown("---")
+        st.sidebar.info("💾 포트폴리오 저장을 위해 로그인")
+        
+        # 구글 로그인 URL 생성
+        res = supabase.auth.sign_in_with_oauth({
+            "provider": "google",
+            "options": {
+                # ★ 중요: 배포 주소와 일치해야 함
+                "redirect_to": "https://dividend-pange.streamlit.app"
+            }
+        })
+        
+        if res.url:
+            st.sidebar.link_button("G 구글 로그인", res.url, type="primary")
+        return None
+
+# ==========================================
 # [2] 메인 애플리케이션
 # ==========================================
 def main():
@@ -52,6 +92,13 @@ def main():
                     st.success("관리자 모드 ON 🚀")
                 else:
                     st.error("비밀번호 불일치")
+
+    
+    # ---------------------------------------------------------
+    # [추가] 일반 사용자 로그인 버튼 (사이드바 표시)
+    # ---------------------------------------------------------
+    current_user = show_login_button()
+   
 
     # ---------------------------------------------------------
     # [2] 점검 모드 가동 로직 (관리자가 아니면 여기서 멈춤)
