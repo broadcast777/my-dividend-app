@@ -375,16 +375,15 @@ def main():
                 # =========================================================
                 # [저장 로직] 로그인 여부에 따라 버튼 자동 변경
                 # =========================================================
-                st.write("") 
+                # [수정] 새로 저장 vs 기존 수정 기능 통합
+                st.write("")
                 with st.container(border=True):
-                    st.write("💾 **포트폴리오 저장하기**")
+                    st.write("💾 **포트폴리오 저장 / 수정**")
                     
-                    # 1. 미로그인: 로그인 버튼 노출 (스크롤 불필요)
                     if not st.session_state.is_logged_in:
-                        st.info("🔒 로그인을 하셔야 내 포트폴리오를 저장할 수 있습니다.")
+                        st.info("🔒 로그인이 필요합니다.")
                         l_c1, l_c2 = st.columns(2)
                         callback_url = "https://dividend-pange.streamlit.app/"
-                        
                         with l_c1:
                             if st.button("🔵 Google 로그인", key="save_google", use_container_width=True):
                                 try:
@@ -397,45 +396,64 @@ def main():
                                     res = supabase.auth.sign_in_with_oauth({"provider": "kakao", "options": {"redirect_to": callback_url}})
                                     if res.url: st.markdown(f'<meta http-equiv="refresh" content="0;url={res.url}">', unsafe_allow_html=True)
                                 except: pass
-                    
-                    # 2. 로그인됨: 저장 입력창 노출
                     else:
-                        c_save1, c_save2 = st.columns([2, 1])
-                        p_name = c_save1.text_input("이름 입력 (예: 은퇴용)", placeholder="비워두면 자동 저장됨", label_visibility="collapsed")
-                        
-                        if c_save2.button("저장하기", type="primary", use_container_width=True):
-                            try:
-                                user = st.session_state.user_info
-                                final_name = p_name.strip()
-                                if not final_name:
-                                    cnt_res = supabase.table("portfolios").select("id", count="exact").eq("user_id", user.id).execute()
-                                    next_num = (cnt_res.count or 0) + 1
-                                    final_name = f"포트폴리오 {next_num}"
-
-                                save_data = {
-                                    "total_money": st.session_state.total_invest,
-                                    "composition": weights,
-                                    "summary": {"monthly": total_m, "yield": avg_y}
-                                }
-                                
-                                supabase.table("portfolios").insert({
-                                    "user_id": user.id,
-                                    "user_email": user.email,
-                                    "name": final_name,
-                                    "ticker_data": save_data
-                                }).execute()
-                                
-                                st.success(f"[{final_name}] 저장되었습니다!")
-                                st.balloons()
-                                
-                                # ▼▼▼ [추가] 1초 뒤에 새로고침해서 사이드바 갱신 ▼▼▼
-                                import time
-                                time.sleep(1.2) # 풍선 보여줄 시간 벌기
-                                st.rerun()      # 화면 새로고침! (이제 사이드바에 바로 뜹니다)
-                                # ▲▲▲ [여기까지] ▲▲▲
+                        try:
+                            user = st.session_state.user_info
                             
-                            except Exception as e:
-                                st.error(f"저장 실패: {e}")
+                            # [1] 저장 방식 선택 (라디오 버튼)
+                            save_mode = st.radio("방식 선택", ["✨ 새로 만들기", "🔄 기존 파일 수정"], horizontal=True, label_visibility="collapsed")
+                            
+                            # 공통 저장 데이터
+                            save_data = {
+                                "total_money": st.session_state.total_invest,
+                                "composition": weights,
+                                "summary": {"monthly": total_m, "yield": avg_y}
+                            }
+
+                            if save_mode == "✨ 새로 만들기":
+                                c_new1, c_new2 = st.columns([2, 1])
+                                p_name = c_new1.text_input("새 이름 입력", placeholder="비워두면 자동 이름", label_visibility="collapsed")
+                                
+                                if c_new2.button("새로 저장", type="primary", use_container_width=True):
+                                    final_name = p_name.strip()
+                                    if not final_name:
+                                        cnt_res = supabase.table("portfolios").select("id", count="exact").eq("user_id", user.id).execute()
+                                        next_num = (cnt_res.count or 0) + 1
+                                        final_name = f"포트폴리오 {next_num}"
+                                    
+                                    supabase.table("portfolios").insert({
+                                        "user_id": user.id, "user_email": user.email, "name": final_name, "ticker_data": save_data
+                                    }).execute()
+                                    
+                                    st.success(f"[{final_name}] 저장 완료!"); st.balloons()
+                                    import time; time.sleep(1.0); st.rerun()
+
+                            else: # 🔄 기존 파일 수정 모드
+                                # 내 목록 가져오기
+                                exist_res = supabase.table("portfolios").select("id, name, created_at").eq("user_id", user.id).order("created_at", desc=True).execute()
+                                
+                                if not exist_res.data:
+                                    st.warning("수정할 포트폴리오가 없습니다. 새로 만들어주세요.")
+                                else:
+                                    # 선택 박스용 데이터 가공
+                                    exist_opts = {f"{p.get('name') or '이름없음'} ({p['created_at'][5:10]})": p['id'] for p in exist_res.data}
+                                    
+                                    c_up1, c_up2 = st.columns([2, 1])
+                                    selected_label = c_up1.selectbox("수정할 파일 선택", list(exist_opts.keys()), label_visibility="collapsed")
+                                    target_id = exist_opts[selected_label]
+                                    
+                                    if c_up2.button("덮어쓰기", type="primary", use_container_width=True):
+                                        # Update 쿼리 실행
+                                        supabase.table("portfolios").update({
+                                            "ticker_data": save_data,
+                                            "created_at": "now()" # 수정 시간 갱신 (선택사항)
+                                        }).eq("id", target_id).execute()
+                                        
+                                        st.success("수정 완료! 내용이 업데이트되었습니다."); st.balloons()
+                                        import time; time.sleep(1.0); st.rerun()
+
+                        except Exception as e:
+                            st.error(f"오류 발생: {e}")
 
                 st.write("")
                 st.info("""
