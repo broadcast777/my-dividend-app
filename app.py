@@ -247,7 +247,7 @@ def render_sidebar_login_ui():
 # [4] 메인 애플리케이션
 # ==========================================
 def main():
-    MAINTENANCE_MODE = False
+    MAINTENANCE_MODE = True
 
     # ---------------------------------------------------------
     # [1] 관리자 인증 로직
