@@ -112,7 +112,6 @@ def check_auth_status():
     if not supabase: return
 
     # 🔍 [1단계] 이미 로그인된 상태인지 먼저 확인 (가장 중요!)
-    # 이미 로그인이 되어 있다면, URL에 있는 code는 옛날 것이므로 무시해야 합니다.
     try:
         session = supabase.auth.get_session()
         if session and session.user:
@@ -120,10 +119,9 @@ def check_auth_status():
             st.session_state.is_logged_in = True
             st.session_state.user_info = session.user
             
-            # URL에 code가 남아있다면 보기 싫으니까 지워줍니다.
             if "code" in st.query_params:
                 st.query_params.clear()
-            return # 여기서 함수 종료! (아래 코드 실행 안 함)
+            return 
     except Exception as e:
         print(f"[AUTH] 세션 확인 중 경미한 오류: {e}")
 
@@ -134,7 +132,6 @@ def check_auth_status():
             auth_code = query_params["code"]
             print(f"[AUTH] 🔄 OAuth 코드 교환 시작... (code: {auth_code[:10]}...)")
             
-            # 배포된 주소 (로컬 테스트 시에는 http://localhost:8501)
             redirect_url = "https://dividend-pange.streamlit.app/"
             
             auth_response = supabase.auth.exchange_code_for_session({
@@ -148,7 +145,6 @@ def check_auth_status():
                 st.session_state.is_logged_in = True
                 st.session_state.user_info = session.user
             
-            # 성공했으므로 URL 정리
             st.query_params.clear()
             st.session_state.code_processed = True
             st.success("✅ 로그인되었습니다!")
@@ -158,22 +154,16 @@ def check_auth_status():
             error_msg = str(e)
             print(f"[AUTH] ❌ 교환 실패: {error_msg}")
             
-            # ★ 핵심: 'verifier' 에러나 'grant' 에러는
-            # 보통 "새로고침 되면서 이미 처리된 코드를 또 넣어서" 나는 에러입니다.
-            # 사용자에게 보여주지 말고 조용히 처리합니다.
             if "code verifier" in error_msg or "invalid_grant" in error_msg:
-                # 에러는 났지만, 혹시 세션은 살아있나? 마지막 확인
                 session = supabase.auth.get_session()
                 if session and session.user:
                     st.session_state.is_logged_in = True
                     st.session_state.user_info = session.user
-                    st.query_params.clear() # URL 청소하고 모른 척 넘어가기
+                    st.query_params.clear() 
                     return
 
-            # 진짜 심각한 에러만 보여주기
             if not st.session_state.is_logged_in:
                 st.error("로그인 시간이 만료되었습니다. 다시 시도해주세요.")
-                # st.error(f"디버그용 에러 메시지: {error_msg}") # 필요할 때만 주석 해제
                 
             st.session_state.code_processed = True
             st.query_params.clear()
@@ -183,64 +173,64 @@ check_auth_status()
 
 
 # ==========================================
-# [3] 사이드바 로그인 UI 함수
+# [3] 로그인 UI 함수 (메인 화면으로 이동됨)
 # ==========================================
-def render_sidebar_login_ui():
-    """사이드바 인증 UI"""
+def render_login_ui():
+    """메인 화면 상단에 표시되는 인증 UI"""
     if not supabase: return
 
     is_logged_in = st.session_state.get("is_logged_in", False)
     user_info = st.session_state.get("user_info", None)
     
-    st.sidebar.markdown("---")
-    
+    # 로그인 상태일 때는 사이드바에 프로필 표시 (공간 절약)
     if is_logged_in and user_info:
-        # ✅ 로그인 상태
         email = user_info.email if user_info.email else "User"
         nickname = email.split("@")[0]
         
-        st.sidebar.success(f"👋 반가워요! **{nickname}**님")
-        
-        if st.sidebar.button("🚪 로그아웃", key="logout_btn", use_container_width=True):
-            supabase.auth.sign_out()
-            st.session_state.is_logged_in = False
-            st.session_state.user_info = None
-            st.session_state.code_processed = False
-            print("[AUTH] 로그아웃 완료")
-            st.rerun()
+        with st.sidebar:
+            st.success(f"👋 반가워요! **{nickname}**님")
+            if st.button("🚪 로그아웃", key="logout_btn", use_container_width=True):
+                supabase.auth.sign_out()
+                st.session_state.is_logged_in = False
+                st.session_state.user_info = None
+                st.session_state.code_processed = False
+                print("[AUTH] 로그아웃 완료")
+                st.rerun()
+    
+    # ★ 로그인 안 된 상태: 메인 화면에 크게 표시 (요청하신 부분)
     else:
-        # ❌ 미로그인 상태
-        st.sidebar.info("💾 포트폴리오 저장을 위해 로그인")
-        
-        col1, col2 = st.sidebar.columns(2)
-        callback_url = "https://dividend-pange.streamlit.app/"
-        
-        # 버튼 클릭 시에만 로그인 시도 (암호 덮어쓰기 방지)
-        with col1:
-            if st.button("🔵 Google", key="btn_google", use_container_width=True):
-                try:
-                    res = supabase.auth.sign_in_with_oauth({
-                        "provider": "google",
-                        "options": {"redirect_to": callback_url}
-                    })
-                    if res.url:
-                        st.markdown(f'<meta http-equiv="refresh" content="0;url={res.url}">', unsafe_allow_html=True)
-                except Exception as e:
-                    st.error(f"오류: {e}")
+        with st.container():
+            st.info("💾 포트폴리오 저장을 위해 로그인")
+            
+            col1, col2 = st.columns(2) # 메인 컬럼 사용
+            callback_url = "https://dividend-pange.streamlit.app/"
+            
+            with col1:
+                if st.button("🔵 Google", key="btn_google", use_container_width=True):
+                    try:
+                        res = supabase.auth.sign_in_with_oauth({
+                            "provider": "google",
+                            "options": {"redirect_to": callback_url}
+                        })
+                        if res.url:
+                            st.markdown(f'<meta http-equiv="refresh" content="0;url={res.url}">', unsafe_allow_html=True)
+                    except Exception as e:
+                        st.error(f"오류: {e}")
 
-        with col2:
-            if st.button("💬 Kakao", key="btn_kakao", use_container_width=True):
-                try:
-                    res = supabase.auth.sign_in_with_oauth({
-                        "provider": "kakao",
-                        "options": {"redirect_to": callback_url}
-                    })
-                    if res.url:
-                        st.markdown(f'<meta http-equiv="refresh" content="0;url={res.url}">', unsafe_allow_html=True)
-                except Exception as e:
-                    st.error(f"오류: {e}")
-        
-        st.sidebar.caption("🔒 안전하게 로그인됩니다.")
+            with col2:
+                if st.button("💬 Kakao", key="btn_kakao", use_container_width=True):
+                    try:
+                        res = supabase.auth.sign_in_with_oauth({
+                            "provider": "kakao",
+                            "options": {"redirect_to": callback_url}
+                        })
+                        if res.url:
+                            st.markdown(f'<meta http-equiv="refresh" content="0;url={res.url}">', unsafe_allow_html=True)
+                    except Exception as e:
+                        st.error(f"오류: {e}")
+            
+            st.caption("🔒 안전하게 로그인됩니다.")
+            st.markdown("---")
 
 
 # ==========================================
@@ -250,14 +240,14 @@ def main():
     MAINTENANCE_MODE = False
 
     # ---------------------------------------------------------
-    # [1] 관리자 인증 로직 (항상 보이도록 유지)
+    # [1] 관리자 인증 로직 (사이드바 -> 메인 Expander로 이동)
     # ---------------------------------------------------------
     is_admin = False
     if st.query_params.get("admin", "false").lower() == "true":
         ADMIN_HASH = "c41b0bb392db368a44ce374151794850417b56c9786e3c482f825327c7153182"
-        with st.sidebar:
-            st.header("🐌 메뉴 / 관리")
-            password_input = st.text_input("🔐 관리자 접속", type="password", placeholder="비밀번호 입력")
+        # ★ 요청대로 밖으로 뺌 (Expander 사용해서 깔끔하게)
+        with st.expander("🔐 관리자 접속", expanded=False):
+            password_input = st.text_input("비밀번호 입력", type="password")
             if password_input:
                 if hashlib.sha256(password_input.encode()).hexdigest() == ADMIN_HASH:
                     is_admin = True
@@ -266,30 +256,20 @@ def main():
                     st.error("비밀번호 불일치")
 
     # ---------------------------------------------------------
-    # [2] 사이드바 로그인 UI 렌더링 (항상 보이도록 유지)
+    # [2] 로그인 UI 렌더링 (메인 상단)
     # ---------------------------------------------------------
-    render_sidebar_login_ui()
+    render_login_ui()
     
-    # [중요] 메인 로직에서 사용할 유저 변수는 여기서 session_state를 직접 할당
     current_user = st.session_state.user_info
 
     # ---------------------------------------------------------
-    # [NEW] 사이드바 메뉴 선택 (테이블 분리용)
-    # ---------------------------------------------------------
-    with st.sidebar:
-        st.markdown("---")
-        # 여기가 핵심입니다: 메뉴를 만들어 줍니다.
-        menu = st.radio("📂 **메뉴 이동**", ["💰 배당금 계산기", "📃 전체 종목 리스트"], label_visibility="visible")
-
-    # ---------------------------------------------------------
-    # [3] 점검 모드
+    # [3] 점검 모드 및 메인 타이틀
     # ---------------------------------------------------------
     if MAINTENANCE_MODE and not is_admin:
         st.title("🚧 시스템 정기 점검 중")
         st.write("잠시 후 다시 접속해 주세요! 🙇‍♂️")
         st.stop()
     
-    # 헤더 타이틀 (공통)
     if is_admin:
         st.title("💰 배당팽이 대시보드 (관리자 모드)")
     else:
@@ -299,7 +279,7 @@ def main():
     df_raw = logic.load_stock_data_from_csv()
     if df_raw.empty: st.stop()
     
-    # [관리자] 갱신 도구
+    # [관리자] 갱신 도구 (관리자만 보임 - 사이드바 유지 or 이동 가능, 일단 유지)
     if is_admin:
         with st.sidebar:
             st.markdown("---")
@@ -337,6 +317,13 @@ def main():
     # 데이터 처리
     with st.spinner('⚙️ 배당 데이터베이스 엔진 가동 중...'):
         df = logic.load_and_process_data(df_raw, is_admin=is_admin)
+
+    # ---------------------------------------------------------
+    # [NEW] 사이드바 메뉴 (테이블 분리)
+    # ---------------------------------------------------------
+    with st.sidebar:
+        st.markdown("---")
+        menu = st.radio("📂 **메뉴 이동**", ["💰 배당금 계산기", "📃 전체 종목 리스트"])
 
     # =================================================================================
     # [화면 1] 배당금 계산기 (기존 메인 화면)
@@ -422,7 +409,7 @@ def main():
                 st.write("") 
                 if st.button("💾 내 포트폴리오 저장하기", type="primary", use_container_width=True):
                     if not st.session_state.is_logged_in or not st.session_state.user_info:
-                        st.toast("⚠️ 로그인이 필요한 기능입니다. 사이드바를 확인해주세요!")
+                        st.toast("⚠️ 로그인이 필요한 기능입니다. 상단의 로그인 버튼을 확인해주세요!")
                         st.warning("로그인을 하셔야 '나만의 포트폴리오'를 저장할 수 있습니다.")
                     else:
                         try:
@@ -672,7 +659,7 @@ def main():
     # [화면 2] 전체 종목 리스트 (별도 메뉴)
     # =================================================================================
     elif menu == "📃 전체 종목 리스트":
-        # 섹션 4: 전체 데이터 테이블 출력 (메뉴 선택 시에만 보임)
+        # 섹션 4: 전체 데이터 테이블 출력
         st.info("💡 **이동 안내:** '코드' 클릭 시 블로그 분석글로, '🔗정보' 클릭 시 네이버/야후 금융 정보로 이동합니다. (**⭐ 표시는 상장 1년 미만 종목입니다.**)")
         
         tab_all, tab_kor, tab_usa = st.tabs(["🌎 전체", "🇰🇷 국내", "🇺🇸 해외"])
@@ -685,7 +672,7 @@ def main():
             ui.render_custom_table(df[df['분류'] == '해외'])
 
     # ------------------------------------------
-    # 하단 푸터 및 방문자 추적 (공통)
+    # 하단 푸터 및 방문자 추적
     # ------------------------------------------
     st.divider()
     st.caption("© 2025 **배당팽이** | 실시간 데이터 기반 배당 대시보드")
