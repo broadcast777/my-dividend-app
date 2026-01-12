@@ -472,6 +472,14 @@ def main():
                     if c_save2.button("저장하기", type="primary", use_container_width=True):
                         if not st.session_state.is_logged_in:
                             st.toast("로그인이 필요합니다!")
+                            # ▼▼▼ [추가] 화면 최상단으로 자동 스크롤 기능 ▼▼▼
+                            st.markdown("""
+                                <script>
+                                    var body = window.parent.document.querySelector(".main");
+                                    body.scrollTo({top: 0, behavior: 'smooth'});
+                                </script>
+                                """, unsafe_allow_html=True)
+                            # ▲▲▲ [여기까지] ▲▲▲
                         else:
                             try:
                                 user = st.session_state.user_info
