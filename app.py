@@ -234,13 +234,16 @@ def main():
     # ---------------------------------------------------------
     # 사이드바 메뉴 & 불러오기 & 삭제 기능
     # ---------------------------------------------------------
+    # ---------------------------------------------------------
+    # 사이드바 메뉴 & 불러오기 (UI 개선: 토글 방식)
+    # ---------------------------------------------------------
     with st.sidebar:
         if not st.session_state.is_logged_in:
             st.markdown("---")
         
         menu = st.radio("📂 **메뉴 이동**", ["💰 배당금 계산기", "📃 전체 종목 리스트"], label_visibility="visible")
         
-        # [불러오기 및 삭제 기능]
+        # [불러오기 및 관리 기능]
         st.markdown("---")
         with st.expander("📂 불러오기 / 관리"):
             if not st.session_state.is_logged_in:
@@ -248,34 +251,39 @@ def main():
             else:
                 try:
                     uid = st.session_state.user_info.id
-                    # 최신순 정렬
                     resp = supabase.table("portfolios").select("*").eq("user_id", uid).order("created_at", desc=True).execute()
                     
                     if resp.data:
-                        # 리스트 만들기
-                        opts = {f"{p.get('name') or '이름없음'} ({p['created_at'][:10]})": p for p in resp.data}
+                        # 1. 목록 표시 (이름 + 날짜)
+                        opts = {}
+                        for p in resp.data:
+                            date_str = p['created_at'][5:10] # 월-일 (01-12)
+                            time_str = p['created_at'][11:16] # 시:분 (14:30)
+                            name = p.get('name') or '이름없음'
+                            # 모바일 고려해서 최대한 짧게: "이름 (01-12 14:30)"
+                            label = f"{name} ({date_str} {time_str})"
+                            opts[label] = p
+
                         sel_name = st.selectbox("항목 선택", list(opts.keys()), label_visibility="collapsed")
                         
-                        # 버튼 2개 배치 (복구 / 삭제)
-                        col_load, col_del = st.columns([1, 1])
+                        # 2. UI 깔끔하게 하기: '삭제 모드' 스위치
+                        is_delete_mode = st.toggle("🗑️ 삭제 모드 켜기")
                         
-                        with col_load:
-                            if st.button("📂 복구", use_container_width=True):
+                        if is_delete_mode:
+                            # 삭제 모드일 때: 빨간 버튼 표시
+                            if st.button("🚨 영구 삭제", type="primary", use_container_width=True):
+                                target_id = opts[sel_name]['id']
+                                supabase.table("portfolios").delete().eq("id", target_id).execute()
+                                st.toast("삭제되었습니다.", icon="🗑️")
+                                st.rerun()
+                        else:
+                            # 평소: 복구 버튼 표시
+                            if st.button("📂 불러오기", use_container_width=True):
                                 data = opts[sel_name]['ticker_data']
                                 st.session_state.total_invest = int(data.get('total_money', 30000000))
                                 st.session_state.selected_stocks = list(data.get('composition', {}).keys())
-                                st.toast("성공적으로 불러왔습니다!")
-                                st.rerun() 
-                        
-                        with col_del:
-                            if st.button("🗑️ 삭제", type="secondary", use_container_width=True):
-                                try:
-                                    target_id = opts[sel_name]['id']
-                                    supabase.table("portfolios").delete().eq("id", target_id).execute()
-                                    st.toast("삭제되었습니다.", icon="🗑️")
-                                    st.rerun() # 목록 갱신을 위해 새로고침
-                                except Exception as e:
-                                    st.error("삭제 중 오류 발생")
+                                st.toast("성공적으로 불러왔습니다!", icon="✅")
+                                st.rerun()
                     else:
                         st.caption("저장된 기록이 없습니다.")
                 except Exception as e:
