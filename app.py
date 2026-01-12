@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import random # [복구] 랜덤 비유를 위해 필요
 
 # [모듈화] 분리한 파일들을 불러옵니다
 import logic 
@@ -141,16 +142,15 @@ check_auth_status()
 
 
 # ==========================================
-# [3] 로그인 UI 함수 (수정됨: 상단 로그인 제거)
+# [3] 로그인 UI 함수
 # ==========================================
 def render_login_ui():
-    """로그인 상태일 때만 사이드바에 프로필 표시 (미로그인 시 상단 숨김)"""
+    """로그인 상태일 때만 사이드바에 프로필 표시"""
     if not supabase: return
 
     is_logged_in = st.session_state.get("is_logged_in", False)
     user_info = st.session_state.get("user_info", None)
     
-    # [로그인 됨] -> 사이드바 상단에 프로필 표시
     if is_logged_in and user_info:
         email = user_info.email if user_info.email else "User"
         nickname = email.split("@")[0]
@@ -164,8 +164,6 @@ def render_login_ui():
                 st.session_state.user_info = None
                 st.session_state.code_processed = False
                 st.rerun()
-    
-    # [로그인 안 됨] -> 상단에 아무것도 표시하지 않음 (깔끔!)
     else:
         pass 
 
@@ -176,13 +174,13 @@ def render_login_ui():
 def main():
     MAINTENANCE_MODE = False
     
-    # [1] 값 초기화 (메뉴 이동 시 유지용)
+    # [1] 값 초기화
     if "total_invest" not in st.session_state: 
         st.session_state.total_invest = 30000000
     if "selected_stocks" not in st.session_state: 
         st.session_state.selected_stocks = []
 
-    # [2] 관리자 인증 (메인 Expander)
+    # [2] 관리자 인증
     is_admin = False
     if st.query_params.get("admin", "false").lower() == "true":
         ADMIN_HASH = "c41b0bb392db368a44ce374151794850417b56c9786e3c482f825327c7153182"
@@ -195,7 +193,7 @@ def main():
                 else:
                     st.error("비밀번호 불일치")
 
-    # [3] 로그인 UI 처리
+    # [3] 로그인 UI
     render_login_ui()
     
     # [4] 점검 모드 및 타이틀
@@ -232,9 +230,6 @@ def main():
         df = logic.load_and_process_data(df_raw, is_admin=is_admin)
 
     # ---------------------------------------------------------
-    # 사이드바 메뉴 & 불러오기 & 삭제 기능
-    # ---------------------------------------------------------
-    # ---------------------------------------------------------
     # 사이드바 메뉴 & 불러오기 (UI 개선: 토글 방식)
     # ---------------------------------------------------------
     with st.sidebar:
@@ -254,13 +249,12 @@ def main():
                     resp = supabase.table("portfolios").select("*").eq("user_id", uid).order("created_at", desc=True).execute()
                     
                     if resp.data:
-                        # 1. 목록 표시 (이름 + 날짜)
+                        # 1. 목록 표시
                         opts = {}
                         for p in resp.data:
-                            date_str = p['created_at'][5:10] # 월-일 (01-12)
-                            time_str = p['created_at'][11:16] # 시:분 (14:30)
+                            date_str = p['created_at'][5:10] # 월-일
+                            time_str = p['created_at'][11:16] # 시:분
                             name = p.get('name') or '이름없음'
-                            # 모바일 고려해서 최대한 짧게: "이름 (01-12 14:30)"
                             label = f"{name} ({date_str} {time_str})"
                             opts[label] = p
 
@@ -270,14 +264,12 @@ def main():
                         is_delete_mode = st.toggle("🗑️ 삭제 모드 켜기")
                         
                         if is_delete_mode:
-                            # 삭제 모드일 때: 빨간 버튼 표시
                             if st.button("🚨 영구 삭제", type="primary", use_container_width=True):
                                 target_id = opts[sel_name]['id']
                                 supabase.table("portfolios").delete().eq("id", target_id).execute()
                                 st.toast("삭제되었습니다.", icon="🗑️")
                                 st.rerun()
                         else:
-                            # 평소: 복구 버튼 표시
                             if st.button("📂 불러오기", use_container_width=True):
                                 data = opts[sel_name]['ticker_data']
                                 st.session_state.total_invest = int(data.get('total_money', 30000000))
@@ -289,7 +281,6 @@ def main():
                 except Exception as e:
                     st.error("불러오기 실패")
 
-    
     # =================================================================================
     # [화면 1] 배당금 계산기
     # =================================================================================
@@ -300,13 +291,13 @@ def main():
         with st.expander("🧮 나만의 배당 포트폴리오 시뮬레이션", expanded=True):
             col1, col2 = st.columns([1, 2])
             
-            # 1. 투자금 입력 (세션 값 연동)
+            # 1. 투자금 입력
             current_invest_val = int(st.session_state.total_invest / 10000)
             invest_input = col1.number_input("💰 총 투자 금액 (만원)", min_value=100, value=current_invest_val, step=100)
             st.session_state.total_invest = invest_input * 10000
             total_invest = st.session_state.total_invest 
             
-            # 2. 종목 선택 (세션 값 연동)
+            # 2. 종목 선택
             selected = col2.multiselect("📊 종목 선택", df['pure_name'].unique(), default=st.session_state.selected_stocks)
             st.session_state.selected_stocks = selected
 
@@ -375,8 +366,7 @@ def main():
                 # =========================================================
                 # [저장 로직] 로그인 여부에 따라 버튼 자동 변경
                 # =========================================================
-                # [수정] 새로 저장 vs 기존 수정 기능 통합
-                st.write("")
+                st.write("") 
                 with st.container(border=True):
                     st.write("💾 **포트폴리오 저장 / 수정**")
                     
@@ -399,11 +389,8 @@ def main():
                     else:
                         try:
                             user = st.session_state.user_info
-                            
-                            # [1] 저장 방식 선택 (라디오 버튼)
                             save_mode = st.radio("방식 선택", ["✨ 새로 만들기", "🔄 기존 파일 수정"], horizontal=True, label_visibility="collapsed")
                             
-                            # 공통 저장 데이터
                             save_data = {
                                 "total_money": st.session_state.total_invest,
                                 "composition": weights,
@@ -428,27 +415,21 @@ def main():
                                     st.success(f"[{final_name}] 저장 완료!"); st.balloons()
                                     import time; time.sleep(1.0); st.rerun()
 
-                            else: # 🔄 기존 파일 수정 모드
-                                # 내 목록 가져오기
+                            else: 
                                 exist_res = supabase.table("portfolios").select("id, name, created_at").eq("user_id", user.id).order("created_at", desc=True).execute()
-                                
                                 if not exist_res.data:
                                     st.warning("수정할 포트폴리오가 없습니다. 새로 만들어주세요.")
                                 else:
-                                    # 선택 박스용 데이터 가공
                                     exist_opts = {f"{p.get('name') or '이름없음'} ({p['created_at'][5:10]})": p['id'] for p in exist_res.data}
-                                    
                                     c_up1, c_up2 = st.columns([2, 1])
                                     selected_label = c_up1.selectbox("수정할 파일 선택", list(exist_opts.keys()), label_visibility="collapsed")
                                     target_id = exist_opts[selected_label]
                                     
                                     if c_up2.button("덮어쓰기", type="primary", use_container_width=True):
-                                        # Update 쿼리 실행
                                         supabase.table("portfolios").update({
                                             "ticker_data": save_data,
-                                            "created_at": "now()" # 수정 시간 갱신 (선택사항)
+                                            "created_at": "now()"
                                         }).eq("id", target_id).execute()
-                                        
                                         st.success("수정 완료! 내용이 업데이트되었습니다."); st.balloons()
                                         import time; time.sleep(1.0); st.rerun()
 
@@ -502,9 +483,13 @@ def main():
                         
                         st.write("📋 **상세 포트폴리오**")
                         ui.render_custom_table(df_ana)
+                        
+                        st.error("""**⚠️ 포트폴리오 분석 시 유의사항**
+    1. 과거의 데이터를 기반으로 한 단순 결과값이며, 실제 투자 수익을 보장하지 않습니다.
+    2. '달러 자산' 비율 실제 환노출 여부와 다를 수 있습니다 투자 전 확인이 필요합니다.
+    3. 실제 배당금 지급일과 금액은 운용사의 사정에 따라 변경될 수 있습니다.""")
 
                     with tab_simulation:
-                        # (시뮬레이션 로직 - 기존과 동일하게 유지)
                         start_money = total_invest
                         is_over_100m = start_money > 100000000
                         st.info(f"📊 상단에서 설정한 **초기 자산 {start_money/10000:,.0f}만원**으로 시뮬레이션을 시작합니다.")
@@ -597,7 +582,27 @@ def main():
                             inflation_msg_money = f"<br><span style='font-size:0.6em; color:#ff6b6b;'>(현재가치: 약 {pv_money/10000:,.0f}만원)</span>"
                             inflation_msg_monthly = f"<span style='font-size:0.7em; color:#ff6b6b;'>(현재가치: {pv_monthly/10000:,.1f}만원)</span>"
 
-                        st.markdown(f"""<div style="background-color: #e7f3ff; border: 1.5px solid #d0e8ff; border-radius: 16px; padding: 25px; text-align: center; box-shadow: 0 4px 10px rgba(0,104,201,0.05);"><p style="color: #666; font-size: 0.95em; margin: 0 0 8px 0;">{years_sim}년 뒤 모이는 돈 (세후)</p><h2 style="color: #0068c9; font-size: 2.2em; margin: 0; font-weight: 800; line-height: 1.2;">약 {real_money/10000:,.0f}만원{inflation_msg_money}</h2><p style="color: #777; font-size: 0.9em; margin: 8px 0 0 0;">(투자원금 {final_principal/10000:,.0f}만원 / {tax_msg})</p><div style="height: 1px; background-color: #d0e8ff; margin: 25px auto; width: 85%;"></div><p style="color: #0068c9; font-weight: bold; font-size: 1.1em; margin: 0 0 12px 0;">📅 월 예상 배당금: {monthly_pocket/10000:,.1f}만원 {inflation_msg_monthly}</p></div>""", unsafe_allow_html=True)
+                        # [복구] 스타벅스 비유 로직
+                        analogy_items = [
+                            {"name": "스타벅스", "unit": "잔", "price": 4500, "emoji": "☕"},
+                            {"name": "치킨", "unit": "마리", "price": 23000, "emoji": "🍗"},
+                            {"name": "제주도 항공권", "unit": "장", "price": 60000, "emoji": "✈️"},
+                            {"name": "특급호텔 숙박", "unit": "박", "price": 200000, "emoji": "🏨"}
+                        ]
+                        selected_item = random.choice(analogy_items)
+                        item_count = int(monthly_pocket // selected_item['price'])
+
+                        st.markdown(f"""<div style="background-color: #e7f3ff; border: 1.5px solid #d0e8ff; border-radius: 16px; padding: 25px; text-align: center; box-shadow: 0 4px 10px rgba(0,104,201,0.05);"><p style="color: #666; font-size: 0.95em; margin: 0 0 8px 0;">{years_sim}년 뒤 모이는 돈 (세후)</p><h2 style="color: #0068c9; font-size: 2.2em; margin: 0; font-weight: 800; line-height: 1.2;">약 {real_money/10000:,.0f}만원{inflation_msg_money}</h2><p style="color: #777; font-size: 0.9em; margin: 8px 0 0 0;">(투자원금 {final_principal/10000:,.0f}만원 / {tax_msg})</p><div style="height: 1px; background-color: #d0e8ff; margin: 25px auto; width: 85%;"></div><p style="color: #0068c9; font-weight: bold; font-size: 1.1em; margin: 0 0 12px 0;">📅 월 예상 배당금: {monthly_pocket/10000:,.1f}만원 {inflation_msg_monthly}</p><div style="background-color: rgba(255,255,255,0.5); padding: 15px; border-radius: 12px; display: inline-block; min-width: 80%;"><p style="color: #333; font-size: 1.1em; margin: 0; line-height: 1.6;">매달 <b>{selected_item['emoji']} {selected_item['name']} {item_count:,}{selected_item['unit']}</b><br>마음껏 즐기기 가능! 😋</p></div></div>""", unsafe_allow_html=True)
+                        
+                        # [복구] 시뮬레이션 경고문
+                        annual_div_income = monthly_div_final * 12
+                        if annual_div_income > 20000000:
+                            st.warning(f"🚨 **주의:** {years_sim}년 뒤 연간 배당금이 2,000만원을 초과하여 금융소득종합과세 대상이 될 수 있습니다.")
+                        
+                        st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**
+    1. 본 결과는 주가·환율 변동과 수수료 등을 제외하고, 현재 배당률로만 계산한 결과입니다.
+    2. ISA 계좌의 비과세 한도 및 세율은 세법 개정에 따라 달라질 수 있습니다.
+    3. 과거의 데이터를 기반으로 한 단순 시뮬레이션이며, 실제 투자 수익을 보장하지 않습니다.""")
 
                     with tab_goal:
                         st.subheader("🎯 목표 배당금 역산기 (은퇴 시뮬레이터)")
@@ -635,6 +640,16 @@ def main():
                             discount_factor = (1.025) ** (months_passed / 12)
                             real_value = target_monthly_goal / discount_factor
                             st.warning(f"⚠️ **물가 반영 시:** {months_passed // 12}년 뒤 {target_monthly_goal/10000:,.0f}만원의 실질 가치는 현재 기준 **약 {real_value/10000:,.1f}만원**입니다.")
+                        
+                        # [복구] 목표 탭 경고문
+                        target_annual_income = target_monthly_goal * 12
+                        if target_annual_income > 20000000:
+                            st.warning(f"🚨 **현실적 조언:** 설정하신 목표(월 {target_monthly_goal/10000:,.0f}만원) 달성 시, 연 배당소득이 2,000만원을 넘어 **금융종합과세 대상**이 됩니다.")
+
+                        st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**
+    1. 본 결과는 주가·환율 변동과 수수료 등을 제외하고, 현재 배당률로만 계산한 결과입니다.
+    2. 실제 배당금은 운용사의 공시 및 환율 상황에 따라 매월 달라질 수 있습니다.
+    3. 과거의 데이터를 기반으로 한 단순 시뮬레이션이며, 실제 투자 수익을 보장하지 않습니다.""")
 
     # =================================================================================
     # [화면 2] 전체 종목 리스트
