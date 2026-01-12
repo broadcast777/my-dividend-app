@@ -461,34 +461,49 @@ def main():
                 # [포트폴리오 저장 로직]
                 # =========================================================
                 st.write("") 
-                if st.button("💾 내 포트폴리오 저장하기", type="primary", use_container_width=True):
-                    if not st.session_state.is_logged_in or not st.session_state.user_info:
-                        st.toast("⚠️ 로그인이 필요한 기능입니다. 상단의 로그인 버튼을 확인해주세요!")
-                        st.warning("로그인을 하셔야 '나만의 포트폴리오'를 저장할 수 있습니다.")
-                    else:
-                        try:
-                            user = st.session_state.user_info
-                            save_data = {
-                                "total_money": total_invest,
-                                "composition": weights,
-                                "summary": {
-                                    "monthly_income": total_m,
-                                    "yield": avg_y
-                                }
-                            }
-                            
-                            supabase.table("portfolios").insert({
-                                "user_id": user.id,
-                                "user_email": user.email,
-                                "ticker_data": save_data
-                            }).execute()
-                            
-                            st.success("짐 싸기 완료! 포트폴리오가 안전하게 저장되었습니다. 🧳")
-                            st.balloons() 
-                            
-                        except Exception as e:
-                            st.error(f"저장 중 오류가 발생했습니다: {e}")
+                # [교체] 이름 저장 및 자동 작명 기능이 추가된 저장 로직
+                st.write("")
+                with st.container(border=True):
+                    st.write("💾 **포트폴리오 저장**")
+                    c_save1, c_save2 = st.columns([2, 1])
+                    
+                    # 이름 입력창 (비워두면 자동)
+                    p_name = c_save1.text_input("이름 입력 (예: 은퇴용)", placeholder="비워두면 자동 저장됨", label_visibility="collapsed")
+                    
+                    if c_save2.button("저장하기", type="primary", use_container_width=True):
+                        if not st.session_state.is_logged_in:
+                            st.toast("로그인이 필요합니다!")
+                        else:
+                            try:
+                                user = st.session_state.user_info
+                                
+                                # 1. 이름 자동 생성 로직
+                                final_name = p_name.strip()
+                                if not final_name:
+                                    # 기존 갯수 세어서 번호 매기기
+                                    cnt_res = supabase.table("portfolios").select("id", count="exact").eq("user_id", user.id).execute()
+                                    next_num = (cnt_res.count or 0) + 1
+                                    final_name = f"포트폴리오 {next_num}"
 
+                                save_data = {
+                                    "total_money": st.session_state.total_invest,
+                                    "composition": weights,
+                                    "summary": {"monthly": total_m, "yield": avg_y}
+                                }
+                                
+                                # 2. DB Insert (name 컬럼 포함)
+                                supabase.table("portfolios").insert({
+                                    "user_id": user.id,
+                                    "user_email": user.email,
+                                    "name": final_name,
+                                    "ticker_data": save_data
+                                }).execute()
+                                
+                                st.success(f"[{final_name}] 저장되었습니다!")
+                                st.balloons()
+                            except Exception as e:
+                                st.error(f"저장 실패: {e}")
+                                
                 # [기존 코드] 저장 버튼 로직 끝나는 곳 바로 뒤
             
                 # ▼▼▼ [여기서부터 붙여넣기] ▼▼▼
