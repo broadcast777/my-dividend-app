@@ -115,7 +115,7 @@ def check_auth_status():
     if "code" in query_params and not st.session_state.get("code_processed", False):
         try:
             auth_code = query_params["code"]
-            redirect_url = "https://dividend-pange.streamlit.app/"
+            redirect_url = "https://dividend-pange.streamlit.app"
             
             auth_response = supabase.auth.exchange_code_for_session({
                 "auth_code": auth_code,
