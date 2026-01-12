@@ -344,11 +344,23 @@ def main():
         # ------------------------------------------
         # 섹션 1: 포트폴리오 시뮬레이션
         # ------------------------------------------
+        # [수정] 입력창이 '저장된 값(session_state)'을 불러오도록 변경
         with st.expander("🧮 나만의 배당 포트폴리오 시뮬레이션", expanded=True):
             col1, col2 = st.columns([1, 2])
-            total_invest = col1.number_input("💰 총 투자 금액 (만원)", min_value=100, value=3000, step=100) * 10000
-            selected = col2.multiselect("📊 종목 선택", df['pure_name'].unique())
-
+            
+            # 1. 투자금 입력 (저장된 값 나누기 10000 해서 보여줌)
+            current_invest_val = int(st.session_state.total_invest / 10000)
+            invest_input = col1.number_input("💰 총 투자 금액 (만원)", min_value=100, value=current_invest_val, step=100)
+            
+            # 입력값이 바뀌면 즉시 저장소에 업데이트
+            st.session_state.total_invest = invest_input * 10000
+            
+            # 2. 종목 선택 (저장된 리스트를 기본값으로 설정)
+            selected = col2.multiselect("📊 종목 선택", df['pure_name'].unique(), default=st.session_state.selected_stocks)
+            
+            # 선택된 종목이 바뀌면 즉시 저장소에 업데이트
+            st.session_state.selected_stocks = selected
+            
             if selected:
                 # 해외 ETF 경고
                 has_foreign_stock = any(df[df['pure_name'] == s_name].iloc[0]['분류'] == '해외' for s_name in selected)
