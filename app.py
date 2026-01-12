@@ -427,6 +427,13 @@ def main():
                                 
                                 st.success(f"[{final_name}] 저장되었습니다!")
                                 st.balloons()
+                                
+                                # ▼▼▼ [추가] 1초 뒤에 새로고침해서 사이드바 갱신 ▼▼▼
+                                import time
+                                time.sleep(1.2) # 풍선 보여줄 시간 벌기
+                                st.rerun()      # 화면 새로고침! (이제 사이드바에 바로 뜹니다)
+                                # ▲▲▲ [여기까지] ▲▲▲
+                            
                             except Exception as e:
                                 st.error(f"저장 실패: {e}")
 
