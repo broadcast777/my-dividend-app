@@ -474,11 +474,11 @@ def main():
                         if not st.session_state.is_logged_in:
                                st.toast("🔐 로그인이 필요합니다!\n\n위의 Google/Kakao 로그인 버튼을 눌러주세요.")
                                # ▼▼▼ [수정] 에러 나는 코드 지우고 이걸로 교체 (강제 이동) ▼▼▼
-                                st.components.v1.html("""
-                                <script>
+                               st.components.v1.html("""
+                                    <script>
                                     window.parent.location.href = "#login_top";
-                                </script>
-                            """, height=0)
+                                    </script>
+                                """, height=0)
                             # ▲▲▲ [여기까지] ▲▲▲
                         else:
                             try:
