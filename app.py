@@ -473,7 +473,11 @@ def main():
                     if c_save2.button("저장하기", type="primary", use_container_width=True):
                         if not st.session_state.is_logged_in:
                                st.toast("🔐 로그인이 필요합니다!\n\n위의 Google/Kakao 로그인 버튼을 눌러주세요.")
-                               st.page_scroll_to_top()
+                               st.markdown("""
+                                            <script>
+                                            window.scrollTo(0, 0);
+                                            </script>
+                                            """, unsafe_allow_html=True)
                         else:
                             try:
                                 user = st.session_state.user_info
