@@ -383,7 +383,17 @@ def main():
                         with l_c2:
                             if st.button("💬 Kakao 로그인", key="save_kakao", use_container_width=True):
                                 try:
-                                    res = supabase.auth.sign_in_with_oauth({"provider": "kakao", "options": {"redirect_to": callback_url}})
+                                    res = supabase.auth.sign_in_with_oauth({
+                                        "provider": "kakao",
+                                        "options": {
+                                            "redirect_to": callback_url,
+                                            # ▼▼▼ [추가] 앱 실행 막고 웹 로그인 강제하기 ▼▼▼
+                                            "queryParams": {
+                                                "prompt": "login" 
+                                            }
+                                            # ▲▲▲ [여기까지] ▲▲▲
+                                        }
+                                    })
                                     if res.url: st.markdown(f'<meta http-equiv="refresh" content="0;url={res.url}">', unsafe_allow_html=True)
                                 except: pass
                     else:
