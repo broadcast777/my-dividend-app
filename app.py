@@ -239,6 +239,12 @@ def render_login_ui():
 # ==========================================
 def main():
     MAINTENANCE_MODE = False
+    
+    # [추가] 메뉴 이동 시에도 값이 유지되도록 세션 상태 초기화
+    if "total_invest" not in st.session_state: 
+        st.session_state.total_invest = 30000000
+    if "selected_stocks" not in st.session_state: 
+        st.session_state.selected_stocks = []
 
     # ---------------------------------------------------------
     # [1] 관리자 인증 로직 (사이드바 -> 메인 Expander로 이동)
