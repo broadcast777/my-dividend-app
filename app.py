@@ -463,7 +463,10 @@ def main():
                 # [교체] 이름 저장 및 자동 작명 기능이 추가된 저장 로직
                 st.write("")
                 with st.container(border=True):
-                    st.write("💾 **포트폴리오 저장**")
+                    # ▼▼▼ [추가] 도착 깃발(앵커) 꽂기 ▼▼▼
+                    st.markdown("<div id='login_target'></div>", unsafe_allow_html=True)
+                    # ▲▲▲ [여기까지] ▲▲▲
+                    st.write("💾 **포트폴리오 저장하기**")
                     c_save1, c_save2 = st.columns([2, 1])
                     
                     # 이름 입력창 (비워두면 자동)
@@ -472,23 +475,10 @@ def main():
                     if c_save2.button("저장하기", type="primary", use_container_width=True):
                         if not st.session_state.is_logged_in:
                             st.toast("로그인이 필요합니다!")
-                            # ▼▼▼ [수정된 코드] 모든 스크롤 영역 강제 이동 (Brute Force) ▼▼▼
+                            # ▼▼▼ [수정된 코드] URL 해시를 이용한 강제 점프 (무조건 작동) ▼▼▼
                             st.components.v1.html("""
                                 <script>
-                                    // 1. 최신 Streamlit 스크롤 영역 (가장 유력)
-                                    try {
-                                        window.parent.document.querySelector('[data-testid="stAppViewContainer"]').scrollTo({top: 0, behavior: 'smooth'});
-                                    } catch(e) {}
-
-                                    // 2. 구버전 또는 다른 구조일 경우 대비 (메인 섹션)
-                                    try {
-                                        window.parent.document.querySelector('section.main').scrollTo({top: 0, behavior: 'smooth'});
-                                    } catch(e) {}
-
-                                    // 3. 전체 윈도우 스크롤
-                                    try {
-                                        window.parent.window.scrollTo({top: 0, behavior: 'smooth'});
-                                    } catch(e) {}
+                                    window.parent.location.href = "#login_target";
                                 </script>
                             """, height=0)
                             # ▲▲▲ [여기까지] ▲▲▲
