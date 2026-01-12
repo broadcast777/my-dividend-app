@@ -172,7 +172,7 @@ def render_login_ui():
 # [4] 메인 애플리케이션
 # ==========================================
 def main():
-    MAINTENANCE_MODE = True
+    MAINTENANCE_MODE = False
     
     # [1] 값 초기화
     if "total_invest" not in st.session_state: 
