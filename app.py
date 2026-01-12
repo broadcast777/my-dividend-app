@@ -278,6 +278,37 @@ def main():
         
         # ★ 여기서 페이지 이동 메뉴 생성
         menu = st.radio("📂 **메뉴 이동**", ["💰 배당금 계산기", "📃 전체 종목 리스트"], label_visibility="visible")
+        
+        # [추가] 내 포트폴리오 불러오기 기능
+        st.markdown("---")
+        with st.expander("📂 불러오기 (Click)"):
+            if not st.session_state.is_logged_in:
+                st.caption("로그인이 필요합니다.")
+            else:
+                try:
+                    # DB에서 내 포트폴리오 목록 가져오기 (최신순)
+                    uid = st.session_state.user_info.id
+                    resp = supabase.table("portfolios").select("*").eq("user_id", uid).order("created_at", desc=True).execute()
+                    
+                    if resp.data:
+                        # 선택지 만들기: "이름 (날짜)" 형식
+                        opts = {f"{p.get('name', '이름없음')} ({p['created_at'][:10]})": p for p in resp.data}
+                        sel_name = st.selectbox("선택", list(opts.keys()), label_visibility="collapsed")
+                        
+                        if st.button("복구하기", use_container_width=True):
+                            data = opts[sel_name]['ticker_data']
+                            
+                            # ★ 핵심: 세션 상태에 덮어씌워서 복구
+                            st.session_state.total_invest = int(data.get('total_money', 30000000))
+                            # 딕셔너리 키(종목명)들을 리스트로 변환하여 복구
+                            st.session_state.selected_stocks = list(data.get('composition', {}).keys())
+                            
+                            st.success("복구 완료! 메인 화면을 확인하세요.")
+                            st.rerun() # 화면 새로고침
+                    else:
+                        st.caption("저장된 기록이 없습니다.")
+                except Exception as e:
+                    st.error("불러오기 실패")
 
     # ---------------------------------------------------------
     # [3] 점검 모드 및 메인 타이틀
