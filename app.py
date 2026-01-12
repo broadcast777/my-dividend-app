@@ -175,8 +175,11 @@ check_auth_status()
 # ==========================================
 # [3] 로그인 UI 함수 (★메인 상단으로 이동됨★)
 # ==========================================
+# ==========================================
+# [3] 로그인 UI 함수 (수정됨: 상단 로그인 제거)
+# ==========================================
 def render_login_ui():
-    """메인 화면 상단에 표시되는 인증 UI"""
+    """로그인 상태일 때만 사이드바에 프로필 표시 (미로그인 시 상단 숨김)"""
     if not supabase: return
 
     is_logged_in = st.session_state.get("is_logged_in", False)
@@ -195,8 +198,11 @@ def render_login_ui():
                 st.session_state.is_logged_in = False
                 st.session_state.user_info = None
                 st.session_state.code_processed = False
-                print("[AUTH] 로그아웃 완료")
                 st.rerun()
+    
+    # [로그인 안 됨] -> 상단에 아무것도 표시하지 않음 (깔끔!)
+    else:
+        pass
     
     # [로그인 안 됨] -> 메인 화면에 크게 표시 (요청하신 부분)
     else:
