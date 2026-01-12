@@ -463,9 +463,7 @@ def main():
                 # [교체] 이름 저장 및 자동 작명 기능이 추가된 저장 로직
                 st.write("")
                 with st.container(border=True):
-                    # ▼▼▼ [추가] 도착 깃발(앵커) 꽂기 ▼▼▼
-                    st.markdown("<div id='login_target'></div>", unsafe_allow_html=True)
-                    # ▲▲▲ [여기까지] ▲▲▲
+                    
                     st.write("💾 **포트폴리오 저장하기**")
                     c_save1, c_save2 = st.columns([2, 1])
                     
@@ -474,14 +472,8 @@ def main():
                     
                     if c_save2.button("저장하기", type="primary", use_container_width=True):
                         if not st.session_state.is_logged_in:
-                            st.toast("로그인이 필요합니다!")
-                            # ▼▼▼ [수정된 코드] URL 해시를 이용한 강제 점프 (무조건 작동) ▼▼▼
-                            st.components.v1.html("""
-                                <script>
-                                    window.parent.location.href = "#login_target";
-                                </script>
-                            """, height=0)
-                            # ▲▲▲ [여기까지] ▲▲▲
+                            st.toast("🔐 로그인이 필요합니다!\n\n위의 Google/Kakao 로그인 버튼을 눌러주세요.")
+                             st.page_scroll_to_top()
                         else:
                             try:
                                 user = st.session_state.user_info
