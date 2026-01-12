@@ -383,15 +383,15 @@ def main():
                         with l_c2:
                             if st.button("💬 Kakao 로그인", key="save_kakao", use_container_width=True):
                                 try:
+                                    # [최종 수정] "돌아갈 주소"를 슬래시 없는 버전으로 강제 고정
+                                    # 이렇게 하면 app/ 에서 왔더라도 로그인 후엔 app 으로 깔끔하게 이동합니다.
                                     res = supabase.auth.sign_in_with_oauth({
                                         "provider": "kakao",
                                         "options": {
-                                            "redirect_to": callback_url,
-                                            # ▼▼▼ [추가] 앱 실행 막고 웹 로그인 강제하기 ▼▼▼
+                                            "redirect_to": "https://dividend-pange.streamlit.app", # 슬래시 뺀 주소 직접 입력!
                                             "queryParams": {
-                                                "prompt": "login" 
+                                                "prompt": "login"
                                             }
-                                            # ▲▲▲ [여기까지] ▲▲▲
                                         }
                                     })
                                     if res.url: st.markdown(f'<meta http-equiv="refresh" content="0;url={res.url}">', unsafe_allow_html=True)
