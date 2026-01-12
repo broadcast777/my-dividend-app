@@ -344,21 +344,22 @@ def main():
         # ------------------------------------------
         # 섹션 1: 포트폴리오 시뮬레이션
         # ------------------------------------------
-        # [수정] 입력창이 '저장된 값(session_state)'을 불러오도록 변경
+        # [수정] 변수 연결 오류 해결 버전
         with st.expander("🧮 나만의 배당 포트폴리오 시뮬레이션", expanded=True):
             col1, col2 = st.columns([1, 2])
             
-            # 1. 투자금 입력 (저장된 값 나누기 10000 해서 보여줌)
+            # 1. 투자금 입력 (저장된 값 불러오기)
             current_invest_val = int(st.session_state.total_invest / 10000)
             invest_input = col1.number_input("💰 총 투자 금액 (만원)", min_value=100, value=current_invest_val, step=100)
             
-            # 입력값이 바뀌면 즉시 저장소에 업데이트
+            # ★ 핵심 수정: 세션에 저장함과 동시에, 밑에서 계산할 때 쓸 'total_invest' 변수도 만들어줘야 합니다!
             st.session_state.total_invest = invest_input * 10000
+            total_invest = st.session_state.total_invest 
             
-            # 2. 종목 선택 (저장된 리스트를 기본값으로 설정)
+            # 2. 종목 선택 (저장된 값 불러오기)
             selected = col2.multiselect("📊 종목 선택", df['pure_name'].unique(), default=st.session_state.selected_stocks)
             
-            # 선택된 종목이 바뀌면 즉시 저장소에 업데이트
+            # 선택된 종목 저장
             st.session_state.selected_stocks = selected
             
             if selected:
