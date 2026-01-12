@@ -473,11 +473,13 @@ def main():
                     if c_save2.button("저장하기", type="primary", use_container_width=True):
                         if not st.session_state.is_logged_in:
                                st.toast("🔐 로그인이 필요합니다!\n\n위의 Google/Kakao 로그인 버튼을 눌러주세요.")
-                               st.markdown("""
-                                            <script>
-                                            window.scrollTo(0, 0);
-                                            </script>
-                                            """, unsafe_allow_html=True)
+                               # ▼▼▼ [수정] 에러 나는 코드 지우고 이걸로 교체 (강제 이동) ▼▼▼
+                                st.components.v1.html("""
+                                <script>
+                                    window.parent.location.href = "#login_top";
+                                </script>
+                            """, height=0)
+                            # ▲▲▲ [여기까지] ▲▲▲
                         else:
                             try:
                                 user = st.session_state.user_info
