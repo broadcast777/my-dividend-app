@@ -472,13 +472,17 @@ def main():
                     if c_save2.button("저장하기", type="primary", use_container_width=True):
                         if not st.session_state.is_logged_in:
                             st.toast("로그인이 필요합니다!")
-                            # ▼▼▼ [추가] 화면 최상단으로 자동 스크롤 기능 ▼▼▼
-                            st.markdown("""
+                            # ▼▼▼ [수정된 코드] 강력 스크롤 자바스크립트 ▼▼▼
+                            st.components.v1.html("""
                                 <script>
-                                    var body = window.parent.document.querySelector(".main");
-                                    body.scrollTo({top: 0, behavior: 'smooth'});
+                                    // 1. 메인 윈도우 스크롤 시도
+                                    window.parent.window.scrollTo({top: 0, behavior: 'smooth'});
+                                    
+                                    // 2. Streamlit 전용 컨테이너 스크롤 시도 (최신 버전 호환)
+                                    var elements = window.parent.document.querySelectorAll('section.main, [data-testid="stAppViewContainer"]');
+                                    elements.forEach(el => el.scrollTo({top: 0, behavior: 'smooth'}));
                                 </script>
-                                """, unsafe_allow_html=True)
+                            """, height=0)
                             # ▲▲▲ [여기까지] ▲▲▲
                         else:
                             try:
