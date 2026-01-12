@@ -173,7 +173,7 @@ check_auth_status()
 
 
 # ==========================================
-# [3] 로그인 UI 함수 (메인 화면으로 이동됨)
+# [3] 로그인 UI 함수 (★메인 상단으로 이동됨★)
 # ==========================================
 def render_login_ui():
     """메인 화면 상단에 표시되는 인증 UI"""
@@ -182,12 +182,13 @@ def render_login_ui():
     is_logged_in = st.session_state.get("is_logged_in", False)
     user_info = st.session_state.get("user_info", None)
     
-    # 로그인 상태일 때는 사이드바에 프로필 표시 (공간 절약)
+    # [로그인 됨] -> 사이드바 상단에 프로필 표시
     if is_logged_in and user_info:
         email = user_info.email if user_info.email else "User"
         nickname = email.split("@")[0]
         
         with st.sidebar:
+            st.markdown("---")
             st.success(f"👋 반가워요! **{nickname}**님")
             if st.button("🚪 로그아웃", key="logout_btn", use_container_width=True):
                 supabase.auth.sign_out()
@@ -197,12 +198,12 @@ def render_login_ui():
                 print("[AUTH] 로그아웃 완료")
                 st.rerun()
     
-    # ★ 로그인 안 된 상태: 메인 화면에 크게 표시 (요청하신 부분)
+    # [로그인 안 됨] -> 메인 화면에 크게 표시 (요청하신 부분)
     else:
         with st.container():
             st.info("💾 포트폴리오 저장을 위해 로그인")
             
-            col1, col2 = st.columns(2) # 메인 컬럼 사용
+            col1, col2 = st.columns(2)
             callback_url = "https://dividend-pange.streamlit.app/"
             
             with col1:
@@ -245,8 +246,8 @@ def main():
     is_admin = False
     if st.query_params.get("admin", "false").lower() == "true":
         ADMIN_HASH = "c41b0bb392db368a44ce374151794850417b56c9786e3c482f825327c7153182"
-        # ★ 요청대로 밖으로 뺌 (Expander 사용해서 깔끔하게)
-        with st.expander("🔐 관리자 접속", expanded=False):
+        # ★ 요청대로 밖으로 뺌
+        with st.expander("🔐 관리자 접속 (Admin)", expanded=False):
             password_input = st.text_input("비밀번호 입력", type="password")
             if password_input:
                 if hashlib.sha256(password_input.encode()).hexdigest() == ADMIN_HASH:
@@ -256,11 +257,21 @@ def main():
                     st.error("비밀번호 불일치")
 
     # ---------------------------------------------------------
-    # [2] 로그인 UI 렌더링 (메인 상단)
+    # [2] 로그인 UI 렌더링 (메인 상단 호출)
     # ---------------------------------------------------------
     render_login_ui()
     
     current_user = st.session_state.user_info
+
+    # ---------------------------------------------------------
+    # [NEW] 사이드바 메뉴 (테이블 분리)
+    # ---------------------------------------------------------
+    with st.sidebar:
+        if not st.session_state.is_logged_in:
+            st.markdown("---") # 로그인 안 했을 때 구분선
+        
+        # ★ 여기서 페이지 이동 메뉴 생성
+        menu = st.radio("📂 **메뉴 이동**", ["💰 배당금 계산기", "📃 전체 종목 리스트"], label_visibility="visible")
 
     # ---------------------------------------------------------
     # [3] 점검 모드 및 메인 타이틀
@@ -279,7 +290,7 @@ def main():
     df_raw = logic.load_stock_data_from_csv()
     if df_raw.empty: st.stop()
     
-    # [관리자] 갱신 도구 (관리자만 보임 - 사이드바 유지 or 이동 가능, 일단 유지)
+    # [관리자] 갱신 도구
     if is_admin:
         with st.sidebar:
             st.markdown("---")
@@ -318,15 +329,8 @@ def main():
     with st.spinner('⚙️ 배당 데이터베이스 엔진 가동 중...'):
         df = logic.load_and_process_data(df_raw, is_admin=is_admin)
 
-    # ---------------------------------------------------------
-    # [NEW] 사이드바 메뉴 (테이블 분리)
-    # ---------------------------------------------------------
-    with st.sidebar:
-        st.markdown("---")
-        menu = st.radio("📂 **메뉴 이동**", ["💰 배당금 계산기", "📃 전체 종목 리스트"])
-
     # =================================================================================
-    # [화면 1] 배당금 계산기 (기존 메인 화면)
+    # [화면 1] 배당금 계산기
     # =================================================================================
     if menu == "💰 배당금 계산기":
         st.warning("⚠️ **투자 유의사항:** 본 대시보드의 연배당률은 과거 분배금 데이터를 기반으로 계산된 참고용 지표입니다.")
@@ -447,10 +451,22 @@ def main():
                     # [탭 1] 자산 구성 분석
                     with tab_analysis:
                         chart_col, table_col = st.columns([1.2, 1])
+                        
+                        # =======================================================
+                        # ★★★ [수정됨] KODEX 등 환노출 종목을 달러 자산으로 잡는 로직
+                        # =======================================================
                         def classify_currency(row):
                             try:
                                 bunryu = str(row.get('분류', ''))
-                                if bunryu == "해외" or "(해외)" in row['종목']: return "🇺🇸 달러 자산"
+                                exch = str(row.get('환구분', '')) # '환노출' 텍스트 확인
+                                name = str(row.get('종목', ''))
+                                
+                                # 1. 원래 해외 종목
+                                if bunryu == "해외" or "(해외)" in name: return "🇺🇸 달러 자산"
+                                
+                                # 2. ★환노출★ 종목 (이게 핵심!)
+                                if "환노출" in exch: return "🇺🇸 달러 자산"
+                                
                                 return "🇰🇷 원화 자산"
                             except: return "🇰🇷 원화 자산"
                         
