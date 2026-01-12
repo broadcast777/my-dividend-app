@@ -461,33 +461,44 @@ def main():
                 # =========================================================
                 st.write("") 
                 # [교체] 이름 저장 및 자동 작명 기능이 추가된 저장 로직
+                # [수정] 스크롤 대신, 로그인 안 했으면 로그인 버튼을 바로 보여주는 방식 (확실함)
                 st.write("")
                 with st.container(border=True):
-                    
                     st.write("💾 **포트폴리오 저장하기**")
-                    c_save1, c_save2 = st.columns([2, 1])
                     
-                    # 이름 입력창 (비워두면 자동)
-                    p_name = c_save1.text_input("이름 입력 (예: 은퇴용)", placeholder="비워두면 자동 저장됨", label_visibility="collapsed")
+                    # 1. 로그인이 안 된 경우 -> 로그인 버튼을 직접 노출 (스크롤 불필요!)
+                    if not st.session_state.is_logged_in:
+                        st.info("🔒 로그인을 하셔야 저장할 수 있습니다.")
+                        l_c1, l_c2 = st.columns(2)
+                        callback_url = "https://dividend-pange.streamlit.app/"
+                        
+                        with l_c1:
+                            if st.button("🔵 Google 로그인", key="save_google", use_container_width=True):
+                                try:
+                                    res = supabase.auth.sign_in_with_oauth({"provider": "google", "options": {"redirect_to": callback_url}})
+                                    if res.url: st.markdown(f'<meta http-equiv="refresh" content="0;url={res.url}">', unsafe_allow_html=True)
+                                except: pass
+                        with l_c2:
+                            if st.button("💬 Kakao 로그인", key="save_kakao", use_container_width=True):
+                                try:
+                                    res = supabase.auth.sign_in_with_oauth({"provider": "kakao", "options": {"redirect_to": callback_url}})
+                                    if res.url: st.markdown(f'<meta http-equiv="refresh" content="0;url={res.url}">', unsafe_allow_html=True)
+                                except: pass
                     
-                    if c_save2.button("저장하기", type="primary", use_container_width=True):
-                        if not st.session_state.is_logged_in:
-                               st.toast("🔐 로그인이 필요합니다!\n\n위의 Google/Kakao 로그인 버튼을 눌러주세요.")
-                               # ▼▼▼ [수정] 에러 나는 코드 지우고 이걸로 교체 (강제 이동) ▼▼▼
-                               st.components.v1.html("""
-                                    <script>
-                                    window.parent.location.href = "#login_top";
-                                    </script>
-                                """, height=0)
-                            # ▲▲▲ [여기까지] ▲▲▲
-                        else:
+                    # 2. 로그인 된 경우 -> 저장 입력창 및 버튼 표시
+                    else:
+                        c_save1, c_save2 = st.columns([2, 1])
+                        
+                        # 이름 입력 (비워두면 자동)
+                        p_name = c_save1.text_input("이름 입력 (예: 은퇴용)", placeholder="비워두면 자동 저장됨", label_visibility="collapsed")
+                        
+                        if c_save2.button("저장하기", type="primary", use_container_width=True):
                             try:
                                 user = st.session_state.user_info
                                 
-                                # 1. 이름 자동 생성 로직
+                                # 이름 자동 생성
                                 final_name = p_name.strip()
                                 if not final_name:
-                                    # 기존 갯수 세어서 번호 매기기
                                     cnt_res = supabase.table("portfolios").select("id", count="exact").eq("user_id", user.id).execute()
                                     next_num = (cnt_res.count or 0) + 1
                                     final_name = f"포트폴리오 {next_num}"
@@ -498,7 +509,7 @@ def main():
                                     "summary": {"monthly": total_m, "yield": avg_y}
                                 }
                                 
-                                # 2. DB Insert (name 컬럼 포함)
+                                # DB 저장
                                 supabase.table("portfolios").insert({
                                     "user_id": user.id,
                                     "user_email": user.email,
