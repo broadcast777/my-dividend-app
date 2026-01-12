@@ -232,7 +232,7 @@ def main():
         df = logic.load_and_process_data(df_raw, is_admin=is_admin)
 
     # ---------------------------------------------------------
-    # 사이드바 메뉴 & 불러오기
+    # 사이드바 메뉴 & 불러오기 & 삭제 기능
     # ---------------------------------------------------------
     with st.sidebar:
         if not st.session_state.is_logged_in:
@@ -240,32 +240,48 @@ def main():
         
         menu = st.radio("📂 **메뉴 이동**", ["💰 배당금 계산기", "📃 전체 종목 리스트"], label_visibility="visible")
         
-        # [불러오기 기능]
+        # [불러오기 및 삭제 기능]
         st.markdown("---")
-        with st.expander("📂 불러오기 (Click)"):
+        with st.expander("📂 불러오기 / 관리"):
             if not st.session_state.is_logged_in:
                 st.caption("로그인이 필요합니다.")
             else:
                 try:
                     uid = st.session_state.user_info.id
+                    # 최신순 정렬
                     resp = supabase.table("portfolios").select("*").eq("user_id", uid).order("created_at", desc=True).execute()
                     
                     if resp.data:
-                        # 'None' 방지 처리 적용됨
+                        # 리스트 만들기
                         opts = {f"{p.get('name') or '이름없음'} ({p['created_at'][:10]})": p for p in resp.data}
-                        sel_name = st.selectbox("선택", list(opts.keys()), label_visibility="collapsed")
+                        sel_name = st.selectbox("항목 선택", list(opts.keys()), label_visibility="collapsed")
                         
-                        if st.button("복구하기", use_container_width=True):
-                            data = opts[sel_name]['ticker_data']
-                            st.session_state.total_invest = int(data.get('total_money', 30000000))
-                            st.session_state.selected_stocks = list(data.get('composition', {}).keys())
-                            st.success("복구 완료! 메인 화면을 확인하세요.")
-                            st.rerun() 
+                        # 버튼 2개 배치 (복구 / 삭제)
+                        col_load, col_del = st.columns([1, 1])
+                        
+                        with col_load:
+                            if st.button("📂 복구", use_container_width=True):
+                                data = opts[sel_name]['ticker_data']
+                                st.session_state.total_invest = int(data.get('total_money', 30000000))
+                                st.session_state.selected_stocks = list(data.get('composition', {}).keys())
+                                st.toast("성공적으로 불러왔습니다!")
+                                st.rerun() 
+                        
+                        with col_del:
+                            if st.button("🗑️ 삭제", type="secondary", use_container_width=True):
+                                try:
+                                    target_id = opts[sel_name]['id']
+                                    supabase.table("portfolios").delete().eq("id", target_id).execute()
+                                    st.toast("삭제되었습니다.", icon="🗑️")
+                                    st.rerun() # 목록 갱신을 위해 새로고침
+                                except Exception as e:
+                                    st.error("삭제 중 오류 발생")
                     else:
                         st.caption("저장된 기록이 없습니다.")
                 except Exception as e:
                     st.error("불러오기 실패")
 
+    
     # =================================================================================
     # [화면 1] 배당금 계산기
     # =================================================================================
