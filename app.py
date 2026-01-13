@@ -366,7 +366,7 @@ def main():
                 # =========================================================
                 # [저장 로직] 로그인 여부에 따라 버튼 자동 변경
                 # =========================================================
-                st.write("") 
+               st.write("") 
                 with st.container(border=True):
                     st.write("💾 **포트폴리오 저장 / 수정**")
                     
@@ -380,6 +380,7 @@ def main():
                                 provider_res = supabase.auth.sign_in_with_oauth({
                                     "provider": "google",
                                     "options": {
+                                        # [수정] 사장님 말씀대로 풀네임(dividend-pange) 사용
                                         "redirect_to": "https://dividend-pange.streamlit.app",
                                         "queryParams": {
                                             "prompt": "select_account"
@@ -390,7 +391,7 @@ def main():
                                 
                                 if provider_res.url:
                                     st.markdown(f'''
-                                        <a href="{provider_res.url}" target="_blank" style="
+                                        <a href="{provider_res.url}" target="_self" style="
                                             display: inline-flex;
                                             justify-content: center;
                                             align-items: center;
@@ -414,6 +415,7 @@ def main():
                                 provider_res = supabase.auth.sign_in_with_oauth({
                                     "provider": "kakao",
                                     "options": {
+                                        # [수정] 사장님 말씀대로 풀네임(dividend-pange) 사용
                                         "redirect_to": "https://dividend-pange.streamlit.app",
                                         "queryParams": {"prompt": "login"},
                                         "skip_browser_redirect": True
@@ -439,6 +441,9 @@ def main():
                                         </a>
                                     ''', unsafe_allow_html=True)
                             except: st.error("오류")
+                    # (이 아래 else 부분은 기존 코드 그대로 유지)
+                    else:
+                        # ... 기존 코드 ...
 
                     else:
                         # [로그인 성공 시 화면] - 중복 없이 하나만 있어야 합니다.
