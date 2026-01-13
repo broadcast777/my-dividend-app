@@ -19,18 +19,24 @@ import ui
 st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
 
 # ---------------------------------------------------------
-# [핵심 해결책] Supabase 클라이언트 자체를 캐싱(박제)합니다.
-# 이렇게 해야 앱이 새로고침 되어도 '인증 암호(Verifier)'를 잊어버리지 않습니다.
+# Supabase 클라이언트 연결 (이 코드로 되어 있는지 확인!)
 # ---------------------------------------------------------
-@st.cache_resource
-def get_supabase_client():
-    try:
-        URL = st.secrets["SUPABASE_URL"]
-        KEY = st.secrets["SUPABASE_KEY"]
-        # ClientOptions 없이 기본 생성 (캐싱이 모든 걸 해결함)
-        return create_client(URL, KEY)
-    except Exception as e:
-        return None
+try:
+    URL = st.secrets["SUPABASE_URL"]
+    KEY = st.secrets["SUPABASE_KEY"]
+    
+    supabase = create_client(
+        URL, 
+        KEY,
+        options=ClientOptions(
+            storage=StreamlitStorage(), # <--- 이게 핵심입니다.
+            auto_refresh_token=True,
+            persist_session=True,
+        )
+    )
+except Exception as e:
+    st.error(f"🚨 Supabase 연결 오류: {e}")
+    supabase = None
 
 supabase = get_supabase_client()
 
@@ -46,30 +52,27 @@ for key in ["is_logged_in", "user_info", "code_processed"]:
         st.session_state[key] = False if key != "user_info" else None
 
 # ==========================================
-# [2] 인증 상태 체크 (PC 깜빡임 해결 버전)
+# [2] 인증 상태 체크 (수정됨: 주소 명시)
 # ==========================================
 def check_auth_status():
-    # 1. 이미 로그인된 상태면 패스
-    if st.session_state.is_logged_in:
-        return
+    if not supabase: return
 
-    # 2. Supabase 자체 세션 확인 (새로고침 시 복구용)
+    # 1. 이미 로그인된 상태인지 확인
     try:
         session = supabase.auth.get_session()
         if session and session.user:
             st.session_state.is_logged_in = True
             st.session_state.user_info = session.user
             if "code" in st.query_params: st.query_params.clear()
-            return
+            return 
     except: pass
 
-    # 3. 로그인 콜백 처리 (구글/카카오에서 돌아왔을 때)
+    # 2. 로그인 콜백 처리
     if "code" in st.query_params and not st.session_state.code_processed:
         try:
             auth_code = st.query_params["code"]
             
-            # [수정] redirect_to를 다시 넣되, '슬래시 없는 주소'로 명확하게 지정합니다.
-            # 구글은 이 주소가 sign_in 때와 다르면(혹은 없으면) 조용히 실패합니다.
+            # [수정] redirect_to에 "슬래시 없는 주소"를 명확히 넣습니다.
             res = supabase.auth.exchange_code_for_session({
                 "auth_code": auth_code,
                 "redirect_to": "https://dividend-pange.streamlit.app"
@@ -79,16 +82,13 @@ def check_auth_status():
                 st.session_state.is_logged_in = True
                 st.session_state.user_info = res.session.user
                 st.session_state.code_processed = True
-                st.success("✅ 로그인 성공! 잠시만 기다려주세요...")
-                time.sleep(0.5)
+                st.success("✅ 로그인 성공!")
+                time.sleep(0.5) # 세션 안정화 대기
                 st.query_params.clear()
                 st.rerun()
                 
         except Exception as e:
-            # 에러가 나면 화면에 찍어서 원인을 봅니다.
-            # (깜빡이고 끝나는 대신 에러 메시지라도 나와야 고칠 수 있습니다)
-            st.error(f"인증 교환 실패: {e}")
-            # st.query_params.clear() # 디버깅을 위해 잠시 주석 처리 (에러 확인용)
+            st.error(f"인증 실패: {e}")
             st.session_state.code_processed = True
 
 check_auth_status()
@@ -317,16 +317,16 @@ def main():
                 with st.container(border=True):
                     st.write("💾 **포트폴리오 저장 / 수정**")
                     
-                    if not st.session_state.is_logged_in:
+if not st.session_state.is_logged_in:
                         st.info("🔒 로그인이 필요합니다.")
-
-                        # [핵심] 로그인 링크를 한 번만 생성하여 Session State에 저장 (Verifier 고정)
+                        
+                        # [수정] 링크 고정용 변수 초기화
                         if "auth_links" not in st.session_state:
                             st.session_state.auth_links = {"google": None, "kakao": None}
 
                         l_c1, l_c2 = st.columns(2)
                         
-                        # [왼쪽] Google 로그인
+                        # [왼쪽] Google (링크가 없으면 만들고, 있으면 재활용)
                         with l_c1:
                             try:
                                 if st.session_state.auth_links["google"] is None:
@@ -342,10 +342,10 @@ def main():
                                 
                                 if st.session_state.auth_links["google"]:
                                     url = st.session_state.auth_links["google"]
-                                    st.markdown(f'''<a href="{url}" target="_self" style="display: inline-flex; justify-content: center; align-items: center; width: 100%; background-color: #fff; color: #1f1f1f; border: 1px solid #747775; padding: 0.5rem; border-radius: 0.5rem; text-decoration: none; font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">🔵 Google 로그인</a>''', unsafe_allow_html=True)
+                                    st.markdown(f'<a href="{url}" target="_self" style="display:inline-flex;justify-content:center;align-items:center;width:100%;background:#fff;color:#1f1f1f;border:1px solid #747775;padding:0.5rem;border-radius:0.5rem;text-decoration:none;font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,0.05);">🔵 Google 로그인</a>', unsafe_allow_html=True)
                             except: st.error("오류")
                         
-                        # [오른쪽] Kakao 로그인
+                        # [오른쪽] Kakao (링크가 없으면 만들고, 있으면 재활용)
                         with l_c2:
                             try:
                                 if st.session_state.auth_links["kakao"] is None:
@@ -361,9 +361,8 @@ def main():
                                 
                                 if st.session_state.auth_links["kakao"]:
                                     url = st.session_state.auth_links["kakao"]
-                                    st.markdown(f'''<a href="{url}" target="_self" style="display: inline-flex; justify-content: center; align-items: center; width: 100%; background-color: #FEE500; color: #000; border: 1px solid rgba(0,0,0,0.1); padding: 0.5rem; border-radius: 0.5rem; text-decoration: none; font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">💬 Kakao 로그인</a>''', unsafe_allow_html=True)
+                                    st.markdown(f'<a href="{url}" target="_self" style="display:inline-flex;justify-content:center;align-items:center;width:100%;background:#FEE500;color:#000;border:1px solid rgba(0,0,0,0.1);padding:0.5rem;border-radius:0.5rem;text-decoration:none;font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,0.05);">💬 Kakao 로그인</a>', unsafe_allow_html=True)
                             except: st.error("오류")
-
                     else:
                         # [로그인 성공 시 화면]
                         try:
