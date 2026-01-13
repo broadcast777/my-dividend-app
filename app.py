@@ -19,12 +19,31 @@ import ui
 # ==========================================
 st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
 
+# [상단 import 부분에 추가 필요]
+from streamlit.runtime.scriptrunner import get_script_run_ctx
+
+# ... (기존 import들) ...
+
 # ==========================================
-# [수정 1] 파일 직통 저장소
+# [수정 1] 파일 직통 저장소 (동시 접속자 분리 버전)
 # ==========================================
 class StreamlitFileStorageFixed:
+    """
+    사용자(세션)별로 별도의 파일을 만들어 저장하는 방식입니다.
+    이제 여러 사람이 동시에 접속해도 서로의 로그인이 꼬이지 않습니다.
+    """
     def __init__(self):
-        self.storage_file = Path("auth_token.json")
+        # 1. 현재 접속한 사용자의 고유 ID(Session ID)를 가져옵니다.
+        try:
+            ctx = get_script_run_ctx()
+            self.session_id = ctx.session_id
+        except Exception:
+            # 혹시라도 ID를 못 가져오면 임시 ID 부여 (에러 방지)
+            self.session_id = "unknown_user"
+            
+        # 2. 파일 이름에 ID를 붙여서 사람마다 다른 파일을 쓰게 합니다.
+        # 예: auth_token_a1b2c3d4.json
+        self.storage_file = Path(f"auth_token_{self.session_id}.json")
 
     def set_item(self, key: str, value: str) -> None:
         try:
@@ -60,6 +79,7 @@ class StreamlitFileStorageFixed:
                         json.dump(data, f)
         except Exception as e:
             print(f"Remove Error: {e}")
+
 
 # ---------------------------------------------------------
 # 세션 상태 변수 초기화
