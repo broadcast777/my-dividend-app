@@ -377,83 +377,72 @@ def main():
                 chart_compare = alt.Chart(c_data).mark_bar(cornerRadiusTopLeft=10, cornerRadiusTopRight=10).encode(x=alt.X('계좌 종류', sort=None, axis=alt.Axis(labelAngle=0, title=None)), y=alt.Y('월 수령액', title=None), color=alt.Color('계좌 종류', scale=alt.Scale(domain=['일반 계좌', 'ISA/연금계좌'], range=['#95a5a6', '#f1c40f']), legend=None), tooltip=[alt.Tooltip('계좌 종류'), alt.Tooltip('월 수령액', format=',.0f')]).properties(height=220)
                 st.altair_chart(chart_compare, use_container_width=True)
 
+
+
                 # =========================================================
                 # [저장 로직] 로그인 여부에 따라 버튼 자동 변경
                 # =========================================================
                 st.write("") 
                 with st.container(border=True):
                     st.write("💾 **포트폴리오 저장 / 수정**")
-                    import streamlit as st
-                # supabase 클라이언트가 이미 초기화되어 있다고 가정 (supabase 변수 사용)
-                
-                # ... (상단 생략) ...
-                
-                if not st.session_state.get('is_logged_in', False):
-                    st.info("🔒 로그인이 필요합니다.")
                     
-                    # [레이아웃] 좌우 2분할
-                    col_google, col_kakao = st.columns(2)
-                
-                    # ---------------------------------------------------------
-                    # 1. [왼쪽] 구글 로그인 로직 (현재 창 _self)
-                    # ---------------------------------------------------------
-                    with col_google:
-                        try:
-                            # 구글 인증 URL 생성
-                            res_google = supabase.auth.sign_in_with_oauth({
-                                "provider": "google",
-                                "options": {
-                                    "redirect_to": "https://dividend-pange.streamlit.app", # 본인의 배포 URL 확인
-                                    "queryParams": {"access_type": "offline", "prompt": "consent"},
-                                    "skip_browser_redirect": True
-                                }
-                            })
-                            
-                            if res_google.url:
-                                # 구글은 보통 현재 창(_self)에서 리다이렉트 되는 것이 자연스럽습니다.
-                                btn_google = f'''
-                                <a href="{res_google.url}" target="_self" style="
-                                    display: inline-flex; justify-content: center; align-items: center; width: 100%;
-                                    background-color: #ffffff; color: #1f1f1f; border: 1px solid #747775;
-                                    padding: 0.6rem; border-radius: 0.5rem; text-decoration: none; font-weight: 600;
-                                    box-shadow: 0 1px 2px rgba(0,0,0,0.1);">
-                                    🔵 Google 로그인
-                                </a>
-                                '''
-                                st.markdown(btn_google, unsafe_allow_html=True)
-                        except Exception as e:
-                            st.error(f"구글 오류: {e}")
-                
-                    # ---------------------------------------------------------
-                    # 2. [오른쪽] 카카오 로그인 로직 (새 창 _blank)
-                    # ---------------------------------------------------------
-                    with col_kakao:
-                        try:
-                            # 카카오 인증 URL 생성
-                            res_kakao = supabase.auth.sign_in_with_oauth({
-                                "provider": "kakao",
-                                "options": {
-                                    "redirect_to": "https://dividend-pange.streamlit.app", # 본인의 배포 URL 확인
-                                    "skip_browser_redirect": True
-                                }
-                            })
-                            
-                            if res_kakao.url:
-                                # 카카오는 요청하신 대로 새 창(_blank)으로 띄웁니다.
-                                btn_kakao = f'''
-                                <a href="{res_kakao.url}" target="_blank" style="
-                                    display: inline-flex; justify-content: center; align-items: center; width: 100%;
-                                    background-color: #FEE500; color: #000000; border: 1px solid rgba(0,0,0,0.05);
-                                    padding: 0.6rem; border-radius: 0.5rem; text-decoration: none; font-weight: 600;
-                                    box-shadow: 0 1px 2px rgba(0,0,0,0.1);">
-                                    💬 Kakao 로그인
-                                </a>
-                                '''
-                                st.markdown(btn_kakao, unsafe_allow_html=True)
-                        except Exception as e:
-                            st.error(f"카카오 오류: {e}")
+                    # 1. 로그인이 안 된 경우: 로그인 버튼 표시
+                    if not st.session_state.get('is_logged_in', False):
+                        st.info("🔒 로그인이 필요합니다.")
+                        
+                        # [레이아웃] 좌우 2분할
+                        col_google, col_kakao = st.columns(2)
+                        
+                        # (1) 구글 로그인 (현재 창)
+                        with col_google:
+                            try:
+                                res_google = supabase.auth.sign_in_with_oauth({
+                                    "provider": "google",
+                                    "options": {
+                                        "redirect_to": "https://dividend-pange.streamlit.app", 
+                                        "queryParams": {"access_type": "offline", "prompt": "consent"},
+                                        "skip_browser_redirect": True
+                                    }
+                                })
+                                if res_google.url:
+                                    btn_google = f'''
+                                    <a href="{res_google.url}" target="_self" style="
+                                        display: inline-flex; justify-content: center; align-items: center; width: 100%;
+                                        background-color: #ffffff; color: #1f1f1f; border: 1px solid #747775;
+                                        padding: 0.6rem; border-radius: 0.5rem; text-decoration: none; font-weight: 600;
+                                        box-shadow: 0 1px 2px rgba(0,0,0,0.1);">
+                                        🔵 Google 로그인
+                                    </a>
+                                    '''
+                                    st.markdown(btn_google, unsafe_allow_html=True)
+                            except Exception as e:
+                                st.error(f"구글 오류: {e}")
+                        
+                        # (2) 카카오 로그인 (새 창)
+                        with col_kakao:
+                            try:
+                                res_kakao = supabase.auth.sign_in_with_oauth({
+                                    "provider": "kakao",
+                                    "options": {
+                                        "redirect_to": "https://dividend-pange.streamlit.app", 
+                                        "skip_browser_redirect": True
+                                    }
+                                })
+                                if res_kakao.url:
+                                    btn_kakao = f'''
+                                    <a href="{res_kakao.url}" target="_blank" style="
+                                        display: inline-flex; justify-content: center; align-items: center; width: 100%;
+                                        background-color: #FEE500; color: #000000; border: 1px solid rgba(0,0,0,0.05);
+                                        padding: 0.6rem; border-radius: 0.5rem; text-decoration: none; font-weight: 600;
+                                        box-shadow: 0 1px 2px rgba(0,0,0,0.1);">
+                                        💬 Kakao 로그인
+                                    </a>
+                                    '''
+                                    st.markdown(btn_kakao, unsafe_allow_html=True)
+                            except Exception as e:
+                                st.error(f"카카오 오류: {e}")
 
-
+                    # 2. 로그인 된 경우: 저장/수정 UI 표시
                     else:
                         try:
                             user = st.session_state.user_info
@@ -507,7 +496,7 @@ def main():
 
                         except Exception as e:
                             st.error(f"오류 발생: {e}")
-
+                            
                 st.write("")
                 st.info("""
                 📢 **찾으시는 종목이 안 보이나요?**
