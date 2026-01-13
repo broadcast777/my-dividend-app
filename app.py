@@ -375,23 +375,27 @@ def main():
                         l_c1, l_c2 = st.columns(2)
                         callback_url = "https://dividend-pange.streamlit.app/"
                         with l_c1:
-                            # [Google 수정] 구글은 '새 창'을 열면 세션이 끊겨서 에러가 납니다.
-                            # 다시 '현재 창(_self)'으로 변경하여 모바일 크롬 호환성을 확보합니다.
+                            # [Google 해결책] 복잡한 옵션을 다 지우고 '기본'으로 바꿉니다.
+                            # access_type, prompt 등을 지우면 "로그인 시간 만료" 오류가 사라집니다.
                             try:
                                 provider_res = supabase.auth.sign_in_with_oauth({
                                     "provider": "google",
                                     "options": {
+                                        # 주소는 사장님이 쓰시는 'dividend-pange' 그대로! (슬래시 없음)
                                         "redirect_to": "https://dividend-pange.streamlit.app",
+                                        
+                                        # ▼▼▼ [핵심 수정] 옵션을 다 지우고 queryParams를 비웁니다 ▼▼▼
+                                        # 이렇게 하면 불필요한 재인증 과정을 생략해서 모바일 연결이 빨라집니다.
                                         "queryParams": {
-                                            "access_type": "offline",
-                                            "prompt": "consent"
+                                            # "access_type": "offline", (삭제)
+                                            # "prompt": "consent"       (삭제)
                                         },
                                         "skip_browser_redirect": True
                                     }
                                 })
                                 
                                 if provider_res.url:
-                                    # ▼▼▼ 여기 target을 "_self"로 변경했습니다! ▼▼▼
+                                    # 구글은 '현재 창(_self)'으로 여는 게 가장 안정적입니다.
                                     st.markdown(f'''
                                         <a href="{provider_res.url}" target="_self" style="
                                             display: inline-flex;
@@ -409,8 +413,7 @@ def main():
                                             🔵 Google 로그인
                                         </a>
                                     ''', unsafe_allow_html=True)
-                            except Exception as e:
-                                st.error("접속 오류")
+                            except: st.error("오류")
                                 
                         with l_c2:
                             # [최후의 해결책] 새 창(_blank)으로 띄우기
