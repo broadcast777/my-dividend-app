@@ -383,28 +383,34 @@ def main():
                         with l_c2:
                             if st.button("💬 Kakao 로그인", key="save_kakao", use_container_width=True):
                                 try:
-                                    # [1] redirect_to에 "슬래시(/)를 붙여서" 명시합니다.
-                                    # 이유: Streamlit은 원래 슬래시 있는 주소가 '진짜 주소'입니다. 
-                                    # 억지로 떼는 것보다 붙여주는 게 서버 충돌을 막습니다.
+                                    # [최종 해결책] 
+                                    # 1. 옵션을 다 지우고 '기본 설정'만 따르게 합니다. (충돌 방지)
+                                    # 2. 자동 이동이 실패할 경우를 대비해 '링크'를 직접 보여줍니다.
                                     res = supabase.auth.sign_in_with_oauth({
-                                        "provider": "kakao",
-                                        "options": {
-                                            "redirect_to": "https://dividend-pange.streamlit.app/", 
-                                            "queryParams": {
-                                                "prompt": "login"
-                                            }
-                                        }
+                                        "provider": "kakao"
+                                        # options는 삭제했습니다. Supabase Site URL(슬래시 없음)로 자동 이동합니다.
                                     })
                                     
-                                    # [2] 이동 방식을 <meta> 태그에서 "자바스크립트"로 변경합니다.
-                                    # 모바일에서 훨씬 강력하고 확실하게 이동시켜 줍니다.
                                     if res.url:
-                                        st.write(f"""
-                                            <script>
-                                                window.top.location.href = "{res.url}";
-                                            </script>
-                                        """, unsafe_allow_html=True)
+                                        # [1] 자바스크립트로 자동 이동 시도
+                                        st.write(f'<script>window.top.location.href = "{res.url}";</script>', unsafe_allow_html=True)
                                         
+                                        # [2] (보험용) 만약 회색 화면이 뜨거나 이동 안 하면 이 링크를 누르게 함
+                                        st.success("👇 자동 이동이 안 되면 아래 링크를 클릭하세요!")
+                                        st.markdown(f'''
+                                            <a href="{res.url}" target="_self" style="
+                                                display: block; 
+                                                text-align: center; 
+                                                background-color: #FEE500; 
+                                                color: #000; 
+                                                padding: 12px; 
+                                                border-radius: 8px; 
+                                                text-decoration: none; 
+                                                font-weight: bold;
+                                                margin-top: 10px;">
+                                                🚀 카카오 로그인 페이지로 이동하기 (클릭)
+                                            </a>
+                                        ''', unsafe_allow_html=True)
                                 except: pass
                     else:
                         try:
