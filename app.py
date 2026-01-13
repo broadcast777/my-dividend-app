@@ -371,7 +371,7 @@ def main():
                     st.write("💾 **포트폴리오 저장 / 수정**")
                     
                     # 들여쓰기 교정 완료된 코드입니다. 그대로 복사하세요.
-                  if not st.session_state.is_logged_in:
+                   if not st.session_state.is_logged_in:
                         st.info("🔒 로그인이 필요합니다.")
                         l_c1, l_c2 = st.columns(2)
                         
