@@ -116,8 +116,8 @@ def check_auth_status():
             
             # [수정] redirect_to에 "슬래시 없는 주소"를 명확히 넣습니다.
             res = supabase.auth.exchange_code_for_session({
-                "auth_code": auth_code,
-                "redirect_to": "https://dividend-pange.streamlit.app"
+                "auth_code": auth_code
+                
             })
             
             if res.session and res.session.user:
@@ -376,7 +376,7 @@ def main():
                                     res = supabase.auth.sign_in_with_oauth({
                                         "provider": "google",
                                         "options": {
-                                            "redirect_to": "https://dividend-pange.streamlit.app",
+                                           
                                             "queryParams": {"prompt": "select_account"},
                                             "skip_browser_redirect": True
                                         }
