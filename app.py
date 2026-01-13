@@ -83,9 +83,11 @@ for key in ["is_logged_in", "user_info", "code_processed"]:
 
 
 # ---------------------------------------------------------
-# Supabase 클라이언트 연결 캐싱
+# Supabase 클라이언트 연결 (캐싱 제거됨!)
 # ---------------------------------------------------------
-@st.cache_resource
+# [중요 수정] @st.cache_resource를 제거했습니다.
+# 이유: 로그인을 위해 갔다오면 앱이 새로고침 되는데, 캐시가 남아있으면
+# 저장해둔 보안 암호(Verifier)를 못 읽어와서 에러가 납니다.
 def get_supabase_client():
     try:
         URL = st.secrets["SUPABASE_URL"]
@@ -352,7 +354,7 @@ def main():
                             '비중': weights[stock], 
                             '자산유형': s_row['자산유형'], 
                             '투자금액_만원': amt / 10000,
-                            '종목명': stock,               
+                            '종목명': stock,                
                             '코드': s_row.get('코드', ''),
                             '분류': s_row.get('분류', '국내'),
                             '연배당률': s_row.get('연배당률', 0),
@@ -399,36 +401,26 @@ def main():
                             l_c1, l_c2 = st.columns(2)
                             
                             # -----------------------------------------------------
-                            # [왼쪽] Google 로그인 (방식: 링크 / 타겟: 현재 창 _self)
+                            # [왼쪽] Google 로그인 (구글은 버튼 + 메타태그 방식이 잘 됐으므로 복구)
                             # -----------------------------------------------------
                             with l_c1:
-                                try:
-                                    # 버튼을 누를 때 URL을 만드는 게 아니라, 미리 만들어둡니다. (안정성 UP)
-                                    res_google = supabase.auth.sign_in_with_oauth({
-                                        "provider": "google",
-                                        "options": {
-                                            "redirect_to": "https://dividend-pange.streamlit.app",
-                                            "queryParams": {"access_type": "offline", "prompt": "consent"},
-                                            "skip_browser_redirect": True
-                                        }
-                                    })
-                                    if res_google.url:
-                                        # target="_self" -> 현재 탭에서 이동
-                                        btn_google = f'''
-                                        <a href="{res_google.url}" target="_self" style="
-                                            display: inline-flex; justify-content: center; align-items: center; width: 100%;
-                                            background-color: #ffffff; color: #1f1f1f; border: 1px solid #747775;
-                                            padding: 0.6rem; border-radius: 0.5rem; text-decoration: none; font-weight: 600;
-                                            box-shadow: 0 1px 2px rgba(0,0,0,0.1);">
-                                            🔵 Google 로그인
-                                        </a>
-                                        '''
-                                        st.markdown(btn_google, unsafe_allow_html=True)
-                                except Exception as e:
-                                    st.error(f"구글 생성 오류: {e}")
+                                if st.button("🔵 Google 로그인", key="save_google", use_container_width=True):
+                                    try:
+                                        res = supabase.auth.sign_in_with_oauth({
+                                            "provider": "google",
+                                            "options": {
+                                                "redirect_to": "https://dividend-pange.streamlit.app",
+                                                "queryParams": {"access_type": "offline", "prompt": "consent"},
+                                                "skip_browser_redirect": False
+                                            }
+                                        })
+                                        if res.url:
+                                            st.markdown(f'<meta http-equiv="refresh" content="0;url={res.url}">', unsafe_allow_html=True)
+                                    except Exception as e:
+                                        st.error(f"Google 로그인 오류: {e}")
                             
                             # -----------------------------------------------------
-                            # [오른쪽] Kakao 로그인 (방식: 링크 / 타겟: 새 창 _blank)
+                            # [오른쪽] Kakao 로그인 (카카오는 링크 + 새 창 방식이 잘 됐으므로 유지)
                             # -----------------------------------------------------
                             with l_c2:
                                 try:
@@ -440,7 +432,6 @@ def main():
                                         }
                                     })
                                     if res_kakao.url:
-                                        # target="_blank" -> 새 탭에서 이동
                                         btn_kakao = f'''
                                         <a href="{res_kakao.url}" target="_blank" style="
                                             display: inline-flex; justify-content: center; align-items: center; width: 100%;
@@ -452,7 +443,7 @@ def main():
                                         '''
                                         st.markdown(btn_kakao, unsafe_allow_html=True)
                                 except Exception as e:
-                                    st.error(f"카카오 생성 오류: {e}")
+                                    st.error(f"Kakao 생성 오류: {e}")
 
                     # 2. 로그인 된 경우 (기존 로직 유지)
                     else:
