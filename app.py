@@ -17,50 +17,29 @@ import ui
 # ==========================================
 st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
 
-# ---------------------------------------------------------
-# [핵심] 새로고침해도 로그인이 풀리지 않게 잡아주는 저장소 클래스
-# ---------------------------------------------------------
-class StreamlitStorage:
-    """Streamlit + 파일 하이브리드 저장소 (PKCE 보존용)"""
-    
+# ==========================================
+# [수정 1] 파일 대신 세션 상태를 사용하는 저장소
+# ==========================================
+class StreamlitSessionStorage:
+    """
+    Supabase 인증 토큰과 Verifier를 st.session_state에만 저장합니다.
+    파일을 쓰지 않아 '덮어쓰기' 문제를 방지합니다.
+    """
     def __init__(self):
-        self.storage_dir = Path.home() / ".streamlit_auth"
-        self.storage_dir.mkdir(exist_ok=True)
-        self.storage_file = self.storage_dir / "auth_storage.json"
-        
-        if "supabase_storage" not in st.session_state:
-            st.session_state.supabase_storage = self._load_from_file()
-
-    def _load_from_file(self) -> dict:
-        try:
-            if self.storage_file.exists():
-                with open(self.storage_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-        except Exception as e:
-            print(f"[Storage] 파일 로드 실패: {e}")
-        return {}
-
-    def _save_to_file(self) -> None:
-        try:
-            with open(self.storage_file, 'w', encoding='utf-8') as f:
-                json.dump(st.session_state.supabase_storage, f)
-        except Exception as e:
-            print(f"[Storage] 파일 저장 실패: {e}")
+        self.namespace = "supabase_auth_store"
+        if self.namespace not in st.session_state:
+            st.session_state[self.namespace] = {}
 
     def get_item(self, key: str) -> str | None:
-        if key in st.session_state.supabase_storage:
-            return st.session_state.supabase_storage[key]
-        file_data = self._load_from_file()
-        return file_data.get(key)
+        return st.session_state[self.namespace].get(key)
 
     def set_item(self, key: str, value: str) -> None:
-        st.session_state.supabase_storage[key] = value
-        self._save_to_file()
+        st.session_state[self.namespace][key] = value
 
     def remove_item(self, key: str) -> None:
-        if key in st.session_state.supabase_storage:
-            del st.session_state.supabase_storage[key]
-        self._save_to_file()
+        if key in st.session_state[self.namespace]:
+            del st.session_state[self.namespace][key]
+
 
 
 # ---------------------------------------------------------
@@ -72,17 +51,18 @@ for key in ["is_logged_in", "user_info", "code_processed"]:
 
 
 # ---------------------------------------------------------
-# Supabase 클라이언트 연결
+# Supabase 클라이언트 연결 (Storage 교체)
 # ---------------------------------------------------------
 try:
     URL = st.secrets["SUPABASE_URL"]
     KEY = st.secrets["SUPABASE_KEY"]
     
+    # 위에서 만든 StreamlitSessionStorage로 교체
     supabase = create_client(
         URL, 
         KEY,
         options=ClientOptions(
-            storage=StreamlitStorage(),
+            storage=StreamlitSessionStorage(), 
             auto_refresh_token=True,
             persist_session=True,
         )
@@ -368,7 +348,9 @@ def main():
                 chart_compare = alt.Chart(c_data).mark_bar(cornerRadiusTopLeft=10, cornerRadiusTopRight=10).encode(x=alt.X('계좌 종류', sort=None, axis=alt.Axis(labelAngle=0, title=None)), y=alt.Y('월 수령액', title=None), color=alt.Color('계좌 종류', scale=alt.Scale(domain=['일반 계좌', 'ISA/연금계좌'], range=['#95a5a6', '#f1c40f']), legend=None), tooltip=[alt.Tooltip('계좌 종류'), alt.Tooltip('월 수령액', format=',.0f')]).properties(height=220)
                 st.altair_chart(chart_compare, use_container_width=True)
 
-               # =========================================================
+
+
+                # =========================================================
                 # [저장 로직] 로그인 여부에 따라 버튼 자동 변경
                 # =========================================================
                 st.write("") 
@@ -376,13 +358,24 @@ def main():
                     st.write("💾 **포트폴리오 저장 / 수정**")
                     
                     if not st.session_state.is_logged_in:
+                        
+                        # ▼▼▼ [수정 2] 방어 코드 삽입 위치 (들여쓰기 주의!) ▼▼▼
+                        # 이유: URL에 'code'가 있다는 건 로그인 인증을 하고 돌아왔다는 뜻입니다.
+                        # 이때 아래의 버튼 생성 코드(sign_in_with_oauth)가 또 실행되면
+                        # 비밀번호(Verifier)가 갱신되어 "인증 불일치" 에러가 납니다.
+                        # 따라서 여기서 스크립트를 멈춰줘야(st.stop) 안전합니다.
+                        if "code" in st.query_params:
+                            st.info("🔄 로그인 확인 중입니다... 잠시만 기다려주세요.")
+                            st.stop()
+                        # ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+                        
                         st.info("🔒 로그인이 필요합니다.")
                         
                         # [핵심 수정] 로그인 링크를 '한 번만' 만들어서 저장해둡니다.
-                        # 이렇게 해야 새로고침 되어도 암호(Verifier)가 바뀌지 않아 'Code Verifier' 에러가 해결됩니다.
                         if "auth_links" not in st.session_state:
                             st.session_state.auth_links = {"google": None, "kakao": None}
 
+                  
                         l_c1, l_c2 = st.columns(2)
                         
                         # [왼쪽] Google 로그인
