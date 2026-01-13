@@ -388,6 +388,8 @@ def main():
                                     res = supabase.auth.sign_in_with_oauth({
                                         "provider": "kakao",
                                         "options": {
+
+                                            "redirect_to": "https://dividend-pange.streamlit.app",
                                             
                                             "queryParams": {
                                                 "prompt": "login"
