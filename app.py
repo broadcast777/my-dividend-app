@@ -452,7 +452,7 @@ def main():
                                         save_cached_url("google", url)
                                     
                                     st.markdown(f'''
-                                        <a href="{url}" target="_self" style="
+                                        <a href="{url}" target="_blank" style="
                                             display: inline-flex; justify-content: center; align-items: center; width: 100%;
                                             background-color: #fff; color: #1f1f1f; border: 1px solid #747775;
                                             padding: 0.5rem; border-radius: 0.5rem; text-decoration: none; font-weight: 600;
@@ -481,7 +481,7 @@ def main():
                                         save_cached_url("kakao", url)
                                     
                                     st.markdown(f'''
-                                        <a href="{url}" target="_self" style="
+                                        <a href="{url}" target="_blank" style="
                                             display: inline-flex; justify-content: center; align-items: center; width: 100%;
                                             background-color: #FEE500; color: #000; border: 1px solid rgba(0,0,0,0.1);
                                             padding: 0.5rem; border-radius: 0.5rem; text-decoration: none; font-weight: 600;
