@@ -46,7 +46,7 @@ for key in ["is_logged_in", "user_info", "code_processed"]:
         st.session_state[key] = False if key != "user_info" else None
 
 # ==========================================
-# [2] 인증 상태 체크 (최종 수정)
+# [2] 인증 상태 체크 (PC 깜빡임 해결 버전)
 # ==========================================
 def check_auth_status():
     # 1. 이미 로그인된 상태면 패스
@@ -68,9 +68,12 @@ def check_auth_status():
         try:
             auth_code = st.query_params["code"]
             
-            # [중요] redirect_to 없이 코드 교환만 시도
-            # 클라이언트가 캐싱되어 있으므로 'verifier'를 기억하고 있어 성공합니다.
-            res = supabase.auth.exchange_code_for_session({"auth_code": auth_code})
+            # [수정] redirect_to를 다시 넣되, '슬래시 없는 주소'로 명확하게 지정합니다.
+            # 구글은 이 주소가 sign_in 때와 다르면(혹은 없으면) 조용히 실패합니다.
+            res = supabase.auth.exchange_code_for_session({
+                "auth_code": auth_code,
+                "redirect_to": "https://dividend-pange.streamlit.app"
+            })
             
             if res.session and res.session.user:
                 st.session_state.is_logged_in = True
@@ -82,8 +85,10 @@ def check_auth_status():
                 st.rerun()
                 
         except Exception as e:
-            st.query_params.clear() # 에러 나면 파라미터 지워서 무한반복 방지
-            # st.error(f"인증 오류: {e}") # 사용자에게 에러 안 보여주고 조용히 처리
+            # 에러가 나면 화면에 찍어서 원인을 봅니다.
+            # (깜빡이고 끝나는 대신 에러 메시지라도 나와야 고칠 수 있습니다)
+            st.error(f"인증 교환 실패: {e}")
+            # st.query_params.clear() # 디버깅을 위해 잠시 주석 처리 (에러 확인용)
             st.session_state.code_processed = True
 
 check_auth_status()
