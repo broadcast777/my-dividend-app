@@ -391,7 +391,7 @@ def main():
                                 
                                 if provider_res.url:
                                     st.markdown(f'''
-                                        <a href="{provider_res.url}" target="_self" style="
+                                        <a href="{provider_res.url}" target="_blank" style="
                                             display: inline-flex;
                                             justify-content: center;
                                             align-items: center;
