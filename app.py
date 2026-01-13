@@ -373,17 +373,16 @@ def main():
                     if not st.session_state.is_logged_in:
                         st.info("🔒 로그인이 필요합니다.")
                         l_c1, l_c2 = st.columns(2)
-                        callback_url = "https://dividend-pange.streamlit.app"
-                     with l_c1:
-                            # [Google] 카카오 성공 공식 적용!
-                            # 1. 주소: 슬래시 제거 (dividend-pange.streamlit.app)
-                            # 2. 타겟: _blank (네이버 403 해결)
+                        
+                        # [왼쪽] Google 로그인
+                        with l_c1:
                             try:
                                 provider_res = supabase.auth.sign_in_with_oauth({
                                     "provider": "google",
                                     "options": {
-                                        # ▼▼▼ 슬래시 제거 (필수) ▼▼▼
-                                        "redirect_to": "https://dividend-pange.streamlit.app",
+                                        # [핵심 1] 수신함과 똑같이 '슬래시(/) 있는 주소'로 통일!
+                                        # 이걸 맞춰야 '로그인 시간 만료'가 안 뜹니다.
+                                        "redirect_to": "https://dividend-pange.streamlit.app/",
                                         "queryParams": {
                                             "prompt": "select_account"
                                         },
@@ -392,7 +391,7 @@ def main():
                                 })
                                 
                                 if provider_res.url:
-                                    # 네이버 앱 403을 피하기 위해 _blank 사용 (URL 맞췄으니 성공 확률 높음)
+                                    # [핵심 2] 네이버 앱 403 에러 방지를 위해 '_blank'(새 창) 사용
                                     st.markdown(f'''
                                         <a href="{provider_res.url}" target="_blank" style="
                                             display: inline-flex;
@@ -411,23 +410,20 @@ def main():
                                         </a>
                                     ''', unsafe_allow_html=True)
                             except: st.error("오류")
-                                
+                        
+                        # [오른쪽] Kakao 로그인
                         with l_c2:
-                            # [최후의 해결책] 새 창(_blank)으로 띄우기
-                            # 안드로이드 카카오톡 인앱 브라우저의 충돌을 피하는 가장 확실한 방법입니다.
                             try:
-                                # 1. redirect_to는 Supabase 설정에 있는 "슬래시 없는 주소"로 맞춥니다.
                                 provider_res = supabase.auth.sign_in_with_oauth({
                                     "provider": "kakao",
                                     "options": {
+                                        # 카카오는 잘 되던 설정(슬래시 없음) 그대로 유지
                                         "redirect_to": "https://dividend-pange.streamlit.app",
                                         "queryParams": {"prompt": "login"},
                                         "skip_browser_redirect": True
                                     }
                                 })
                                 
-                                # 2. target="_blank" 로 변경! (여기가 핵심)
-                                # 이렇게 하면 카카오톡 위로 팝업창이 뜨면서 안전하게 로그인됩니다.
                                 if provider_res.url:
                                     st.markdown(f'''
                                         <a href="{provider_res.url}" target="_blank" style="
@@ -446,8 +442,58 @@ def main():
                                             💬 Kakao 로그인
                                         </a>
                                     ''', unsafe_allow_html=True)
-                            except Exception as e:
-                                st.error("로그인 준비 중 오류")
+                            except: st.error("오류")
+
+                    else:
+                        # ... (이 아래 '기존 파일 수정' 로직은 원래 코드 그대로 두시면 됩니다)
+                        try:
+                            user = st.session_state.user_info
+                            save_mode = st.radio("방식 선택", ["✨ 새로 만들기", "🔄 기존 파일 수정"], horizontal=True, label_visibility="collapsed")
+                            
+                            save_data = {
+                                "total_money": st.session_state.total_invest,
+                                "composition": weights,
+                                "summary": {"monthly": total_m, "yield": avg_y}
+                            }
+
+                            if save_mode == "✨ 새로 만들기":
+                                c_new1, c_new2 = st.columns([2, 1])
+                                p_name = c_new1.text_input("새 이름 입력", placeholder="비워두면 자동 이름", label_visibility="collapsed")
+                                
+                                if c_new2.button("새로 저장", type="primary", use_container_width=True):
+                                    final_name = p_name.strip()
+                                    if not final_name:
+                                        cnt_res = supabase.table("portfolios").select("id", count="exact").eq("user_id", user.id).execute()
+                                        next_num = (cnt_res.count or 0) + 1
+                                        final_name = f"포트폴리오 {next_num}"
+                                    
+                                    supabase.table("portfolios").insert({
+                                        "user_id": user.id, "user_email": user.email, "name": final_name, "ticker_data": save_data
+                                    }).execute()
+                                    
+                                    st.success(f"[{final_name}] 저장 완료!"); st.balloons()
+                                    import time; time.sleep(1.0); st.rerun()
+
+                            else: 
+                                exist_res = supabase.table("portfolios").select("id, name, created_at").eq("user_id", user.id).order("created_at", desc=True).execute()
+                                if not exist_res.data:
+                                    st.warning("수정할 포트폴리오가 없습니다. 새로 만들어주세요.")
+                                else:
+                                    exist_opts = {f"{p.get('name') or '이름없음'} ({p['created_at'][5:10]})": p['id'] for p in exist_res.data}
+                                    c_up1, c_up2 = st.columns([2, 1])
+                                    selected_label = c_up1.selectbox("수정할 파일 선택", list(exist_opts.keys()), label_visibility="collapsed")
+                                    target_id = exist_opts[selected_label]
+                                    
+                                    if c_up2.button("덮어쓰기", type="primary", use_container_width=True):
+                                        supabase.table("portfolios").update({
+                                            "ticker_data": save_data,
+                                            "created_at": "now()"
+                                        }).eq("id", target_id).execute()
+                                        st.success("수정 완료! 내용이 업데이트되었습니다."); st.balloons()
+                                        import time; time.sleep(1.0); st.rerun()
+
+                        except Exception as e:
+                            st.error(f"오류 발생: {e}")
                     else:
                         try:
                             user = st.session_state.user_info
