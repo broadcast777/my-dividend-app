@@ -93,7 +93,7 @@ except Exception as e:
 
 
 # ==========================================
-# [2] 인증 상태 체크
+# [2] 인증 상태 체크 (수정됨)
 # ==========================================
 def check_auth_status():
     if not supabase: return
@@ -115,11 +115,12 @@ def check_auth_status():
     if "code" in query_params and not st.session_state.get("code_processed", False):
         try:
             auth_code = query_params["code"]
-            redirect_url = "https://dividend-pange.streamlit.app"
             
+            # [핵심 수정] redirect_to를 삭제했습니다.
+            # 이유: 여기서 주소를 잘못 적으면 "Redirect Mismatch" 에러가 발생하여
+            # 바로 아래 except 블록으로 넘어가 "시간 만료" 메시지가 뜨게 됩니다.
             auth_response = supabase.auth.exchange_code_for_session({
-                "auth_code": auth_code,
-                "redirect_to": redirect_url
+                "auth_code": auth_code
             })
             session = auth_response.session
             
@@ -132,11 +133,15 @@ def check_auth_status():
             st.success("✅ 로그인되었습니다!")
             st.rerun()
             
-        except Exception:
+        except Exception as e:
+            # [디버깅] "시간 만료" 대신 진짜 에러 내용을 화면에 찍어줍니다.
             if not st.session_state.is_logged_in:
-                st.error("로그인 시간이 만료되었습니다. 다시 시도해주세요.")
+                st.error(f"인증 오류 발생: {e}") 
+                # 만약 "PKCE verifier not found"가 뜨면 브라우저 쿠키 문제입니다.
+                # "Redirect mismatch"가 뜨면 설정 문제입니다.
+                
             st.session_state.code_processed = True
-            st.query_params.clear()
+            # st.query_params.clear() # 에러 확인을 위해 잠시 주석 처리 (필요시 해제)
 
 check_auth_status()
 
