@@ -676,7 +676,7 @@ def main():
                         st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**
                         
 1. 본 결과는 주가·환율 변동과 수수료 등을 제외하고, 현재 배당률로만 계산한 결과입니다.
-2. ISA 계좌의 비과세 한도 및 세율은 세법 개정에 따라 달라질 수 있습니다.
+2. 실제 배당금은 운용사의 공시 및 환율 상황에 따라 매월 달라질 수 있습니다.
 3. 과거의 데이터를 기반으로 한 단순 시뮬레이션이며, 실제 투자 수익을 보장하지 않습니다.""")
 
                     with tab_goal:
@@ -690,7 +690,7 @@ def main():
                             monthly_add_goal = st.number_input("매월 추가 적립 가능 금액 (만원)", min_value=0, value=150, step=10) * 10000
                             apply_inflation_goal = st.toggle("📈 목표치에 물가상승률 반영", value=False, help="미래의 300만원이 현재의 얼마 가치인지 고려하여 목표를 상향 조정합니다.")
 
-                        tax_factor = 0.846 
+                        tax_factor = 0.846
                         required_asset_goal = (target_monthly_goal / tax_factor) / (avg_y / 100) * 12
                         
                         st.markdown("---")
