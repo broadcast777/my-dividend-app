@@ -19,7 +19,7 @@ import ui
 st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
 
 # ==========================================
-# [수정 1] 파일 기반 저장소 (로그인 정보 유지용)
+# [수정 1] 파일 기반 저장소 (순서 오류 해결됨)
 # ==========================================
 class StreamlitFileStorageFixed:
     """PKCE 토큰을 강제로 보존하는 저장소"""
@@ -29,20 +29,23 @@ class StreamlitFileStorageFixed:
         self.storage_dir.mkdir(exist_ok=True)
         self.storage_file = self.storage_dir / "auth_token.json"
         
-        # 세션 초기화
+        # [핵심 수정] 먼저 빈 공간을 확실히 만든 뒤에 로드합니다.
         if "supabase_storage" not in st.session_state:
-            st.session_state.supabase_storage = self._load()
+            st.session_state.supabase_storage = {}
+        
+        # 그 다음 파일 내용을 불러와 채웁니다.
+        self._sync_from_file()
 
-    def _load(self) -> dict:
+    def _sync_from_file(self):
+        """파일에서 읽어와 세션 상태를 업데이트"""
         try:
             if self.storage_file.exists():
                 with open(self.storage_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
+                    # 이제 공간이 있으므로 안전하게 업데이트 가능
                     st.session_state.supabase_storage.update(data)
-                    return data
         except Exception as e:
             print(f"[Storage] 로드 실패: {e}")
-        return {}
 
     def _save(self) -> None:
         try:
@@ -52,20 +55,9 @@ class StreamlitFileStorageFixed:
             print(f"[Storage] 저장 실패: {e}")
 
     def get_item(self, key: str):
-        # 1. 세션에서 먼저 찾기
+        # 세션에 있으면 바로 반환
         if key in st.session_state.supabase_storage:
             return st.session_state.supabase_storage[key]
-        
-        # 2. 파일에서 찾기
-        try:
-            with open(self.storage_file, 'r', encoding='utf-8') as f:
-                file_data = json.load(f)
-                if key in file_data:
-                    st.session_state.supabase_storage[key] = file_data[key]
-                    self._save()
-                    return file_data[key]
-        except:
-            pass
         return None
 
     def set_item(self, key: str, value) -> None:
@@ -89,8 +81,6 @@ for key in ["is_logged_in", "user_info", "code_processed"]:
 # ---------------------------------------------------------
 # [핵심 수정] Supabase 클라이언트 연결 캐싱
 # ---------------------------------------------------------
-# 이 함수에 @st.cache_resource를 붙여서 앱이 새로고침 되어도
-# 클라이언트 객체(와 그 안에 저장된 Verifier)가 초기화되지 않게 막습니다.
 @st.cache_resource
 def get_supabase_client():
     try:
@@ -155,9 +145,9 @@ def check_auth_status():
             
         except Exception as e:
             error_str = str(e)
+            # 친절한 에러 메시지 처리
             if "challenge" in error_str.lower() and "verifier" in error_str.lower():
-                st.error("🔴 인증 시간 초과 또는 브라우저 보안 문제")
-                st.caption("새로고침 후 다시 시도해주세요.")
+                st.error("⚠️ 보안 토큰이 만료되었습니다. (새로고침 후 다시 로그인해주세요)")
             else:
                 st.error(f"🔴 인증 오류: {error_str}")
             
@@ -420,7 +410,6 @@ def main():
                                         st.error(f"Google 로그인 오류: {e}")
                             
                             with l_c2:
-                                # [핵심 수정] 카카오 버튼 코드를 구글과 동일한 구조로 맞춤
                                 if st.button("💬 Kakao 로그인", key="save_kakao", use_container_width=True):
                                     try:
                                         res = supabase.auth.sign_in_with_oauth({
@@ -676,7 +665,7 @@ def main():
                         st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**
                         
 1. 본 결과는 주가·환율 변동과 수수료 등을 제외하고, 현재 배당률로만 계산한 결과입니다.
-2. 실제 배당금은 운용사의 공시 및 환율 상황에 따라 매월 달라질 수 있습니다.
+2. ISA 계좌의 비과세 한도 및 세율은 세법 개정에 따라 달라질 수 있습니다.
 3. 과거의 데이터를 기반으로 한 단순 시뮬레이션이며, 실제 투자 수익을 보장하지 않습니다.""")
 
                     with tab_goal:
