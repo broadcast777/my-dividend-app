@@ -453,7 +453,7 @@ def main():
                         except Exception as e:
                             st.error(f"카카오 오류: {e}")
 
-# ... (하단 생략) ...
+
                     else:
                         try:
                             user = st.session_state.user_info
