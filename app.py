@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import random # [복구] 랜덤 비유를 위해 필요
+import time   # [추가] 시간 지연 처리를 위해 추가
 
 # [모듈화] 분리한 파일들을 불러옵니다
 import logic 
@@ -18,28 +19,46 @@ import ui
 st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
 
 # ==========================================
-# [수정 1] 파일 대신 세션 상태를 사용하는 저장소
+# [수정 1] 파일 기반 저장소 (로그인 정보 유지용)
 # ==========================================
-class StreamlitSessionStorage:
+class StreamlitFileStorage:
     """
-    Supabase 인증 토큰과 Verifier를 st.session_state에만 저장합니다.
-    파일을 쓰지 않아 '덮어쓰기' 문제를 방지합니다.
+    구글 로그인 후 돌아와도 인증 정보(Verifier)가 유지되도록 파일에 저장합니다.
+    세션(Session) 대신 파일을 사용하여 Redirect 후 정보 소실을 막습니다.
     """
     def __init__(self):
-        self.namespace = "supabase_auth_store"
-        if self.namespace not in st.session_state:
-            st.session_state[self.namespace] = {}
+        self.storage_dir = Path.home() / ".streamlit_auth"
+        self.storage_dir.mkdir(exist_ok=True)
+        self.storage_file = self.storage_dir / "auth_token.json"
+
+    def _load(self):
+        try:
+            if self.storage_file.exists():
+                with open(self.storage_file, 'r') as f:
+                    return json.load(f)
+        except: pass
+        return {}
+
+    def _save(self, data):
+        try:
+            with open(self.storage_file, 'w') as f:
+                json.dump(data, f)
+        except: pass
 
     def get_item(self, key: str) -> str | None:
-        return st.session_state[self.namespace].get(key)
+        data = self._load()
+        return data.get(key)
 
     def set_item(self, key: str, value: str) -> None:
-        st.session_state[self.namespace][key] = value
+        data = self._load()
+        data[key] = value
+        self._save(data)
 
     def remove_item(self, key: str) -> None:
-        if key in st.session_state[self.namespace]:
-            del st.session_state[self.namespace][key]
-
+        data = self._load()
+        if key in data:
+            del data[key]
+            self._save(data)
 
 
 # ---------------------------------------------------------
@@ -57,12 +76,12 @@ try:
     URL = st.secrets["SUPABASE_URL"]
     KEY = st.secrets["SUPABASE_KEY"]
     
-    # 위에서 만든 StreamlitSessionStorage로 교체
+    # [수정] FileStorage로 교체하여 인증 정보 유지
     supabase = create_client(
         URL, 
         KEY,
         options=ClientOptions(
-            storage=StreamlitSessionStorage(), 
+            storage=StreamlitFileStorage(), 
             auto_refresh_token=True,
             persist_session=True,
         )
@@ -97,8 +116,6 @@ def check_auth_status():
             auth_code = query_params["code"]
             
             # [핵심 수정] redirect_to를 삭제했습니다.
-            # 이유: 여기서 주소를 잘못 적으면 "Redirect Mismatch" 에러가 발생하여
-            # 바로 아래 except 블록으로 넘어가 "시간 만료" 메시지가 뜨게 됩니다.
             auth_response = supabase.auth.exchange_code_for_session({
                 "auth_code": auth_code
             })
@@ -119,9 +136,11 @@ def check_auth_status():
                 st.error(f"인증 오류 발생: {e}") 
                 # 만약 "PKCE verifier not found"가 뜨면 브라우저 쿠키 문제입니다.
                 # "Redirect mismatch"가 뜨면 설정 문제입니다.
-                
+                time.sleep(3) # 에러 메시지 확인을 위해 잠시 대기
+            
             st.session_state.code_processed = True
-            # st.query_params.clear() # 에러 확인을 위해 잠시 주석 처리 (필요시 해제)
+            st.query_params.clear() # 에러 발생 시에도 파라미터 지워서 무한 루프 방지
+            st.rerun()
 
 check_auth_status()
 
@@ -148,6 +167,9 @@ def render_login_ui():
                 st.session_state.is_logged_in = False
                 st.session_state.user_info = None
                 st.session_state.code_processed = False
+                # 로그아웃 시 저장된 링크 초기화
+                if "auth_links" in st.session_state:
+                    st.session_state.auth_links = {"google": None, "kakao": None}
                 st.rerun()
     else:
         pass 
@@ -318,7 +340,7 @@ def main():
                             '비중': weights[stock], 
                             '자산유형': s_row['자산유형'], 
                             '투자금액_만원': amt / 10000,
-                            '종목명': stock,              
+                            '종목명': stock,               
                             '코드': s_row.get('코드', ''),
                             '분류': s_row.get('분류', '국내'),
                             '연배당률': s_row.get('연배당률', 0),
@@ -349,7 +371,6 @@ def main():
                 st.altair_chart(chart_compare, use_container_width=True)
 
 
-
                 # =========================================================
                 # [저장 로직] 로그인 여부에 따라 버튼 자동 변경
                 # =========================================================
@@ -359,83 +380,81 @@ def main():
                     
                     if not st.session_state.is_logged_in:
                         
-                        # ▼▼▼ [수정 2] 방어 코드 삽입 위치 (들여쓰기 주의!) ▼▼▼
-                        # 이유: URL에 'code'가 있다는 건 로그인 인증을 하고 돌아왔다는 뜻입니다.
-                        # 이때 아래의 버튼 생성 코드(sign_in_with_oauth)가 또 실행되면
-                        # 비밀번호(Verifier)가 갱신되어 "인증 불일치" 에러가 납니다.
-                        # 따라서 여기서 스크립트를 멈춰줘야(st.stop) 안전합니다.
+                        # [핵심 수정] 무한 로딩 해결을 위한 로직 변경
+                        # URL에 'code'가 있다는 건 로그인 처리 중이라는 뜻입니다.
+                        # 이때 버튼 생성 코드를 실행하면 암호가 갱신되어 에러가 납니다.
+                        # 따라서 else 분기를 사용해 버튼을 아예 그리지 않음으로써 암호를 보존합니다.
                         if "code" in st.query_params:
                             st.info("🔄 로그인 확인 중입니다... 잠시만 기다려주세요.")
-                            st.stop()
-                        # ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+                            # st.stop()을 제거하여 스크립트가 멈추지 않게 함
                         
-                        st.info("🔒 로그인이 필요합니다.")
-                        
-                        # [핵심 수정] 로그인 링크를 '한 번만' 만들어서 저장해둡니다.
-                        if "auth_links" not in st.session_state:
-                            st.session_state.auth_links = {"google": None, "kakao": None}
+                        else:
+                            st.info("🔒 로그인이 필요합니다.")
+                            
+                            # [핵심 수정] 로그인 링크를 '한 번만' 만들어서 저장해둡니다.
+                            if "auth_links" not in st.session_state:
+                                st.session_state.auth_links = {"google": None, "kakao": None}
 
-                  
-                        l_c1, l_c2 = st.columns(2)
-                        
-                        # [왼쪽] Google 로그인
-                        with l_c1:
-                            try:
-                                # 1. 링크가 없을 때만 새로 생성 (이때 생성된 Verifier가 고정됨)
-                                if st.session_state.auth_links["google"] is None:
-                                    res = supabase.auth.sign_in_with_oauth({
-                                        "provider": "google",
-                                        "options": {
-                                            "redirect_to": "https://dividend-pange.streamlit.app",
-                                            "queryParams": {"prompt": "select_account"},
-                                            "skip_browser_redirect": True
-                                        }
-                                    })
-                                    st.session_state.auth_links["google"] = res.url
-                                
-                                # 2. 저장된 링크를 화면에 표시
-                                if st.session_state.auth_links["google"]:
-                                    url = st.session_state.auth_links["google"]
-                                    st.markdown(f'''
-                                        <a href="{url}" target="_self" style="
-                                            display: inline-flex; justify-content: center; align-items: center; width: 100%;
-                                            background-color: #fff; color: #1f1f1f; border: 1px solid #747775;
-                                            padding: 0.5rem; border-radius: 0.5rem; text-decoration: none; font-weight: 600;
-                                            box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
-                                            🔵 Google 로그인
-                                        </a>
-                                    ''', unsafe_allow_html=True)
-                            except: st.error("오류")
-                        
-                        # [오른쪽] Kakao 로그인
-                        with l_c2:
-                            try:
-                                if st.session_state.auth_links["kakao"] is None:
-                                    res = supabase.auth.sign_in_with_oauth({
-                                        "provider": "kakao",
-                                        "options": {
-                                            "redirect_to": "https://dividend-pange.streamlit.app",
-                                            "queryParams": {"prompt": "login"},
-                                            "skip_browser_redirect": True
-                                        }
-                                    })
-                                    st.session_state.auth_links["kakao"] = res.url
-                                
-                                if st.session_state.auth_links["kakao"]:
-                                    url = st.session_state.auth_links["kakao"]
-                                    st.markdown(f'''
-                                        <a href="{url}" target="_self" style="
-                                            display: inline-flex; justify-content: center; align-items: center; width: 100%;
-                                            background-color: #FEE500; color: #000; border: 1px solid rgba(0,0,0,0.1);
-                                            padding: 0.5rem; border-radius: 0.5rem; text-decoration: none; font-weight: 600;
-                                            box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
-                                            💬 Kakao 로그인
-                                        </a>
-                                    ''', unsafe_allow_html=True)
-                            except: st.error("오류")
+                            l_c1, l_c2 = st.columns(2)
+                            
+                            # [왼쪽] Google 로그인
+                            with l_c1:
+                                try:
+                                    # 1. 링크가 없을 때만 새로 생성
+                                    if st.session_state.auth_links["google"] is None:
+                                        res = supabase.auth.sign_in_with_oauth({
+                                            "provider": "google",
+                                            "options": {
+                                                "redirect_to": "https://dividend-pange.streamlit.app",
+                                                "queryParams": {"prompt": "select_account"},
+                                                "skip_browser_redirect": True
+                                            }
+                                        })
+                                        st.session_state.auth_links["google"] = res.url
+                                    
+                                    # 2. 저장된 링크를 화면에 표시
+                                    if st.session_state.auth_links["google"]:
+                                        url = st.session_state.auth_links["google"]
+                                        st.markdown(f'''
+                                            <a href="{url}" target="_self" style="
+                                                display: inline-flex; justify-content: center; align-items: center; width: 100%;
+                                                background-color: #fff; color: #1f1f1f; border: 1px solid #747775;
+                                                padding: 0.5rem; border-radius: 0.5rem; text-decoration: none; font-weight: 600;
+                                                box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
+                                                🔵 Google 로그인
+                                            </a>
+                                        ''', unsafe_allow_html=True)
+                                except: st.error("오류")
+                            
+                            # [오른쪽] Kakao 로그인
+                            with l_c2:
+                                try:
+                                    if st.session_state.auth_links["kakao"] is None:
+                                        res = supabase.auth.sign_in_with_oauth({
+                                            "provider": "kakao",
+                                            "options": {
+                                                "redirect_to": "https://dividend-pange.streamlit.app",
+                                                "queryParams": {"prompt": "login"},
+                                                "skip_browser_redirect": True
+                                            }
+                                        })
+                                        st.session_state.auth_links["kakao"] = res.url
+                                    
+                                    if st.session_state.auth_links["kakao"]:
+                                        url = st.session_state.auth_links["kakao"]
+                                        st.markdown(f'''
+                                            <a href="{url}" target="_self" style="
+                                                display: inline-flex; justify-content: center; align-items: center; width: 100%;
+                                                background-color: #FEE500; color: #000; border: 1px solid rgba(0,0,0,0.1);
+                                                padding: 0.5rem; border-radius: 0.5rem; text-decoration: none; font-weight: 600;
+                                                box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
+                                                💬 Kakao 로그인
+                                            </a>
+                                        ''', unsafe_allow_html=True)
+                                except: st.error("오류")
 
                     else:
-                        # [로그인 성공 시 화면] - 기존과 동일
+                        # [로그인 성공 시 화면]
                         try:
                             user = st.session_state.user_info
                             save_mode = st.radio("방식 선택", ["✨ 새로 만들기", "🔄 기존 파일 수정"], horizontal=True, label_visibility="collapsed")
