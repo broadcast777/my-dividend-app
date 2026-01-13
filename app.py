@@ -6,10 +6,9 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import random # [복구] 랜덤 비유를 위해 필요
-import time   # [추가] 시간 지연 처리를 위해 추가
+import random 
+import time   
 
-# [모듈화] 분리한 파일들을 불러옵니다
 import logic 
 import ui
 
@@ -19,17 +18,19 @@ import ui
 st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
 
 # ==========================================
-# [수정 1] 파일 기반 저장소 (로그인 정보 유지용)
+# [수정 1] 강력한 파일 기반 저장소 (Verifier 유지용)
 # ==========================================
+# Streamlit Cloud의 /tmp 폴더는 권한 문제 없이 확실하게 쓸 수 있는 공간입니다.
+CACHE_DIR = Path("/tmp") / ".streamlit_auth_cache"
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
 class StreamlitFileStorage:
     """
-    구글 로그인 후 돌아와도 인증 정보(Verifier)가 유지되도록 파일에 저장합니다.
-    세션(Session) 대신 파일을 사용하여 Redirect 후 정보 소실을 막습니다.
+    Supabase 인증 토큰과 Verifier를 /tmp 파일에 저장합니다.
+    세션이 끊겨도 리다이렉트 후 파일을 다시 읽어 인증을 이어갑니다.
     """
     def __init__(self):
-        self.storage_dir = Path.home() / ".streamlit_auth"
-        self.storage_dir.mkdir(exist_ok=True)
-        self.storage_file = self.storage_dir / "auth_token.json"
+        self.storage_file = CACHE_DIR / "auth_token.json"
 
     def _load(self):
         try:
@@ -60,6 +61,44 @@ class StreamlitFileStorage:
             del data[key]
             self._save(data)
 
+# ---------------------------------------------------------
+# [수정 2] 로그인 URL 캐싱 (이중 실행 방지)
+# ---------------------------------------------------------
+# 앱이 새로고침될 때마다 sign_in_with_oauth가 실행되면 Verifier가 바뀌어버립니다.
+# 생성된 URL을 파일에 저장해두고, 이미 있으면 그것을 재활용합니다.
+URL_CACHE_FILE = CACHE_DIR / "login_urls.json"
+
+def get_cached_url(provider):
+    try:
+        if URL_CACHE_FILE.exists():
+            with open(URL_CACHE_FILE, 'r') as f:
+                data = json.load(f)
+                # 5분(300초) 지난 URL은 폐기
+                if time.time() - data.get('timestamp', 0) < 300:
+                    return data.get(provider)
+    except: pass
+    return None
+
+def save_cached_url(provider, url):
+    try:
+        data = {}
+        if URL_CACHE_FILE.exists():
+            with open(URL_CACHE_FILE, 'r') as f:
+                data = json.load(f)
+        
+        data[provider] = url
+        data['timestamp'] = time.time()
+        
+        with open(URL_CACHE_FILE, 'w') as f:
+            json.dump(data, f)
+    except: pass
+
+def clear_cached_urls():
+    try:
+        if URL_CACHE_FILE.exists():
+            os.remove(URL_CACHE_FILE)
+    except: pass
+
 
 # ---------------------------------------------------------
 # 세션 상태 변수 초기화
@@ -70,13 +109,12 @@ for key in ["is_logged_in", "user_info", "code_processed"]:
 
 
 # ---------------------------------------------------------
-# Supabase 클라이언트 연결 (Storage 교체)
+# Supabase 클라이언트 연결
 # ---------------------------------------------------------
 try:
     URL = st.secrets["SUPABASE_URL"]
     KEY = st.secrets["SUPABASE_KEY"]
     
-    # [수정] FileStorage로 교체하여 인증 정보 유지
     supabase = create_client(
         URL, 
         KEY,
@@ -103,19 +141,21 @@ def check_auth_status():
         if session and session.user:
             st.session_state.is_logged_in = True
             st.session_state.user_info = session.user
+            # 로그인 성공 시 URL 파라미터 및 캐시 청소
             if "code" in st.query_params:
                 st.query_params.clear()
+                clear_cached_urls() 
             return 
     except Exception:
         pass
 
-    # 2. 로그인 콜백 처리
+    # 2. 로그인 콜백 처리 (code가 돌아왔을 때)
     query_params = st.query_params
     if "code" in query_params and not st.session_state.get("code_processed", False):
         try:
             auth_code = query_params["code"]
             
-            # [핵심 수정] redirect_to를 삭제했습니다.
+            # [핵심] redirect_to 제거 (Supabase 설정값 사용)
             auth_response = supabase.auth.exchange_code_for_session({
                 "auth_code": auth_code
             })
@@ -124,22 +164,25 @@ def check_auth_status():
             if session and session.user:
                 st.session_state.is_logged_in = True
                 st.session_state.user_info = session.user
-            
-            st.query_params.clear()
+                st.success("✅ 로그인되었습니다!")
+                
+            # 정리 및 새로고침
+            clear_cached_urls()
             st.session_state.code_processed = True
-            st.success("✅ 로그인되었습니다!")
+            st.query_params.clear()
             st.rerun()
             
         except Exception as e:
-            # [디버깅] "시간 만료" 대신 진짜 에러 내용을 화면에 찍어줍니다.
+            # 에러 발생 시 처리
             if not st.session_state.is_logged_in:
-                st.error(f"인증 오류 발생: {e}") 
-                # 만약 "PKCE verifier not found"가 뜨면 브라우저 쿠키 문제입니다.
-                # "Redirect mismatch"가 뜨면 설정 문제입니다.
-                time.sleep(3) # 에러 메시지 확인을 위해 잠시 대기
+                # 에러가 나도 캐시를 지워서 다음 시도 때 깨끗하게 시작하게 함
+                clear_cached_urls()
+                st.error(f"인증 오류 발생: {e}")
+                st.info("🔄 잠시 후 다시 시도해주세요.")
+                time.sleep(3)
             
             st.session_state.code_processed = True
-            st.query_params.clear() # 에러 발생 시에도 파라미터 지워서 무한 루프 방지
+            st.query_params.clear()
             st.rerun()
 
 check_auth_status()
@@ -167,9 +210,7 @@ def render_login_ui():
                 st.session_state.is_logged_in = False
                 st.session_state.user_info = None
                 st.session_state.code_processed = False
-                # 로그아웃 시 저장된 링크 초기화
-                if "auth_links" in st.session_state:
-                    st.session_state.auth_links = {"google": None, "kakao": None}
+                clear_cached_urls() # 로그아웃 시 캐시 삭제
                 st.rerun()
     else:
         pass 
@@ -380,28 +421,25 @@ def main():
                     
                     if not st.session_state.is_logged_in:
                         
-                        # [핵심 수정] 무한 로딩 해결을 위한 로직 변경
-                        # URL에 'code'가 있다는 건 로그인 처리 중이라는 뜻입니다.
-                        # 이때 버튼 생성 코드를 실행하면 암호가 갱신되어 에러가 납니다.
-                        # 따라서 else 분기를 사용해 버튼을 아예 그리지 않음으로써 암호를 보존합니다.
                         if "code" in st.query_params:
                             st.info("🔄 로그인 확인 중입니다... 잠시만 기다려주세요.")
-                            # st.stop()을 제거하여 스크립트가 멈추지 않게 함
+                            # 버튼을 그리지 않아 로직 실행을 막음
                         
                         else:
                             st.info("🔒 로그인이 필요합니다.")
-                            
-                            # [핵심 수정] 로그인 링크를 '한 번만' 만들어서 저장해둡니다.
-                            if "auth_links" not in st.session_state:
-                                st.session_state.auth_links = {"google": None, "kakao": None}
-
                             l_c1, l_c2 = st.columns(2)
                             
                             # [왼쪽] Google 로그인
                             with l_c1:
                                 try:
-                                    # 1. 링크가 없을 때만 새로 생성
-                                    if st.session_state.auth_links["google"] is None:
+                                    # [핵심] 파일에 저장된 유효한 URL이 있는지 먼저 확인
+                                    cached_url = get_cached_url("google")
+                                    
+                                    if cached_url:
+                                        # 있으면 재활용 (sign_in_with_oauth 호출 X -> verifier 유지됨)
+                                        url = cached_url
+                                    else:
+                                        # 없으면 새로 생성 후 저장
                                         res = supabase.auth.sign_in_with_oauth({
                                             "provider": "google",
                                             "options": {
@@ -410,26 +448,27 @@ def main():
                                                 "skip_browser_redirect": True
                                             }
                                         })
-                                        st.session_state.auth_links["google"] = res.url
+                                        url = res.url
+                                        save_cached_url("google", url)
                                     
-                                    # 2. 저장된 링크를 화면에 표시
-                                    if st.session_state.auth_links["google"]:
-                                        url = st.session_state.auth_links["google"]
-                                        st.markdown(f'''
-                                            <a href="{url}" target="_self" style="
-                                                display: inline-flex; justify-content: center; align-items: center; width: 100%;
-                                                background-color: #fff; color: #1f1f1f; border: 1px solid #747775;
-                                                padding: 0.5rem; border-radius: 0.5rem; text-decoration: none; font-weight: 600;
-                                                box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
-                                                🔵 Google 로그인
-                                            </a>
-                                        ''', unsafe_allow_html=True)
+                                    st.markdown(f'''
+                                        <a href="{url}" target="_self" style="
+                                            display: inline-flex; justify-content: center; align-items: center; width: 100%;
+                                            background-color: #fff; color: #1f1f1f; border: 1px solid #747775;
+                                            padding: 0.5rem; border-radius: 0.5rem; text-decoration: none; font-weight: 600;
+                                            box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
+                                            🔵 Google 로그인
+                                        </a>
+                                    ''', unsafe_allow_html=True)
                                 except: st.error("오류")
                             
                             # [오른쪽] Kakao 로그인
                             with l_c2:
                                 try:
-                                    if st.session_state.auth_links["kakao"] is None:
+                                    cached_url = get_cached_url("kakao")
+                                    if cached_url:
+                                        url = cached_url
+                                    else:
                                         res = supabase.auth.sign_in_with_oauth({
                                             "provider": "kakao",
                                             "options": {
@@ -438,19 +477,18 @@ def main():
                                                 "skip_browser_redirect": True
                                             }
                                         })
-                                        st.session_state.auth_links["kakao"] = res.url
+                                        url = res.url
+                                        save_cached_url("kakao", url)
                                     
-                                    if st.session_state.auth_links["kakao"]:
-                                        url = st.session_state.auth_links["kakao"]
-                                        st.markdown(f'''
-                                            <a href="{url}" target="_self" style="
-                                                display: inline-flex; justify-content: center; align-items: center; width: 100%;
-                                                background-color: #FEE500; color: #000; border: 1px solid rgba(0,0,0,0.1);
-                                                padding: 0.5rem; border-radius: 0.5rem; text-decoration: none; font-weight: 600;
-                                                box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
-                                                💬 Kakao 로그인
-                                            </a>
-                                        ''', unsafe_allow_html=True)
+                                    st.markdown(f'''
+                                        <a href="{url}" target="_self" style="
+                                            display: inline-flex; justify-content: center; align-items: center; width: 100%;
+                                            background-color: #FEE500; color: #000; border: 1px solid rgba(0,0,0,0.1);
+                                            padding: 0.5rem; border-radius: 0.5rem; text-decoration: none; font-weight: 600;
+                                            box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
+                                            💬 Kakao 로그인
+                                        </a>
+                                    ''', unsafe_allow_html=True)
                                 except: st.error("오류")
 
                     else:
