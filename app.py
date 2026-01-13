@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import random
 import time
+from streamlit.runtime.scriptrunner import get_script_run_ctx
 
 # [모듈화] 분리한 파일들을 불러옵니다
 import logic 
