@@ -375,12 +375,12 @@ def main():
                         l_c1, l_c2 = st.columns(2)
                         
                         # [왼쪽] Google 로그인
+                        # 설명: 시간 만료 문제 해결을 위해 '현재 창(_self)' 유지
                         with l_c1:
                             try:
                                 provider_res = supabase.auth.sign_in_with_oauth({
                                     "provider": "google",
                                     "options": {
-                                        # [중요] 사장님 설정에 맞춘 주소 (dividend-pange)
                                         "redirect_to": "https://dividend-pange.streamlit.app",
                                         "queryParams": {
                                             "prompt": "select_account"
@@ -410,12 +410,12 @@ def main():
                             except: st.error("오류")
                         
                         # [오른쪽] Kakao 로그인
+                        # 설명: 요청하신 대로 '새 창(_blank)'으로 변경함
                         with l_c2:
                             try:
                                 provider_res = supabase.auth.sign_in_with_oauth({
                                     "provider": "kakao",
                                     "options": {
-                                        # [중요] 사장님 설정에 맞춘 주소 (dividend-pange)
                                         "redirect_to": "https://dividend-pange.streamlit.app",
                                         "queryParams": {"prompt": "login"},
                                         "skip_browser_redirect": True
@@ -424,7 +424,7 @@ def main():
                                 
                                 if provider_res.url:
                                     st.markdown(f'''
-                                        <a href="{provider_res.url}" target="_self" style="
+                                        <a href="{provider_res.url}" target="_blank" style="
                                             display: inline-flex;
                                             justify-content: center;
                                             align-items: center;
@@ -443,7 +443,7 @@ def main():
                             except: st.error("오류")
 
                     else:
-                        # [로그인 성공 시 화면] - 중복된 else를 하나로 합침
+                        # [로그인 성공 시 화면]
                         try:
                             user = st.session_state.user_info
                             save_mode = st.radio("방식 선택", ["✨ 새로 만들기", "🔄 기존 파일 수정"], horizontal=True, label_visibility="collapsed")
@@ -492,7 +492,6 @@ def main():
 
                         except Exception as e:
                             st.error(f"오류 발생: {e}")
-                            
                 st.write("")
                 st.info("""
                 📢 **찾으시는 종목이 안 보이나요?**
