@@ -396,36 +396,42 @@ def main():
                         else:
                             st.info("🔒 로그인이 필요합니다.")
                             
-                            # 좌우 분할
                             l_c1, l_c2 = st.columns(2)
                             
                             # -----------------------------------------------------
-                            # [왼쪽] Google 로그인 (보내주신 코드 기반: 버튼 + 메타태그)
+                            # [왼쪽] Google 로그인 (방식: 링크 / 타겟: 현재 창 _self)
                             # -----------------------------------------------------
                             with l_c1:
-                                # 구글은 st.button을 사용 (기존 성공하신 방식)
-                                if st.button("🔵 Google 로그인", key="btn_google_login", use_container_width=True):
-                                    try:
-                                        res = supabase.auth.sign_in_with_oauth({
-                                            "provider": "google",
-                                            "options": {
-                                                "redirect_to": "https://dividend-pange.streamlit.app",
-                                                "queryParams": {"access_type": "offline", "prompt": "consent"},
-                                                "skip_browser_redirect": False # 보내주신 코드 설정 유지
-                                            }
-                                        })
-                                        # URL이 나오면 메타태그로 강제 이동 (현재 창)
-                                        if res.url:
-                                            st.markdown(f'<meta http-equiv="refresh" content="0;url={res.url}">', unsafe_allow_html=True)
-                                    except Exception as e:
-                                        st.error(f"구글 오류: {e}")
+                                try:
+                                    # 버튼을 누를 때 URL을 만드는 게 아니라, 미리 만들어둡니다. (안정성 UP)
+                                    res_google = supabase.auth.sign_in_with_oauth({
+                                        "provider": "google",
+                                        "options": {
+                                            "redirect_to": "https://dividend-pange.streamlit.app",
+                                            "queryParams": {"access_type": "offline", "prompt": "consent"},
+                                            "skip_browser_redirect": True
+                                        }
+                                    })
+                                    if res_google.url:
+                                        # target="_self" -> 현재 탭에서 이동
+                                        btn_google = f'''
+                                        <a href="{res_google.url}" target="_self" style="
+                                            display: inline-flex; justify-content: center; align-items: center; width: 100%;
+                                            background-color: #ffffff; color: #1f1f1f; border: 1px solid #747775;
+                                            padding: 0.6rem; border-radius: 0.5rem; text-decoration: none; font-weight: 600;
+                                            box-shadow: 0 1px 2px rgba(0,0,0,0.1);">
+                                            🔵 Google 로그인
+                                        </a>
+                                        '''
+                                        st.markdown(btn_google, unsafe_allow_html=True)
+                                except Exception as e:
+                                    st.error(f"구글 생성 오류: {e}")
                             
                             # -----------------------------------------------------
-                            # [오른쪽] Kakao 로그인 (아까 성공한 코드: 링크 + 새 창)
+                            # [오른쪽] Kakao 로그인 (방식: 링크 / 타겟: 새 창 _blank)
                             # -----------------------------------------------------
                             with l_c2:
                                 try:
-                                    # 카카오는 미리 URL을 만들어서 <a> 태그로 보여줌 (새 창 띄우기 위함)
                                     res_kakao = supabase.auth.sign_in_with_oauth({
                                         "provider": "kakao",
                                         "options": {
@@ -434,8 +440,8 @@ def main():
                                         }
                                     })
                                     if res_kakao.url:
-                                        # 버튼처럼 생긴 링크(a tag)를 만듭니다.
-                                        btn_kakao_html = f'''
+                                        # target="_blank" -> 새 탭에서 이동
+                                        btn_kakao = f'''
                                         <a href="{res_kakao.url}" target="_blank" style="
                                             display: inline-flex; justify-content: center; align-items: center; width: 100%;
                                             background-color: #FEE500; color: #000000; border: 1px solid rgba(0,0,0,0.05);
@@ -444,9 +450,9 @@ def main():
                                             💬 Kakao 로그인
                                         </a>
                                         '''
-                                        st.markdown(btn_kakao_html, unsafe_allow_html=True)
+                                        st.markdown(btn_kakao, unsafe_allow_html=True)
                                 except Exception as e:
-                                    st.error(f"카카오 오류: {e}")
+                                    st.error(f"카카오 생성 오류: {e}")
 
                     # 2. 로그인 된 경우 (기존 로직 유지)
                     else:
