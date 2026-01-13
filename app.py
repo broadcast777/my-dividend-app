@@ -375,28 +375,27 @@ def main():
                         l_c1, l_c2 = st.columns(2)
                         callback_url = "https://dividend-pange.streamlit.app"
                         with l_c1:
-                            # [Google 복구] 설정을 단순하게 원복합니다.
-                            # 카카오 때문에 바뀐 '슬래시 없는 주소'에 맞춰 옵션을 뺍니다.
+                            # [Google 수정] 카카오처럼 '새 창(_blank)'으로 띄우되,
+                            # 충돌을 일으키는 옵션(access_type 등)을 싹 비워서 '시간 만료'를 막습니다.
                             try:
                                 provider_res = supabase.auth.sign_in_with_oauth({
                                     "provider": "google",
                                     "options": {
-                                        # Supabase 설정과 똑같이 '슬래시 없는' 주소 (필수!)
+                                        # 사장님 말씀대로 dividend-pange 주소 (슬래시 없음)
                                         "redirect_to": "https://dividend-pange.streamlit.app",
                                         
-                                        # [핵심] 복잡한 옵션 다 삭제! (이게 시간 만료의 주범)
-                                        # 옛날처럼 단순하게 로그인만 요청합니다.
+                                        # [핵심] 옵션을 비웁니다! (카카오처럼 단순하게)
                                         "queryParams": {
-                                            "prompt": "select_account"
+                                            # "prompt": "select_account"  <-- 삭제 (자동 로그인 유도)
                                         },
                                         "skip_browser_redirect": True
                                     }
                                 })
                                 
                                 if provider_res.url:
-                                    # 구글은 반드시 '현재 창(_self)'이어야 합니다.
+                                    # 카카오처럼 target="_blank" (새 창) 사용 -> 네이버 403 해결
                                     st.markdown(f'''
-                                        <a href="{provider_res.url}" target="_self" style="
+                                        <a href="{provider_res.url}" target="_blank" style="
                                             display: inline-flex;
                                             justify-content: center;
                                             align-items: center;
