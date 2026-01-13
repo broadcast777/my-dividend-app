@@ -317,7 +317,8 @@ def main():
                 with st.container(border=True):
                     st.write("💾 **포트폴리오 저장 / 수정**")
                     
-if not st.session_state.is_logged_in:
+                    # [로그인 안 된 상태]
+                    if not st.session_state.is_logged_in:
                         st.info("🔒 로그인이 필요합니다.")
                         
                         # [수정] 링크 고정용 변수 초기화
@@ -363,8 +364,9 @@ if not st.session_state.is_logged_in:
                                     url = st.session_state.auth_links["kakao"]
                                     st.markdown(f'<a href="{url}" target="_self" style="display:inline-flex;justify-content:center;align-items:center;width:100%;background:#FEE500;color:#000;border:1px solid rgba(0,0,0,0.1);padding:0.5rem;border-radius:0.5rem;text-decoration:none;font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,0.05);">💬 Kakao 로그인</a>', unsafe_allow_html=True)
                             except: st.error("오류")
+
+                    # [로그인 된 상태] (들여쓰기 주의: if와 같은 줄에 else가 있어야 함)
                     else:
-                        # [로그인 성공 시 화면]
                         try:
                             user = st.session_state.user_info
                             save_mode = st.radio("방식 선택", ["✨ 새로 만들기", "🔄 기존 파일 수정"], horizontal=True, label_visibility="collapsed")
@@ -378,6 +380,7 @@ if not st.session_state.is_logged_in:
                             if save_mode == "✨ 새로 만들기":
                                 c_new1, c_new2 = st.columns([2, 1])
                                 p_name = c_new1.text_input("새 이름 입력", placeholder="비워두면 자동 이름", label_visibility="collapsed")
+                                
                                 if c_new2.button("새로 저장", type="primary", use_container_width=True):
                                     final_name = p_name.strip()
                                     if not final_name:
@@ -388,6 +391,7 @@ if not st.session_state.is_logged_in:
                                     supabase.table("portfolios").insert({
                                         "user_id": user.id, "user_email": user.email, "name": final_name, "ticker_data": save_data
                                     }).execute()
+                                    
                                     st.success(f"[{final_name}] 저장 완료!"); st.balloons()
                                     import time; time.sleep(1.0); st.rerun()
 
@@ -400,10 +404,15 @@ if not st.session_state.is_logged_in:
                                     c_up1, c_up2 = st.columns([2, 1])
                                     selected_label = c_up1.selectbox("수정할 파일 선택", list(exist_opts.keys()), label_visibility="collapsed")
                                     target_id = exist_opts[selected_label]
+                                    
                                     if c_up2.button("덮어쓰기", type="primary", use_container_width=True):
-                                        supabase.table("portfolios").update({"ticker_data": save_data, "created_at": "now()"}).eq("id", target_id).execute()
+                                        supabase.table("portfolios").update({
+                                            "ticker_data": save_data,
+                                            "created_at": "now()"
+                                        }).eq("id", target_id).execute()
                                         st.success("수정 완료! 내용이 업데이트되었습니다."); st.balloons()
                                         import time; time.sleep(1.0); st.rerun()
+
                         except Exception as e:
                             st.error(f"오류 발생: {e}")
 
