@@ -6,7 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import random
+import random 
 import time
 
 # [모듈화] 분리한 파일들을 불러옵니다
@@ -19,7 +19,61 @@ import ui
 st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
 
 # ---------------------------------------------------------
-# Supabase 클라이언트 연결 (이 코드로 되어 있는지 확인!)
+# [중요] 저장소 클래스 정의 (이게 연결 코드보다 먼저 나와야 함!)
+# ---------------------------------------------------------
+class StreamlitStorage:
+    """Streamlit + 파일 하이브리드 저장소 (PKCE 보존용)"""
+    
+    def __init__(self):
+        self.storage_dir = Path.home() / ".streamlit_auth"
+        self.storage_dir.mkdir(exist_ok=True)
+        self.storage_file = self.storage_dir / "auth_storage.json"
+        
+        if "supabase_storage" not in st.session_state:
+            st.session_state.supabase_storage = self._load_from_file()
+
+    def _load_from_file(self) -> dict:
+        try:
+            if self.storage_file.exists():
+                with open(self.storage_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+        except Exception as e:
+            print(f"[Storage] 파일 로드 실패: {e}")
+        return {}
+
+    def _save_to_file(self) -> None:
+        try:
+            with open(self.storage_file, 'w', encoding='utf-8') as f:
+                json.dump(st.session_state.supabase_storage, f)
+        except Exception as e:
+            print(f"[Storage] 파일 저장 실패: {e}")
+
+    def get_item(self, key: str) -> str | None:
+        if key in st.session_state.supabase_storage:
+            return st.session_state.supabase_storage[key]
+        file_data = self._load_from_file()
+        return file_data.get(key)
+
+    def set_item(self, key: str, value: str) -> None:
+        st.session_state.supabase_storage[key] = value
+        self._save_to_file()
+
+    def remove_item(self, key: str) -> None:
+        if key in st.session_state.supabase_storage:
+            del st.session_state.supabase_storage[key]
+        self._save_to_file()
+
+
+# ---------------------------------------------------------
+# 세션 상태 변수 초기화
+# ---------------------------------------------------------
+for key in ["is_logged_in", "user_info", "code_processed"]:
+    if key not in st.session_state:
+        st.session_state[key] = False if key != "user_info" else None
+
+
+# ---------------------------------------------------------
+# Supabase 클라이언트 연결 (클래스 정의 후 실행)
 # ---------------------------------------------------------
 try:
     URL = st.secrets["SUPABASE_URL"]
@@ -29,7 +83,7 @@ try:
         URL, 
         KEY,
         options=ClientOptions(
-            storage=StreamlitStorage(), # <--- 이게 핵심입니다.
+            storage=StreamlitStorage(), # 위에서 만든 클래스 사용
             auto_refresh_token=True,
             persist_session=True,
         )
@@ -38,19 +92,7 @@ except Exception as e:
     st.error(f"🚨 Supabase 연결 오류: {e}")
     supabase = None
 
-supabase = get_supabase_client()
-
-if not supabase:
-    st.error("🚨 Supabase 연결 실패: secrets 값을 확인해주세요.")
-    st.stop()
-
-# ---------------------------------------------------------
-# 세션 상태 변수 초기화
-# ---------------------------------------------------------
-for key in ["is_logged_in", "user_info", "code_processed"]:
-    if key not in st.session_state:
-        st.session_state[key] = False if key != "user_info" else None
-
+# (이 아래로 check_auth_status 함수가 이어져야 합니다)
 # ==========================================
 # [2] 인증 상태 체크 (수정됨: 주소 명시)
 # ==========================================
