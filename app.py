@@ -86,9 +86,8 @@ def get_connection():
             URL, 
             KEY,
             options=ClientOptions(
-                storage=StreamlitStorage(),
-                auto_refresh_token=True,
-                persist_session=True,
+                storage=StreamlitStorage()
+           
             )
         )
         return client
