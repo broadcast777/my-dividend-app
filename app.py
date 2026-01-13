@@ -375,11 +375,45 @@ def main():
                         l_c1, l_c2 = st.columns(2)
                         callback_url = "https://dividend-pange.streamlit.app/"
                         with l_c1:
-                            if st.button("🔵 Google 로그인", key="save_google", use_container_width=True):
-                                try:
-                                    res = supabase.auth.sign_in_with_oauth({"provider": "google", "options": {"redirect_to": callback_url}})
-                                    if res.url: st.markdown(f'<meta http-equiv="refresh" content="0;url={res.url}">', unsafe_allow_html=True)
-                                except: pass
+                            # [Google 해결책] 카카오와 동일하게 '새 창(_blank)' 전략 적용
+                            # 네이버 인앱 브라우저의 403 에러(보안 차단)를 우회합니다.
+                            try:
+                                provider_res = supabase.auth.sign_in_with_oauth({
+                                    "provider": "google",
+                                    "options": {
+                                        # Supabase 설정과 동일한 '슬래시 없는' 주소
+                                        "redirect_to": "https://dividend-pange.streamlit.app",
+                                        "queryParams": {
+                                            "access_type": "offline",
+                                            "prompt": "consent"
+                                        },
+                                        "skip_browser_redirect": True
+                                    }
+                                })
+                                
+                                # 구글은 흰색 배경에 회색 테두리가 국룰이지만, 
+                                # 기존 버튼 디자인(파란색 느낌)과 비슷하게 맞췄습니다.
+                                if provider_res.url:
+                                    st.markdown(f'''
+                                        <a href="{provider_res.url}" target="_blank" style="
+                                            display: inline-flex;
+                                            justify-content: center;
+                                            align-items: center;
+                                            width: 100%;
+                                            background-color: #fff;
+                                            color: #1f1f1f;
+                                            border: 1px solid #747775;
+                                            padding: 0.5rem;
+                                            border-radius: 0.5rem;
+                                            text-decoration: none;
+                                            font-weight: 600;
+                                            box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
+                                            🔵 Google 로그인
+                                        </a>
+                                    ''', unsafe_allow_html=True)
+                            except Exception as e:
+                                st.error("접속 오류")
+                                
                         with l_c2:
                             # [최후의 해결책] 새 창(_blank)으로 띄우기
                             # 안드로이드 카카오톡 인앱 브라우저의 충돌을 피하는 가장 확실한 방법입니다.
