@@ -6,7 +6,8 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import random # [복구] 랜덤 비유를 위해 필요
+import random
+import time
 
 # [모듈화] 분리한 파일들을 불러옵니다
 import logic 
@@ -18,50 +19,24 @@ import ui
 st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
 
 # ---------------------------------------------------------
-# [핵심] 새로고침해도 로그인이 풀리지 않게 잡아주는 저장소 클래스
+# [핵심 해결책] Supabase 클라이언트 자체를 캐싱(박제)합니다.
+# 이렇게 해야 앱이 새로고침 되어도 '인증 암호(Verifier)'를 잊어버리지 않습니다.
 # ---------------------------------------------------------
-class StreamlitStorage:
-    """Streamlit + 파일 하이브리드 저장소 (PKCE 보존용)"""
-    
-    def __init__(self):
-        self.storage_dir = Path.home() / ".streamlit_auth"
-        self.storage_dir.mkdir(exist_ok=True)
-        self.storage_file = self.storage_dir / "auth_storage.json"
-        
-        if "supabase_storage" not in st.session_state:
-            st.session_state.supabase_storage = self._load_from_file()
+@st.cache_resource
+def get_supabase_client():
+    try:
+        URL = st.secrets["SUPABASE_URL"]
+        KEY = st.secrets["SUPABASE_KEY"]
+        # ClientOptions 없이 기본 생성 (캐싱이 모든 걸 해결함)
+        return create_client(URL, KEY)
+    except Exception as e:
+        return None
 
-    def _load_from_file(self) -> dict:
-        try:
-            if self.storage_file.exists():
-                with open(self.storage_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-        except Exception as e:
-            print(f"[Storage] 파일 로드 실패: {e}")
-        return {}
+supabase = get_supabase_client()
 
-    def _save_to_file(self) -> None:
-        try:
-            with open(self.storage_file, 'w', encoding='utf-8') as f:
-                json.dump(st.session_state.supabase_storage, f)
-        except Exception as e:
-            print(f"[Storage] 파일 저장 실패: {e}")
-
-    def get_item(self, key: str) -> str | None:
-        if key in st.session_state.supabase_storage:
-            return st.session_state.supabase_storage[key]
-        file_data = self._load_from_file()
-        return file_data.get(key)
-
-    def set_item(self, key: str, value: str) -> None:
-        st.session_state.supabase_storage[key] = value
-        self._save_to_file()
-
-    def remove_item(self, key: str) -> None:
-        if key in st.session_state.supabase_storage:
-            del st.session_state.supabase_storage[key]
-        self._save_to_file()
-
+if not supabase:
+    st.error("🚨 Supabase 연결 실패: secrets 값을 확인해주세요.")
+    st.stop()
 
 # ---------------------------------------------------------
 # 세션 상태 변수 초기화
@@ -70,81 +45,48 @@ for key in ["is_logged_in", "user_info", "code_processed"]:
     if key not in st.session_state:
         st.session_state[key] = False if key != "user_info" else None
 
-
-# ---------------------------------------------------------
-# Supabase 클라이언트 연결
-# ---------------------------------------------------------
-try:
-    URL = st.secrets["SUPABASE_URL"]
-    KEY = st.secrets["SUPABASE_KEY"]
-    
-    supabase = create_client(
-        URL, 
-        KEY,
-        options=ClientOptions(
-            storage=StreamlitStorage(),
-            auto_refresh_token=True,
-            persist_session=True,
-        )
-    )
-except Exception as e:
-    st.error(f"🚨 Supabase 연결 오류: {e}")
-    supabase = None
-
-
 # ==========================================
-# [2] 인증 상태 체크 (수정됨)
+# [2] 인증 상태 체크 (최종 수정)
 # ==========================================
 def check_auth_status():
-    if not supabase: return
+    # 1. 이미 로그인된 상태면 패스
+    if st.session_state.is_logged_in:
+        return
 
-    # 1. 이미 로그인된 상태인지 확인
+    # 2. Supabase 자체 세션 확인 (새로고침 시 복구용)
     try:
         session = supabase.auth.get_session()
         if session and session.user:
             st.session_state.is_logged_in = True
             st.session_state.user_info = session.user
-            if "code" in st.query_params:
-                st.query_params.clear()
-            return 
-    except Exception:
-        pass
+            if "code" in st.query_params: st.query_params.clear()
+            return
+    except: pass
 
-    # 2. 로그인 콜백 처리
-    query_params = st.query_params
-    if "code" in query_params and not st.session_state.get("code_processed", False):
+    # 3. 로그인 콜백 처리 (구글/카카오에서 돌아왔을 때)
+    if "code" in st.query_params and not st.session_state.code_processed:
         try:
-            auth_code = query_params["code"]
+            auth_code = st.query_params["code"]
             
-            # [핵심 수정] redirect_to를 삭제했습니다.
-            # 이유: 여기서 주소를 잘못 적으면 "Redirect Mismatch" 에러가 발생하여
-            # 바로 아래 except 블록으로 넘어가 "시간 만료" 메시지가 뜨게 됩니다.
-            auth_response = supabase.auth.exchange_code_for_session({
-                "auth_code": auth_code
-            })
-            session = auth_response.session
+            # [중요] redirect_to 없이 코드 교환만 시도
+            # 클라이언트가 캐싱되어 있으므로 'verifier'를 기억하고 있어 성공합니다.
+            res = supabase.auth.exchange_code_for_session({"auth_code": auth_code})
             
-            if session and session.user:
+            if res.session and res.session.user:
                 st.session_state.is_logged_in = True
-                st.session_state.user_info = session.user
-            
-            st.query_params.clear()
-            st.session_state.code_processed = True
-            st.success("✅ 로그인되었습니다!")
-            st.rerun()
-            
-        except Exception as e:
-            # [디버깅] "시간 만료" 대신 진짜 에러 내용을 화면에 찍어줍니다.
-            if not st.session_state.is_logged_in:
-                st.error(f"인증 오류 발생: {e}") 
-                # 만약 "PKCE verifier not found"가 뜨면 브라우저 쿠키 문제입니다.
-                # "Redirect mismatch"가 뜨면 설정 문제입니다.
+                st.session_state.user_info = res.session.user
+                st.session_state.code_processed = True
+                st.success("✅ 로그인 성공! 잠시만 기다려주세요...")
+                time.sleep(0.5)
+                st.query_params.clear()
+                st.rerun()
                 
+        except Exception as e:
+            st.query_params.clear() # 에러 나면 파라미터 지워서 무한반복 방지
+            # st.error(f"인증 오류: {e}") # 사용자에게 에러 안 보여주고 조용히 처리
             st.session_state.code_processed = True
-            # st.query_params.clear() # 에러 확인을 위해 잠시 주석 처리 (필요시 해제)
 
 check_auth_status()
-
 
 # ==========================================
 # [3] 로그인 UI 함수
@@ -169,9 +111,6 @@ def render_login_ui():
                 st.session_state.user_info = None
                 st.session_state.code_processed = False
                 st.rerun()
-    else:
-        pass 
-
 
 # ==========================================
 # [4] 메인 애플리케이션
@@ -235,7 +174,7 @@ def main():
         df = logic.load_and_process_data(df_raw, is_admin=is_admin)
 
     # ---------------------------------------------------------
-    # 사이드바 메뉴 & 불러오기 (UI 개선: 토글 방식)
+    # 사이드바 메뉴 & 불러오기
     # ---------------------------------------------------------
     with st.sidebar:
         if not st.session_state.is_logged_in:
@@ -254,18 +193,16 @@ def main():
                     resp = supabase.table("portfolios").select("*").eq("user_id", uid).order("created_at", desc=True).execute()
                     
                     if resp.data:
-                        # 1. 목록 표시
                         opts = {}
                         for p in resp.data:
-                            date_str = p['created_at'][5:10] # 월-일
-                            time_str = p['created_at'][11:16] # 시:분
+                            date_str = p['created_at'][5:10]
+                            time_str = p['created_at'][11:16]
                             name = p.get('name') or '이름없음'
                             label = f"{name} ({date_str} {time_str})"
                             opts[label] = p
 
                         sel_name = st.selectbox("항목 선택", list(opts.keys()), label_visibility="collapsed")
                         
-                        # 2. UI 깔끔하게 하기: '삭제 모드' 스위치
                         is_delete_mode = st.toggle("🗑️ 삭제 모드 켜기")
                         
                         if is_delete_mode:
@@ -368,8 +305,8 @@ def main():
                 chart_compare = alt.Chart(c_data).mark_bar(cornerRadiusTopLeft=10, cornerRadiusTopRight=10).encode(x=alt.X('계좌 종류', sort=None, axis=alt.Axis(labelAngle=0, title=None)), y=alt.Y('월 수령액', title=None), color=alt.Color('계좌 종류', scale=alt.Scale(domain=['일반 계좌', 'ISA/연금계좌'], range=['#95a5a6', '#f1c40f']), legend=None), tooltip=[alt.Tooltip('계좌 종류'), alt.Tooltip('월 수령액', format=',.0f')]).properties(height=220)
                 st.altair_chart(chart_compare, use_container_width=True)
 
-               # =========================================================
-                # [저장 로직] 로그인 여부에 따라 버튼 자동 변경
+                # =========================================================
+                # [저장 로직] 로그인 버튼 (링크 생성 최적화)
                 # =========================================================
                 st.write("") 
                 with st.container(border=True):
@@ -377,9 +314,8 @@ def main():
                     
                     if not st.session_state.is_logged_in:
                         st.info("🔒 로그인이 필요합니다.")
-                        
-                        # [핵심 수정] 로그인 링크를 '한 번만' 만들어서 저장해둡니다.
-                        # 이렇게 해야 새로고침 되어도 암호(Verifier)가 바뀌지 않아 'Code Verifier' 에러가 해결됩니다.
+
+                        # [핵심] 로그인 링크를 한 번만 생성하여 Session State에 저장 (Verifier 고정)
                         if "auth_links" not in st.session_state:
                             st.session_state.auth_links = {"google": None, "kakao": None}
 
@@ -388,7 +324,6 @@ def main():
                         # [왼쪽] Google 로그인
                         with l_c1:
                             try:
-                                # 1. 링크가 없을 때만 새로 생성 (이때 생성된 Verifier가 고정됨)
                                 if st.session_state.auth_links["google"] is None:
                                     res = supabase.auth.sign_in_with_oauth({
                                         "provider": "google",
@@ -400,18 +335,9 @@ def main():
                                     })
                                     st.session_state.auth_links["google"] = res.url
                                 
-                                # 2. 저장된 링크를 화면에 표시
                                 if st.session_state.auth_links["google"]:
                                     url = st.session_state.auth_links["google"]
-                                    st.markdown(f'''
-                                        <a href="{url}" target="_self" style="
-                                            display: inline-flex; justify-content: center; align-items: center; width: 100%;
-                                            background-color: #fff; color: #1f1f1f; border: 1px solid #747775;
-                                            padding: 0.5rem; border-radius: 0.5rem; text-decoration: none; font-weight: 600;
-                                            box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
-                                            🔵 Google 로그인
-                                        </a>
-                                    ''', unsafe_allow_html=True)
+                                    st.markdown(f'''<a href="{url}" target="_self" style="display: inline-flex; justify-content: center; align-items: center; width: 100%; background-color: #fff; color: #1f1f1f; border: 1px solid #747775; padding: 0.5rem; border-radius: 0.5rem; text-decoration: none; font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">🔵 Google 로그인</a>''', unsafe_allow_html=True)
                             except: st.error("오류")
                         
                         # [오른쪽] Kakao 로그인
@@ -430,19 +356,11 @@ def main():
                                 
                                 if st.session_state.auth_links["kakao"]:
                                     url = st.session_state.auth_links["kakao"]
-                                    st.markdown(f'''
-                                        <a href="{url}" target="_self" style="
-                                            display: inline-flex; justify-content: center; align-items: center; width: 100%;
-                                            background-color: #FEE500; color: #000; border: 1px solid rgba(0,0,0,0.1);
-                                            padding: 0.5rem; border-radius: 0.5rem; text-decoration: none; font-weight: 600;
-                                            box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
-                                            💬 Kakao 로그인
-                                        </a>
-                                    ''', unsafe_allow_html=True)
+                                    st.markdown(f'''<a href="{url}" target="_self" style="display: inline-flex; justify-content: center; align-items: center; width: 100%; background-color: #FEE500; color: #000; border: 1px solid rgba(0,0,0,0.1); padding: 0.5rem; border-radius: 0.5rem; text-decoration: none; font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">💬 Kakao 로그인</a>''', unsafe_allow_html=True)
                             except: st.error("오류")
 
                     else:
-                        # [로그인 성공 시 화면] - 기존과 동일
+                        # [로그인 성공 시 화면]
                         try:
                             user = st.session_state.user_info
                             save_mode = st.radio("방식 선택", ["✨ 새로 만들기", "🔄 기존 파일 수정"], horizontal=True, label_visibility="collapsed")
@@ -456,7 +374,6 @@ def main():
                             if save_mode == "✨ 새로 만들기":
                                 c_new1, c_new2 = st.columns([2, 1])
                                 p_name = c_new1.text_input("새 이름 입력", placeholder="비워두면 자동 이름", label_visibility="collapsed")
-                                
                                 if c_new2.button("새로 저장", type="primary", use_container_width=True):
                                     final_name = p_name.strip()
                                     if not final_name:
@@ -467,7 +384,6 @@ def main():
                                     supabase.table("portfolios").insert({
                                         "user_id": user.id, "user_email": user.email, "name": final_name, "ticker_data": save_data
                                     }).execute()
-                                    
                                     st.success(f"[{final_name}] 저장 완료!"); st.balloons()
                                     import time; time.sleep(1.0); st.rerun()
 
@@ -480,17 +396,13 @@ def main():
                                     c_up1, c_up2 = st.columns([2, 1])
                                     selected_label = c_up1.selectbox("수정할 파일 선택", list(exist_opts.keys()), label_visibility="collapsed")
                                     target_id = exist_opts[selected_label]
-                                    
                                     if c_up2.button("덮어쓰기", type="primary", use_container_width=True):
-                                        supabase.table("portfolios").update({
-                                            "ticker_data": save_data,
-                                            "created_at": "now()"
-                                        }).eq("id", target_id).execute()
+                                        supabase.table("portfolios").update({"ticker_data": save_data, "created_at": "now()"}).eq("id", target_id).execute()
                                         st.success("수정 완료! 내용이 업데이트되었습니다."); st.balloons()
                                         import time; time.sleep(1.0); st.rerun()
-
                         except Exception as e:
                             st.error(f"오류 발생: {e}")
+
                 st.write("")
                 st.info("""
                 📢 **찾으시는 종목이 안 보이나요?**
@@ -658,7 +570,7 @@ def main():
                         st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**
                         
     1. 본 결과는 주가·환율 변동과 수수료 등을 제외하고, 현재 배당률로만 계산한 결과입니다.
-    2. ISA 계좌의 비과세 한도 및 세율은 세법 개정에 따라 달라질 수 있습니다.
+    2. 실제 배당금은 운용사의 공시 및 환율 상황에 따라 매월 달라질 수 있습니다.
     3. 과거의 데이터를 기반으로 한 단순 시뮬레이션이며, 실제 투자 수익을 보장하지 않습니다.""")
 
                     with tab_goal:
