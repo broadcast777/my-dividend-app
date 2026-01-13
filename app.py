@@ -381,37 +381,42 @@ def main():
                                     if res.url: st.markdown(f'<meta http-equiv="refresh" content="0;url={res.url}">', unsafe_allow_html=True)
                                 except: pass
                         with l_c2:
-                            if st.button("💬 Kakao 로그인", key="save_kakao", use_container_width=True):
-                                try:
-                                    # [최종 해결책] 
-                                    # 1. 옵션을 다 지우고 '기본 설정'만 따르게 합니다. (충돌 방지)
-                                    # 2. 자동 이동이 실패할 경우를 대비해 '링크'를 직접 보여줍니다.
-                                    res = supabase.auth.sign_in_with_oauth({
-                                        "provider": "kakao"
-                                        # options는 삭제했습니다. Supabase Site URL(슬래시 없음)로 자동 이동합니다.
-                                    })
-                                    
-                                    if res.url:
-                                        # [1] 자바스크립트로 자동 이동 시도
-                                        st.write(f'<script>window.top.location.href = "{res.url}";</script>', unsafe_allow_html=True)
-                                        
-                                        # [2] (보험용) 만약 회색 화면이 뜨거나 이동 안 하면 이 링크를 누르게 함
-                                        st.success("👇 자동 이동이 안 되면 아래 링크를 클릭하세요!")
-                                        st.markdown(f'''
-                                            <a href="{res.url}" target="_self" style="
-                                                display: block; 
-                                                text-align: center; 
-                                                background-color: #FEE500; 
-                                                color: #000; 
-                                                padding: 12px; 
-                                                border-radius: 8px; 
-                                                text-decoration: none; 
-                                                font-weight: bold;
-                                                margin-top: 10px;">
-                                                🚀 카카오 로그인 페이지로 이동하기 (클릭)
-                                            </a>
-                                        ''', unsafe_allow_html=True)
-                                except: pass
+                            # [최종 해결책] 버튼+스크립트 방식(X) -> HTML 링크 방식(O)
+                            # 모바일 호환성이 가장 좋은 '링크' 형태로 만듭니다.
+                            try:
+                                # 1. 로그인 URL을 미리 생성합니다. (슬래시 없는 주소 사용)
+                                # 주의: Supabase 설정도 '슬래시 없음'으로 맞춰주세요.
+                                provider_res = supabase.auth.sign_in_with_oauth({
+                                    "provider": "kakao",
+                                    "options": {
+                                        "redirect_to": "https://dividend-pange.streamlit.app",
+                                        "queryParams": {"prompt": "login"},
+                                        "skip_browser_redirect": True # 브라우저를 바로 열지 않고 URL만 받음
+                                    }
+                                })
+                                
+                                # 2. 생성된 URL을 '링크 버튼' 모양으로 화면에 그립니다.
+                                # target="_self"를 써서 현재 창에서 부드럽게 이동하게 합니다.
+                                if provider_res.url:
+                                    st.markdown(f'''
+                                        <a href="{provider_res.url}" target="_self" style="
+                                            display: inline-flex;
+                                            justify-content: center;
+                                            align-items: center;
+                                            width: 100%;
+                                            background-color: #FEE500;
+                                            color: #000;
+                                            padding: 0.5rem;
+                                            border-radius: 0.5rem;
+                                            text-decoration: none;
+                                            font-weight: 600;
+                                            border: 1px solid rgba(0,0,0,0.1);
+                                            box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
+                                            💬 Kakao 로그인
+                                        </a>
+                                    ''', unsafe_allow_html=True)
+                            except Exception as e:
+                                st.error("로그인 준비 중 오류")
                     else:
                         try:
                             user = st.session_state.user_info
