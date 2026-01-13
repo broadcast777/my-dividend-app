@@ -381,25 +381,24 @@ def main():
                                     if res.url: st.markdown(f'<meta http-equiv="refresh" content="0;url={res.url}">', unsafe_allow_html=True)
                                 except: pass
                         with l_c2:
-                            # [최종 해결책] 버튼+스크립트 방식(X) -> HTML 링크 방식(O)
-                            # 모바일 호환성이 가장 좋은 '링크' 형태로 만듭니다.
+                            # [최후의 해결책] 새 창(_blank)으로 띄우기
+                            # 안드로이드 카카오톡 인앱 브라우저의 충돌을 피하는 가장 확실한 방법입니다.
                             try:
-                                # 1. 로그인 URL을 미리 생성합니다. (슬래시 없는 주소 사용)
-                                # 주의: Supabase 설정도 '슬래시 없음'으로 맞춰주세요.
+                                # 1. redirect_to는 Supabase 설정에 있는 "슬래시 없는 주소"로 맞춥니다.
                                 provider_res = supabase.auth.sign_in_with_oauth({
                                     "provider": "kakao",
                                     "options": {
                                         "redirect_to": "https://dividend-pange.streamlit.app",
                                         "queryParams": {"prompt": "login"},
-                                        "skip_browser_redirect": True # 브라우저를 바로 열지 않고 URL만 받음
+                                        "skip_browser_redirect": True
                                     }
                                 })
                                 
-                                # 2. 생성된 URL을 '링크 버튼' 모양으로 화면에 그립니다.
-                                # target="_self"를 써서 현재 창에서 부드럽게 이동하게 합니다.
+                                # 2. target="_blank" 로 변경! (여기가 핵심)
+                                # 이렇게 하면 카카오톡 위로 팝업창이 뜨면서 안전하게 로그인됩니다.
                                 if provider_res.url:
                                     st.markdown(f'''
-                                        <a href="{provider_res.url}" target="_self" style="
+                                        <a href="{provider_res.url}" target="_blank" style="
                                             display: inline-flex;
                                             justify-content: center;
                                             align-items: center;
