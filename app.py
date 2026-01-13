@@ -72,6 +72,11 @@ class StreamlitFileStorageFixed:
 # ---------------------------------------------------------
 # 세션 상태 변수 초기화
 # ---------------------------------------------------------
+# [수정] 가장 먼저 스토리지 공간을 확보해야 에러가 안 납니다.
+if "supabase_storage" not in st.session_state:
+    st.session_state.supabase_storage = {}
+
+# 나머지 변수 초기화
 for key in ["is_logged_in", "user_info", "code_processed"]:
     if key not in st.session_state:
         st.session_state[key] = False if key != "user_info" else None
