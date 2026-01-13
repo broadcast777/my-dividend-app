@@ -373,7 +373,7 @@ def main():
                     if not st.session_state.is_logged_in:
                         st.info("🔒 로그인이 필요합니다.")
                         l_c1, l_c2 = st.columns(2)
-                        callback_url = "https://dividend-pange.streamlit.app/"
+                        callback_url = "https://dividend-pange.streamlit.app"
                         with l_c1:
                             # [Google 복구] 설정을 단순하게 원복합니다.
                             # 카카오 때문에 바뀐 '슬래시 없는 주소'에 맞춰 옵션을 뺍니다.
