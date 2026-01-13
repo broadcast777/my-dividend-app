@@ -375,27 +375,26 @@ def main():
                         l_c1, l_c2 = st.columns(2)
                         callback_url = "https://dividend-pange.streamlit.app/"
                         with l_c1:
-                            # [Google 해결책] 복잡한 옵션을 다 지우고 '기본'으로 바꿉니다.
-                            # access_type, prompt 등을 지우면 "로그인 시간 만료" 오류가 사라집니다.
+                            # [Google 복구] 설정을 단순하게 원복합니다.
+                            # 카카오 때문에 바뀐 '슬래시 없는 주소'에 맞춰 옵션을 뺍니다.
                             try:
                                 provider_res = supabase.auth.sign_in_with_oauth({
                                     "provider": "google",
                                     "options": {
-                                        # 주소는 사장님이 쓰시는 'dividend-pange' 그대로! (슬래시 없음)
+                                        # Supabase 설정과 똑같이 '슬래시 없는' 주소 (필수!)
                                         "redirect_to": "https://dividend-pange.streamlit.app",
                                         
-                                        # ▼▼▼ [핵심 수정] 옵션을 다 지우고 queryParams를 비웁니다 ▼▼▼
-                                        # 이렇게 하면 불필요한 재인증 과정을 생략해서 모바일 연결이 빨라집니다.
+                                        # [핵심] 복잡한 옵션 다 삭제! (이게 시간 만료의 주범)
+                                        # 옛날처럼 단순하게 로그인만 요청합니다.
                                         "queryParams": {
-                                            # "access_type": "offline", (삭제)
-                                            # "prompt": "consent"       (삭제)
+                                            "prompt": "select_account"
                                         },
                                         "skip_browser_redirect": True
                                     }
                                 })
                                 
                                 if provider_res.url:
-                                    # 구글은 '현재 창(_self)'으로 여는 게 가장 안정적입니다.
+                                    # 구글은 반드시 '현재 창(_self)'이어야 합니다.
                                     st.markdown(f'''
                                         <a href="{provider_res.url}" target="_self" style="
                                             display: inline-flex;
