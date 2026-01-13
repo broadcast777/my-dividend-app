@@ -441,10 +441,7 @@ def main():
                                         </a>
                                     ''', unsafe_allow_html=True)
                             except: st.error("오류")
-                    # (이 아래 else 부분은 기존 코드 그대로 유지)
-                    else:
-                        # ... 기존 코드 ...
-
+                   
                     else:
                         # [로그인 성공 시 화면] - 중복 없이 하나만 있어야 합니다.
                         try:
