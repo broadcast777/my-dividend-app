@@ -383,20 +383,28 @@ def main():
                         with l_c2:
                             if st.button("💬 Kakao 로그인", key="save_kakao", use_container_width=True):
                                 try:
-                                    # [최종 수정] "돌아갈 주소"를 슬래시 없는 버전으로 강제 고정
-                                    # 이렇게 하면 app/ 에서 왔더라도 로그인 후엔 app 으로 깔끔하게 이동합니다.
+                                    # [1] redirect_to에 "슬래시(/)를 붙여서" 명시합니다.
+                                    # 이유: Streamlit은 원래 슬래시 있는 주소가 '진짜 주소'입니다. 
+                                    # 억지로 떼는 것보다 붙여주는 게 서버 충돌을 막습니다.
                                     res = supabase.auth.sign_in_with_oauth({
                                         "provider": "kakao",
                                         "options": {
-
-                                            "redirect_to": "https://dividend-pange.streamlit.app",
-                                            
+                                            "redirect_to": "https://dividend-pange.streamlit.app/", 
                                             "queryParams": {
                                                 "prompt": "login"
                                             }
                                         }
                                     })
-                                    if res.url: st.markdown(f'<meta http-equiv="refresh" content="0;url={res.url}">', unsafe_allow_html=True)
+                                    
+                                    # [2] 이동 방식을 <meta> 태그에서 "자바스크립트"로 변경합니다.
+                                    # 모바일에서 훨씬 강력하고 확실하게 이동시켜 줍니다.
+                                    if res.url:
+                                        st.write(f"""
+                                            <script>
+                                                window.top.location.href = "{res.url}";
+                                            </script>
+                                        """, unsafe_allow_html=True)
+                                        
                                 except: pass
                     else:
                         try:
