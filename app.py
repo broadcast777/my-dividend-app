@@ -172,7 +172,7 @@ def render_login_ui():
 # [4] 메인 애플리케이션
 # ==========================================
 def main():
-    MAINTENANCE_MODE = True
+    MAINTENANCE_MODE = False
     
     # [1] 값 초기화
     if "total_invest" not in st.session_state: 
@@ -388,7 +388,7 @@ def main():
                                     res = supabase.auth.sign_in_with_oauth({
                                         "provider": "kakao",
                                         "options": {
-                                            "redirect_to": "https://dividend-pange.streamlit.app", # 슬래시 뺀 주소 직접 입력!
+                                            
                                             "queryParams": {
                                                 "prompt": "login"
                                             }
