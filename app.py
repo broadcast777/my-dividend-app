@@ -375,13 +375,12 @@ def main():
                         l_c1, l_c2 = st.columns(2)
                         callback_url = "https://dividend-pange.streamlit.app/"
                         with l_c1:
-                            # [Google 해결책] 카카오와 동일하게 '새 창(_blank)' 전략 적용
-                            # 네이버 인앱 브라우저의 403 에러(보안 차단)를 우회합니다.
+                            # [Google 수정] 구글은 '새 창'을 열면 세션이 끊겨서 에러가 납니다.
+                            # 다시 '현재 창(_self)'으로 변경하여 모바일 크롬 호환성을 확보합니다.
                             try:
                                 provider_res = supabase.auth.sign_in_with_oauth({
                                     "provider": "google",
                                     "options": {
-                                        # Supabase 설정과 동일한 '슬래시 없는' 주소
                                         "redirect_to": "https://dividend-pange.streamlit.app",
                                         "queryParams": {
                                             "access_type": "offline",
@@ -391,11 +390,10 @@ def main():
                                     }
                                 })
                                 
-                                # 구글은 흰색 배경에 회색 테두리가 국룰이지만, 
-                                # 기존 버튼 디자인(파란색 느낌)과 비슷하게 맞췄습니다.
                                 if provider_res.url:
+                                    # ▼▼▼ 여기 target을 "_self"로 변경했습니다! ▼▼▼
                                     st.markdown(f'''
-                                        <a href="{provider_res.url}" target="_blank" style="
+                                        <a href="{provider_res.url}" target="_self" style="
                                             display: inline-flex;
                                             justify-content: center;
                                             align-items: center;
