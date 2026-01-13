@@ -382,8 +382,6 @@ def main():
                 chart_compare = alt.Chart(c_data).mark_bar(cornerRadiusTopLeft=10, cornerRadiusTopRight=10).encode(x=alt.X('계좌 종류', sort=None, axis=alt.Axis(labelAngle=0, title=None)), y=alt.Y('월 수령액', title=None), color=alt.Color('계좌 종류', scale=alt.Scale(domain=['일반 계좌', 'ISA/연금계좌'], range=['#95a5a6', '#f1c40f']), legend=None), tooltip=[alt.Tooltip('계좌 종류'), alt.Tooltip('월 수령액', format=',.0f')]).properties(height=220)
                 st.altair_chart(chart_compare, use_container_width=True)
 
-
-
                 # =========================================================
                 # [저장 로직] 로그인 여부에 따라 버튼 자동 변경
                 # =========================================================
@@ -391,63 +389,66 @@ def main():
                 with st.container(border=True):
                     st.write("💾 **포트폴리오 저장 / 수정**")
                     
-                    # 1. 로그인이 안 된 경우: 로그인 버튼 표시
+                    # 1. 로그인이 안 된 경우
                     if not st.session_state.get('is_logged_in', False):
-                        st.info("🔒 로그인이 필요합니다.")
-                        
-                        # [레이아웃] 좌우 2분할
-                        col_google, col_kakao = st.columns(2)
-                        
-                        # (1) 구글 로그인 (현재 창)
-                        with col_google:
-                            try:
-                                res_google = supabase.auth.sign_in_with_oauth({
-                                    "provider": "google",
-                                    "options": {
-                                        "redirect_to": "https://dividend-pange.streamlit.app", 
-                                        "queryParams": {"access_type": "offline", "prompt": "consent"},
-                                        "skip_browser_redirect": True
-                                    }
-                                })
-                                if res_google.url:
-                                    btn_google = f'''
-                                    <a href="{res_google.url}" target="_self" style="
-                                        display: inline-flex; justify-content: center; align-items: center; width: 100%;
-                                        background-color: #ffffff; color: #1f1f1f; border: 1px solid #747775;
-                                        padding: 0.6rem; border-radius: 0.5rem; text-decoration: none; font-weight: 600;
-                                        box-shadow: 0 1px 2px rgba(0,0,0,0.1);">
-                                        🔵 Google 로그인
-                                    </a>
-                                    '''
-                                    st.markdown(btn_google, unsafe_allow_html=True)
-                            except Exception as e:
-                                st.error(f"구글 오류: {e}")
-                        
-                        # (2) 카카오 로그인 (새 창)
-                        with col_kakao:
-                            try:
-                                res_kakao = supabase.auth.sign_in_with_oauth({
-                                    "provider": "kakao",
-                                    "options": {
-                                        "redirect_to": "https://dividend-pange.streamlit.app", 
-                                        "skip_browser_redirect": True
-                                    }
-                                })
-                                if res_kakao.url:
-                                    btn_kakao = f'''
-                                    <a href="{res_kakao.url}" target="_blank" style="
-                                        display: inline-flex; justify-content: center; align-items: center; width: 100%;
-                                        background-color: #FEE500; color: #000000; border: 1px solid rgba(0,0,0,0.05);
-                                        padding: 0.6rem; border-radius: 0.5rem; text-decoration: none; font-weight: 600;
-                                        box-shadow: 0 1px 2px rgba(0,0,0,0.1);">
-                                        💬 Kakao 로그인
-                                    </a>
-                                    '''
-                                    st.markdown(btn_kakao, unsafe_allow_html=True)
-                            except Exception as e:
-                                st.error(f"카카오 오류: {e}")
+                        if "code" in st.query_params:
+                             st.info("🔄 로그인 확인 중입니다... 잠시만 기다려주세요.")
+                        else:
+                            st.info("🔒 로그인이 필요합니다.")
+                            
+                            # 좌우 분할
+                            l_c1, l_c2 = st.columns(2)
+                            
+                            # -----------------------------------------------------
+                            # [왼쪽] Google 로그인 (보내주신 코드 기반: 버튼 + 메타태그)
+                            # -----------------------------------------------------
+                            with l_c1:
+                                # 구글은 st.button을 사용 (기존 성공하신 방식)
+                                if st.button("🔵 Google 로그인", key="btn_google_login", use_container_width=True):
+                                    try:
+                                        res = supabase.auth.sign_in_with_oauth({
+                                            "provider": "google",
+                                            "options": {
+                                                "redirect_to": "https://dividend-pange.streamlit.app",
+                                                "queryParams": {"access_type": "offline", "prompt": "consent"},
+                                                "skip_browser_redirect": False # 보내주신 코드 설정 유지
+                                            }
+                                        })
+                                        # URL이 나오면 메타태그로 강제 이동 (현재 창)
+                                        if res.url:
+                                            st.markdown(f'<meta http-equiv="refresh" content="0;url={res.url}">', unsafe_allow_html=True)
+                                    except Exception as e:
+                                        st.error(f"구글 오류: {e}")
+                            
+                            # -----------------------------------------------------
+                            # [오른쪽] Kakao 로그인 (아까 성공한 코드: 링크 + 새 창)
+                            # -----------------------------------------------------
+                            with l_c2:
+                                try:
+                                    # 카카오는 미리 URL을 만들어서 <a> 태그로 보여줌 (새 창 띄우기 위함)
+                                    res_kakao = supabase.auth.sign_in_with_oauth({
+                                        "provider": "kakao",
+                                        "options": {
+                                            "redirect_to": "https://dividend-pange.streamlit.app",
+                                            "skip_browser_redirect": True
+                                        }
+                                    })
+                                    if res_kakao.url:
+                                        # 버튼처럼 생긴 링크(a tag)를 만듭니다.
+                                        btn_kakao_html = f'''
+                                        <a href="{res_kakao.url}" target="_blank" style="
+                                            display: inline-flex; justify-content: center; align-items: center; width: 100%;
+                                            background-color: #FEE500; color: #000000; border: 1px solid rgba(0,0,0,0.05);
+                                            padding: 0.6rem; border-radius: 0.5rem; text-decoration: none; font-weight: 600;
+                                            box-shadow: 0 1px 2px rgba(0,0,0,0.1);">
+                                            💬 Kakao 로그인
+                                        </a>
+                                        '''
+                                        st.markdown(btn_kakao_html, unsafe_allow_html=True)
+                                except Exception as e:
+                                    st.error(f"카카오 오류: {e}")
 
-                    # 2. 로그인 된 경우: 저장/수정 UI 표시
+                    # 2. 로그인 된 경우 (기존 로직 유지)
                     else:
                         try:
                             user = st.session_state.user_info
