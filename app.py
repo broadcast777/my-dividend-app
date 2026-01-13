@@ -73,25 +73,34 @@ for key in ["is_logged_in", "user_info", "code_processed"]:
 
 
 # ---------------------------------------------------------
-# Supabase 클라이언트 연결 (클래스 정의 후 실행)
+# Supabase 클라이언트 연결 (수정됨: @st.cache_resource 적용)
 # ---------------------------------------------------------
-try:
-    URL = st.secrets["SUPABASE_URL"]
-    KEY = st.secrets["SUPABASE_KEY"]
-    
-    supabase = create_client(
-        URL, 
-        KEY,
-        options=ClientOptions(
-            storage=StreamlitStorage(), # 위에서 만든 클래스 사용
-            auto_refresh_token=True,
-            persist_session=True,
+@st.cache_resource
+def get_connection():
+    try:
+        URL = st.secrets["SUPABASE_URL"]
+        KEY = st.secrets["SUPABASE_KEY"]
+        
+        # 여기서 만든 연결을 '박제'해서 새로고침 되어도 유지합니다.
+        client = create_client(
+            URL, 
+            KEY,
+            options=ClientOptions(
+                storage=StreamlitStorage(),
+                auto_refresh_token=True,
+                persist_session=True,
+            )
         )
-    )
-except Exception as e:
-    st.error(f"🚨 Supabase 연결 오류: {e}")
-    supabase = None
+        return client
+    except Exception as e:
+        return None
 
+# 전역 변수에 할당 (이제 새로고침해도 연결이 초기화되지 않습니다)
+supabase = get_connection()
+
+if not supabase:
+    st.error("🚨 Supabase 연결 실패")
+    st.stop()
 # (이 아래로 check_auth_status 함수가 이어져야 합니다)
 # ==========================================
 # [2] 인증 상태 체크 (수정됨: 주소 명시)
