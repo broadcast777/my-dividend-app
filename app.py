@@ -115,7 +115,7 @@ def check_auth_status():
     if "code" in query_params and not st.session_state.get("code_processed", False):
         try:
             auth_code = query_params["code"]
-            redirect_url = "https://dividend-pange.streamlit.app/"
+            redirect_url = "https://dividend-pange.streamlit.app"
             
             auth_response = supabase.auth.exchange_code_for_session({
                 "auth_code": auth_code,
@@ -373,15 +373,17 @@ def main():
                     if not st.session_state.is_logged_in:
                         st.info("🔒 로그인이 필요합니다.")
                         l_c1, l_c2 = st.columns(2)
-                        callback_url = "https://dividend-pange.streamlit.app/"
-                        with l_c1:
-                            # [Google] 슬래시(/)를 붙여서 보냄 -> 리다이렉트 방지 -> 시간 만료 해결
+                        callback_url = "https://dividend-pange.streamlit.app"
+                       with l_c1:
+                            # [Google] 카카오 성공 공식 적용!
+                            # 1. 주소: 슬래시 제거 (dividend-pange.streamlit.app)
+                            # 2. 타겟: _blank (네이버 403 해결)
                             try:
                                 provider_res = supabase.auth.sign_in_with_oauth({
                                     "provider": "google",
                                     "options": {
-                                        # ▼▼▼ 구글은 슬래시(/) 붙임 ▼▼▼
-                                        "redirect_to": "https://dividend-pange.streamlit.app/",
+                                        # ▼▼▼ 슬래시 제거 (필수) ▼▼▼
+                                        "redirect_to": "https://dividend-pange.streamlit.app",
                                         "queryParams": {
                                             "prompt": "select_account"
                                         },
@@ -390,9 +392,9 @@ def main():
                                 })
                                 
                                 if provider_res.url:
-                                    # 모바일 크롬 호환성을 위해 target="_self" (현재창)
+                                    # 네이버 앱 403을 피하기 위해 _blank 사용 (URL 맞췄으니 성공 확률 높음)
                                     st.markdown(f'''
-                                        <a href="{provider_res.url}" target="_self" style="
+                                        <a href="{provider_res.url}" target="_blank" style="
                                             display: inline-flex;
                                             justify-content: center;
                                             align-items: center;
