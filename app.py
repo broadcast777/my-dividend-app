@@ -366,7 +366,7 @@ def main():
                 # =========================================================
                 # [저장 로직] 로그인 여부에 따라 버튼 자동 변경
                 # =========================================================
-               st.write("") 
+                st.write("") 
                 with st.container(border=True):
                     st.write("💾 **포트폴리오 저장 / 수정**")
                     
@@ -380,7 +380,7 @@ def main():
                                 provider_res = supabase.auth.sign_in_with_oauth({
                                     "provider": "google",
                                     "options": {
-                                        # [수정] 사장님 말씀대로 풀네임(dividend-pange) 사용
+                                        # [중요] 사장님 설정에 맞춘 주소 (dividend-pange)
                                         "redirect_to": "https://dividend-pange.streamlit.app",
                                         "queryParams": {
                                             "prompt": "select_account"
@@ -415,7 +415,7 @@ def main():
                                 provider_res = supabase.auth.sign_in_with_oauth({
                                     "provider": "kakao",
                                     "options": {
-                                        # [수정] 사장님 말씀대로 풀네임(dividend-pange) 사용
+                                        # [중요] 사장님 설정에 맞춘 주소 (dividend-pange)
                                         "redirect_to": "https://dividend-pange.streamlit.app",
                                         "queryParams": {"prompt": "login"},
                                         "skip_browser_redirect": True
@@ -441,9 +441,9 @@ def main():
                                         </a>
                                     ''', unsafe_allow_html=True)
                             except: st.error("오류")
-                   
+
                     else:
-                        # [로그인 성공 시 화면] - 중복 없이 하나만 있어야 합니다.
+                        # [로그인 성공 시 화면] - 중복된 else를 하나로 합침
                         try:
                             user = st.session_state.user_info
                             save_mode = st.radio("방식 선택", ["✨ 새로 만들기", "🔄 기존 파일 수정"], horizontal=True, label_visibility="collapsed")
