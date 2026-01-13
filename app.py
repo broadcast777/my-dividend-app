@@ -19,18 +19,16 @@ import ui
 st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
 
 # ==========================================
-# [수정 1] 파일 직통 저장소 (Session State 사용 안 함)
+# [수정 1] 파일 직통 저장소 (덮어쓰기 방지용)
 # ==========================================
 class StreamlitFileStorageFixed:
     """
-    복잡한 세션 동기화 로직을 제거하고, 
     무조건 파일에 쓰고 파일에서 읽는 '직통' 저장소입니다.
-    리다이렉트 시 세션 초기화 문제로부터 100% 안전합니다.
+    경로를 현재 폴더(.)로 변경하여 권한 문제를 예방합니다.
     """
     def __init__(self):
-        self.storage_dir = Path.home() / ".streamlit_auth"
-        self.storage_dir.mkdir(exist_ok=True)
-        self.storage_file = self.storage_dir / "auth_token.json"
+        # [변경] 홈 디렉토리 대신 현재 실행 디렉토리 사용 (가장 안전)
+        self.storage_file = Path("auth_token.json")
 
     def set_item(self, key: str, value: str) -> None:
         try:
@@ -68,7 +66,7 @@ class StreamlitFileStorageFixed:
             print(f"Remove Error: {e}")
 
 # ---------------------------------------------------------
-# 세션 상태 변수 초기화 (저장소 관련 변수는 제거)
+# 세션 상태 변수 초기화
 # ---------------------------------------------------------
 for key in ["is_logged_in", "user_info", "code_processed"]:
     if key not in st.session_state:
@@ -77,8 +75,8 @@ for key in ["is_logged_in", "user_info", "code_processed"]:
 # ---------------------------------------------------------
 # Supabase 클라이언트 연결
 # ---------------------------------------------------------
-# [중요] persist_session=True, auto_refresh_token=True 유지
-# 캐싱은 끕니다 (@st.cache_resource 제거) -> 파일 읽기 확실하게 하기 위해
+# [중요] 구글 로그인을 위해 캐싱(@st.cache_resource)을 끕니다.
+# 파일에서 매번 최신 암호를 읽어오기 위함입니다.
 def get_supabase_client():
     try:
         URL = st.secrets["SUPABASE_URL"]
@@ -89,7 +87,7 @@ def get_supabase_client():
             KEY,
             options=ClientOptions(
                 storage=StreamlitFileStorageFixed(),
-                persist_session=True,
+                persist_session=True, 
                 auto_refresh_token=True,
             )
         )
@@ -125,7 +123,7 @@ def check_auth_status():
         
         try:
             auth_code = query_params["code"]
-            # exchange_code_for_session이 이제 파일에서 직접 verifier를 찾으므로 성공할 것입니다.
+            # 이제 파일에 정확한 암호가 남아있으므로 성공합니다.
             auth_response = supabase.auth.exchange_code_for_session({"auth_code": auth_code})
             session = auth_response.session
             
@@ -140,7 +138,7 @@ def check_auth_status():
         except Exception as e:
             error_str = str(e)
             if "challenge" in error_str.lower() and "verifier" in error_str.lower():
-                st.error("⚠️ 보안 토큰 만료. (파일 저장소 오류 가능성)")
+                st.error("⚠️ 보안 토큰 만료. (새로고침 후 다시 시도해주세요)")
             else:
                 st.error(f"🔴 인증 오류: {error_str}")
             st.query_params.clear()
@@ -335,7 +333,7 @@ def main():
                 st.altair_chart(chart_compare, use_container_width=True)
 
                 # =========================================================
-                # [저장 로직] 융합 방식 (구글: 버튼/리다이렉트, 카카오: 링크/팝업)
+                # [저장 로직] 로그인 여부에 따라 버튼 자동 변경
                 # =========================================================
                 st.write("") 
                 with st.container(border=True):
@@ -348,7 +346,7 @@ def main():
                             st.info("🔒 로그인이 필요합니다.")
                             l_c1, l_c2 = st.columns(2)
                             
-                            # [왼쪽] Google 로그인 (이제는 파일 저장소가 튼튼해서 버튼 방식도 잘 됩니다)
+                            # [왼쪽] Google 로그인
                             with l_c1:
                                 if st.button("🔵 Google 로그인", key="save_google", use_container_width=True):
                                     try:
@@ -362,10 +360,12 @@ def main():
                                         })
                                         if res.url:
                                             st.markdown(f'<meta http-equiv="refresh" content="0;url={res.url}">', unsafe_allow_html=True)
+                                            # [매우 중요] 여기서 멈춰야 카카오 코드가 실행되어 암호를 덮어쓰는걸 막습니다.
+                                            st.stop()
                                     except Exception as e:
                                         st.error(f"Google 오류: {e}")
                             
-                            # [오른쪽] Kakao 로그인 (여전히 잘 되는 링크 방식 유지)
+                            # [오른쪽] Kakao 로그인 (구글이 눌리면 실행되지 않음)
                             with l_c2:
                                 try:
                                     res_kakao = supabase.auth.sign_in_with_oauth({
@@ -467,11 +467,9 @@ def main():
                                 bunryu = str(row.get('분류', ''))
                                 exch = str(row.get('환구분', ''))
                                 name = str(row.get('종목', ''))
-                                if bunryu == "해외" or "(해외)" in name or "환노출" in exch:
-                                    return "🇺🇸 달러 자산"
+                                if bunryu == "해외" or "(해외)" in name or "환노출" in exch: return "🇺🇸 달러 자산"
                                 return "🇰🇷 원화 자산"
-                            except:
-                                return "🇰🇷 원화 자산"
+                            except: return "🇰🇷 원화 자산"
                         
                         df_ana['통화'] = df_ana.apply(classify_currency, axis=1)
                         usd_ratio = df_ana[df_ana['통화'] == "🇺🇸 달러 자산"]['비중'].sum()
@@ -488,16 +486,12 @@ def main():
                             st.divider()
                             st.markdown(f"**🌐 달러 자산 노출도: `{usd_ratio:.1f}%`**")
                             st.progress(usd_ratio / 100)
-                            if usd_ratio >= 50:
-                                st.caption("💡 포트폴리오의 절반 이상이 환율 변동에 영향을 받습니다.")
-                            else:
-                                st.caption("💡 원화 자산 중심의 구성입니다.")
+                            if usd_ratio >= 50: st.caption("💡 포트폴리오의 절반 이상이 환율 변동에 영향을 받습니다.")
+                            else: st.caption("💡 원화 자산 중심의 구성입니다.")
                         
                         st.write("📋 **상세 포트폴리오**")
                         ui.render_custom_table(df_ana)
-                        
                         st.error("""**⚠️ 포트폴리오 분석 시 유의사항**
-                        
 1. 과거의 데이터를 기반으로 한 단순 결과값이며, 실제 투자 수익을 보장하지 않습니다.
 2. '달러 자산' 비율 실제 환노출 여부와 다를 수 있습니다 투자 전 확인이 필요합니다.
 3. 실제 배당금 지급일과 금액은 운용사의 사정에 따라 변경될 수 있습니다.""")
@@ -506,7 +500,6 @@ def main():
                         start_money = total_invest
                         is_over_100m = start_money > 100000000
                         st.info(f"📊 상단에서 설정한 **초기 자산 {start_money/10000:,.0f}만원**으로 시뮬레이션을 시작합니다.")
-                        
                         c1, c2 = st.columns([1.5, 1])
                         with c1:
                             if is_over_100m:
@@ -514,10 +507,8 @@ def main():
                                 st.caption("🚫 초기 투자금이 1억원을 초과하여 일반 계좌로만 진행됩니다.")
                             else:
                                 is_isa_mode = st.toggle("🛡️ ISA (절세) 계좌로 모으기", value=True)
-                                if is_isa_mode:
-                                    st.caption("💡 **ISA 모드:** 비과세 + 과세이연 효과")
-                                else:
-                                    st.caption("💡 **일반 모드:** 배당소득세(15.4%) 납부 후 재투자")
+                                if is_isa_mode: st.caption("💡 **ISA 모드:** 비과세 + 과세이연 효과")
+                                else: st.caption("💡 **일반 모드:** 배당소득세(15.4%) 납부 후 재투자")
                         with c2:
                             years_sim = st.select_slider("⏳ 투자 기간", options=[3, 5, 10, 15, 20, 30], value=5, format_func=lambda x: f"{x}년")
                             apply_inflation = st.toggle("📉 물가상승률(2.5%) 반영", value=False)
@@ -527,8 +518,7 @@ def main():
                         if is_isa_mode:
                             isa_type = st.radio("ISA 유형", ["일반형 (비과세 200만)", "서민형 (비과세 400만)"], horizontal=True, label_visibility="collapsed")
                             isa_exempt = 400 if "서민형" in isa_type else 200
-                            if start_money > 20000000:
-                                st.warning(f"⚠️ 기존에 선택한 {start_money/10000:,.0f}만원은 ISA 총 한도(1억)에서 차감됩니다.")
+                            if start_money > 20000000: st.warning(f"⚠️ 기존에 선택한 {start_money/10000:,.0f}만원은 ISA 총 한도(1억)에서 차감됩니다.")
                         else:
                             if not is_over_100m:
                                 st.caption("설정한 비율만큼만 재투자하고 나머지는 생활비로 씁니다.")
@@ -556,26 +546,21 @@ def main():
                             if m // 12 > year_tracker:
                                 yearly_contribution = 0
                                 year_tracker = m // 12
-                            
                             actual_add = monthly_add
                             if is_isa_mode:
                                 remaining_yearly = max(0, ISA_YEARLY_CAP - yearly_contribution)
                                 remaining_total = max(0, ISA_TOTAL_CAP - total_principal)
                                 actual_add = min(monthly_add, remaining_yearly, remaining_total)
-                            
                             current_bal += actual_add
                             total_principal += actual_add
                             yearly_contribution += actual_add
                             div_earned = current_bal * monthly_yld
-                            
-                            if is_isa_mode:
-                                reinvest = div_earned
+                            if is_isa_mode: reinvest = div_earned
                             else:
                                 this_tax = div_earned * 0.154
                                 total_tax_paid_general += this_tax
                                 after_tax = div_earned - this_tax
                                 reinvest = after_tax * (reinvest_ratio / 100)
-                            
                             current_bal += reinvest
                             sim_data.append({"년차": m / 12, "자산총액": current_bal / 10000, "총원금": total_principal / 10000, "실제월배당": div_earned})
                         
@@ -604,7 +589,6 @@ def main():
 
                         inflation_msg_money = ""
                         inflation_msg_monthly = ""
-                        
                         if apply_inflation:
                             discount_rate = (1.025) ** years_sim 
                             pv_money = real_money / discount_rate
@@ -612,99 +596,33 @@ def main():
                             inflation_msg_money = f"<br><span style='font-size:0.6em; color:#ff6b6b;'>(현재가치: 약 {pv_money/10000:,.0f}만원)</span>"
                             inflation_msg_monthly = f"<span style='font-size:0.7em; color:#ff6b6b;'>(현재가치: {pv_monthly/10000:,.1f}만원)</span>"
 
-                        analogy_items = [
-                            {"name": "스타벅스", "unit": "잔", "price": 4500, "emoji": "☕"},
-                            {"name": "치킨", "unit": "마리", "price": 23000, "emoji": "🍗"},
-                            {"name": "제주도 항공권", "unit": "장", "price": 60000, "emoji": "✈️"},
-                            {"name": "특급호텔 숙박", "unit": "박", "price": 200000, "emoji": "🏨"}
-                        ]
+                        analogy_items = [{"name": "스타벅스", "unit": "잔", "price": 4500, "emoji": "☕"},{"name": "치킨", "unit": "마리", "price": 23000, "emoji": "🍗"},{"name": "제주도 항공권", "unit": "장", "price": 60000, "emoji": "✈️"},{"name": "특급호텔 숙박", "unit": "박", "price": 200000, "emoji": "🏨"}]
                         selected_item = random.choice(analogy_items)
                         item_count = int(monthly_pocket // selected_item['price'])
 
                         st.markdown(f"""<div style="background-color: #e7f3ff; border: 1.5px solid #d0e8ff; border-radius: 16px; padding: 25px; text-align: center; box-shadow: 0 4px 10px rgba(0,104,201,0.05);"><p style="color: #666; font-size: 0.95em; margin: 0 0 8px 0;">{years_sim}년 뒤 모이는 돈 (세후)</p><h2 style="color: #0068c9; font-size: 2.2em; margin: 0; font-weight: 800; line-height: 1.2;">약 {real_money/10000:,.0f}만원{inflation_msg_money}</h2><p style="color: #777; font-size: 0.9em; margin: 8px 0 0 0;">(투자원금 {final_principal/10000:,.0f}만원 / {tax_msg})</p><div style="height: 1px; background-color: #d0e8ff; margin: 25px auto; width: 85%;"></div><p style="color: #0068c9; font-weight: bold; font-size: 1.1em; margin: 0 0 12px 0;">📅 월 예상 배당금: {monthly_pocket/10000:,.1f}만원 {inflation_msg_monthly}</p><div style="background-color: rgba(255,255,255,0.5); padding: 15px; border-radius: 12px; display: inline-block; min-width: 80%;"><p style="color: #333; font-size: 1.1em; margin: 0; line-height: 1.6;">매달 <b>{selected_item['emoji']} {selected_item['name']} {item_count:,}{selected_item['unit']}</b><br>마음껏 즐기기 가능! 😋</p></div></div>""", unsafe_allow_html=True)
                         
                         annual_div_income = monthly_div_final * 12
-                        if annual_div_income > 20000000:
-                            st.warning(f"🚨 **주의:** {years_sim}년 뒤 연간 배당금이 2,000만원을 초과하여 금융소득종합과세 대상이 될 수 있습니다.")
-                        
+                        if annual_div_income > 20000000: st.warning(f"🚨 **주의:** {years_sim}년 뒤 연간 배당금이 2,000만원을 초과하여 금융소득종합과세 대상이 될 수 있습니다.")
                         st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**
-                        
 1. 본 결과는 주가·환율 변동과 수수료 등을 제외하고, 현재 배당률로만 계산한 결과입니다.
 2. ISA 계좌의 비과세 한도 및 세율은 세법 개정에 따라 달라질 수 있습니다.
 3. 과거의 데이터를 기반으로 한 단순 시뮬레이션이며, 실제 투자 수익을 보장하지 않습니다.""")
 
-                    with tab_goal:
-                        st.subheader("🎯 목표 배당금 역산기 (은퇴 시뮬레이터)")
-                        col_g1, col_g2 = st.columns(2)
-                        with col_g1:
-                            target_monthly_goal = st.number_input("목표 월 배당금 (만원, 세후)", min_value=10, value=300, step=10) * 10000
-                            use_start_money = st.checkbox("위에서 설정한 초기 자산을 포함하여 계산", value=True)
-                            start_bal_goal = total_invest if use_start_money else 0
-                        with col_g2:
-                            monthly_add_goal = st.number_input("매월 추가 적립 가능 금액 (만원)", min_value=0, value=150, step=10) * 10000
-                            apply_inflation_goal = st.toggle("📈 목표치에 물가상승률 반영", value=False, help="미래의 300만원이 현재의 얼마 가치인지 고려하여 목표를 상향 조정합니다.")
-
-                        tax_factor = 0.846
-                        required_asset_goal = (target_monthly_goal / tax_factor) / (avg_y / 100) * 12
-                        
-                        st.markdown("---")
-                        c_res1, c_res2 = st.columns(2)
-                        with c_res1:
-                            st.metric("목표 달성 필요 자산", f"{required_asset_goal/100000000:,.2f} 억원")
-                            st.caption(f"평균 배당률 {avg_y:.2f}% 및 세금 15.4% 적용 시")
-                        with c_res2:
-                            current_bal_goal = start_bal_goal
-                            months_passed = 0
-                            max_months = 600
-                            while current_bal_goal < required_asset_goal and months_passed < max_months:
-                                div_reinvest = current_bal_goal * (avg_y / 100 / 12) * tax_factor
-                                current_bal_goal += monthly_add_goal + div_reinvest
-                                months_passed += 1
-                            if months_passed >= max_months:
-                                st.error("⚠️ 현재 적립액으로는 50년 내 달성이 어렵습니다.")
-                            else:
-                                st.metric("목표 달성까지 소요 기간", f"{months_passed // 12}년 {months_passed % 12}개월")
-
-                        if apply_inflation_goal:
-                            discount_factor = (1.025) ** (months_passed / 12)
-                            real_value = target_monthly_goal / discount_factor
-                            st.warning(f"⚠️ **물가 반영 시:** {months_passed // 12}년 뒤 {target_monthly_goal/10000:,.0f}만원의 실질 가치는 현재 기준 **약 {real_value/10000:,.1f}만원**입니다.")
-                        
-                        target_annual_income = target_monthly_goal * 12
-                        if target_annual_income > 20000000:
-                            st.warning(f"🚨 **현실적 조언:** 설정하신 목표(월 {target_monthly_goal/10000:,.0f}만원) 달성 시, 연 배당소득이 2,000만원을 넘어 **금융종합과세 대상**이 됩니다.")
-
-                        st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**
-                        
-1. 본 결과는 주가·환율 변동과 수수료 등을 제외하고, 현재 배당률로만 계산한 결과입니다.
-2. 실제 배당금은 운용사의 공시 및 환율 상황에 따라 매월 달라질 수 있습니다.
-3. 과거의 데이터를 기반으로 한 단순 시뮬레이션이며, 실제 투자 수익을 보장하지 않습니다.""")
-
-    # =================================================================================
-    # [화면 2] 전체 종목 리스트
-    # =================================================================================
     elif menu == "📃 전체 종목 리스트":
         st.info("💡 **이동 안내:** '코드' 클릭 시 블로그 분석글로, '🔗정보' 클릭 시 네이버/야후 금융 정보로 이동합니다. (**⭐ 표시는 상장 1년 미만 종목입니다.**)")
-        
         tab_all, tab_kor, tab_usa = st.tabs(["🌎 전체", "🇰🇷 국내", "🇺🇸 해외"])
-        with tab_all:
-            ui.render_custom_table(df)
-        with tab_kor:
-            ui.render_custom_table(df[df['분류'] == '국내'])
-        with tab_usa:
-            ui.render_custom_table(df[df['분류'] == '해외'])
+        with tab_all: ui.render_custom_table(df)
+        with tab_kor: ui.render_custom_table(df[df['분류'] == '국내'])
+        with tab_usa: ui.render_custom_table(df[df['분류'] == '해외'])
 
-    # ------------------------------------------
-    # 하단 푸터 및 방문자 추적
-    # ------------------------------------------
     st.divider()
     st.caption("© 2025 **배당팽이** | 실시간 데이터 기반 배당 대시보드")
     st.caption("First Released: 2025.12.31 | [📝 배당팽이의 배당 투자 일지 구경가기](https://blog.naver.com/dividenpange)")
 
     @st.fragment
     def track_visitors():
-        if 'visited' not in st.session_state:
-            st.session_state.visited = False
+        if 'visited' not in st.session_state: st.session_state.visited = False
         if not st.session_state.visited:
             try:
                 if st.query_params.get("admin", "false").lower() != "true":
@@ -719,14 +637,12 @@ def main():
                             new_count = response.data[0]['count'] + 1
                             supabase.table("visit_counts").update({"count": new_count}).eq("id", 1).execute()
                             st.session_state.display_count = new_count
-                        else:
-                            st.session_state.display_count = "Local"
+                        else: st.session_state.display_count = "Local"
                 else:
                     if supabase:
                         response = supabase.table("visit_counts").select("count").eq("id", 1).execute()
                         st.session_state.display_count = response.data[0]['count'] if response.data else "Admin"
-                    else:
-                        st.session_state.display_count = "Admin"
+                    else: st.session_state.display_count = "Admin"
                 st.session_state.visited = True
             except Exception:
                 st.session_state.display_count = "확인 중"
@@ -746,10 +662,8 @@ def main():
                     log_df = pd.DataFrame(recent_logs.data)
                     log_df['created_at'] = pd.to_datetime(log_df['created_at']).dt.tz_convert('Asia/Seoul').dt.strftime('%Y-%m-%d %H:%M:%S')
                     st.table(log_df)
-                else:
-                    st.write("아직 기록된 유입이 없습니다.")
-            except Exception as e:
-                st.error(f"로그 로드 실패: {e}")
+                else: st.write("아직 기록된 유입이 없습니다.")
+            except Exception as e: st.error(f"로그 로드 실패: {e}")
 
 if __name__ == "__main__":
     main()
