@@ -375,27 +375,24 @@ def main():
                         l_c1, l_c2 = st.columns(2)
                         callback_url = "https://dividend-pange.streamlit.app"
                         with l_c1:
-                            # [Google 수정] 카카오처럼 '새 창(_blank)'으로 띄우되,
-                            # 충돌을 일으키는 옵션(access_type 등)을 싹 비워서 '시간 만료'를 막습니다.
+                            # [Google] 슬래시(/)를 붙여서 보냄 -> 리다이렉트 방지 -> 시간 만료 해결
                             try:
                                 provider_res = supabase.auth.sign_in_with_oauth({
                                     "provider": "google",
                                     "options": {
-                                        # 사장님 말씀대로 dividend-pange 주소 (슬래시 없음)
-                                        "redirect_to": "https://dividend-pange.streamlit.app",
-                                        
-                                        # [핵심] 옵션을 비웁니다! (카카오처럼 단순하게)
+                                        # ▼▼▼ 구글은 슬래시(/) 붙임 ▼▼▼
+                                        "redirect_to": "https://dividend-pange.streamlit.app/",
                                         "queryParams": {
-                                            # "prompt": "select_account"  <-- 삭제 (자동 로그인 유도)
+                                            "prompt": "select_account"
                                         },
                                         "skip_browser_redirect": True
                                     }
                                 })
                                 
                                 if provider_res.url:
-                                    # 카카오처럼 target="_blank" (새 창) 사용 -> 네이버 403 해결
+                                    # 모바일 크롬 호환성을 위해 target="_self" (현재창)
                                     st.markdown(f'''
-                                        <a href="{provider_res.url}" target="_blank" style="
+                                        <a href="{provider_res.url}" target="_self" style="
                                             display: inline-flex;
                                             justify-content: center;
                                             align-items: center;
