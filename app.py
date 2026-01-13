@@ -38,7 +38,6 @@ class StreamlitFileStorageFixed:
             if self.storage_file.exists():
                 with open(self.storage_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                    # 로드된 데이터를 즉시 세션에 동기화
                     st.session_state.supabase_storage.update(data)
                     return data
         except Exception as e:
@@ -62,13 +61,11 @@ class StreamlitFileStorageFixed:
             with open(self.storage_file, 'r', encoding='utf-8') as f:
                 file_data = json.load(f)
                 if key in file_data:
-                    # 찾은 값을 세션에 복원
                     st.session_state.supabase_storage[key] = file_data[key]
                     self._save()
                     return file_data[key]
         except:
             pass
-        
         return None
 
     def set_item(self, key: str, value) -> None:
@@ -90,24 +87,30 @@ for key in ["is_logged_in", "user_info", "code_processed"]:
 
 
 # ---------------------------------------------------------
-# Supabase 클라이언트 연결
+# [핵심 수정] Supabase 클라이언트 연결 캐싱
 # ---------------------------------------------------------
-try:
-    URL = st.secrets["SUPABASE_URL"]
-    KEY = st.secrets["SUPABASE_KEY"]
-    
-    supabase = create_client(
-        URL, 
-        KEY,
-        options=ClientOptions(
-            storage=StreamlitFileStorageFixed(),
-            auto_refresh_token=False,
-            persist_session=False,
+# 이 함수에 @st.cache_resource를 붙여서 앱이 새로고침 되어도
+# 클라이언트 객체(와 그 안에 저장된 Verifier)가 초기화되지 않게 막습니다.
+@st.cache_resource
+def get_supabase_client():
+    try:
+        URL = st.secrets["SUPABASE_URL"]
+        KEY = st.secrets["SUPABASE_KEY"]
+        
+        return create_client(
+            URL, 
+            KEY,
+            options=ClientOptions(
+                storage=StreamlitFileStorageFixed(),
+                auto_refresh_token=False,
+                persist_session=False,
+            )
         )
-    )
-except Exception as e:
-    st.error(f"🚨 Supabase 연결 오류: {e}")
-    supabase = None
+    except Exception as e:
+        st.error(f"🚨 Supabase 연결 오류: {e}")
+        return None
+
+supabase = get_supabase_client()
 
 
 # ==========================================
@@ -153,14 +156,8 @@ def check_auth_status():
         except Exception as e:
             error_str = str(e)
             if "challenge" in error_str.lower() and "verifier" in error_str.lower():
-                st.error("""
-                🔴 **PKCE 검증 실패**
-                
-                해결 방법:
-                1. 브라우저 캐시 삭제
-                2. 시크릿 모드로 다시 시도
-                3. Kakao 로그인 사용
-                """)
+                st.error("🔴 인증 시간 초과 또는 브라우저 보안 문제")
+                st.caption("새로고침 후 다시 시도해주세요.")
             else:
                 st.error(f"🔴 인증 오류: {error_str}")
             
@@ -362,7 +359,7 @@ def main():
                             '비중': weights[stock], 
                             '자산유형': s_row['자산유형'], 
                             '투자금액_만원': amt / 10000,
-                            '종목명': stock,              
+                            '종목명': stock,               
                             '코드': s_row.get('코드', ''),
                             '분류': s_row.get('분류', '국내'),
                             '연배당률': s_row.get('연배당률', 0),
@@ -413,7 +410,8 @@ def main():
                                         res = supabase.auth.sign_in_with_oauth({
                                             "provider": "google",
                                             "options": {
-                                                "skip_browser_redirect": False
+                                                "skip_browser_redirect": False,
+                                                "redirect_to": "https://dividend-pange.streamlit.app"
                                             }
                                         })
                                         if res.url:
@@ -422,10 +420,15 @@ def main():
                                         st.error(f"Google 로그인 오류: {e}")
                             
                             with l_c2:
+                                # [핵심 수정] 카카오 버튼 코드를 구글과 동일한 구조로 맞춤
                                 if st.button("💬 Kakao 로그인", key="save_kakao", use_container_width=True):
                                     try:
                                         res = supabase.auth.sign_in_with_oauth({
-                                            "provider": "kakao"
+                                            "provider": "kakao",
+                                            "options": {
+                                                "skip_browser_redirect": False,
+                                                "redirect_to": "https://dividend-pange.streamlit.app"
+                                            }
                                         })
                                         if res.url:
                                             st.markdown(f'<meta http-equiv="refresh" content="0;url={res.url}">', unsafe_allow_html=True)
@@ -687,7 +690,7 @@ def main():
                             monthly_add_goal = st.number_input("매월 추가 적립 가능 금액 (만원)", min_value=0, value=150, step=10) * 10000
                             apply_inflation_goal = st.toggle("📈 목표치에 물가상승률 반영", value=False, help="미래의 300만원이 현재의 얼마 가치인지 고려하여 목표를 상향 조정합니다.")
 
-                        tax_factor = 0.846 
+                        tax_factor = 0.846 
                         required_asset_goal = (target_monthly_goal / tax_factor) / (avg_y / 100) * 12
                         
                         st.markdown("---")
