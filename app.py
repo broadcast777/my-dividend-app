@@ -373,7 +373,7 @@ def main():
                     if not st.session_state.is_logged_in:
                         st.info("🔒 로그인이 필요합니다.")
                         l_c1, l_c2 = st.columns(2)
-                        callback_url = "https://dividend-pange.streamlit.app"
+                        callback_url = "https://dividend-pange.streamlit.app/"
                         with l_c1:
                             # [Google] 슬래시(/)를 붙여서 보냄 -> 리다이렉트 방지 -> 시간 만료 해결
                             try:
