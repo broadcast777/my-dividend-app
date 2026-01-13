@@ -19,35 +19,32 @@ import ui
 st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
 
 # ==========================================
-# [수정 1] 파일 기반 저장소 (순서 오류 해결됨)
+# [수정 1] 세션 상태 방어 로직이 추가된 저장소
 # ==========================================
 class StreamlitFileStorageFixed:
-    """PKCE 토큰을 강제로 보존하는 저장소"""
+    """PKCE 토큰을 파일에 저장하며, 세션 상태가 초기화되어도 복구합니다."""
     
     def __init__(self):
         self.storage_dir = Path.home() / ".streamlit_auth"
         self.storage_dir.mkdir(exist_ok=True)
         self.storage_file = self.storage_dir / "auth_token.json"
-        
-        # [핵심 수정] 먼저 빈 공간을 확실히 만든 뒤에 로드합니다.
+        # 초기화 시점에도 체크
+        self._ensure_session()
+
+    def _ensure_session(self):
+        """세션 상태가 비어있으면 파일에서 읽어와 복구하는 방어 함수"""
         if "supabase_storage" not in st.session_state:
             st.session_state.supabase_storage = {}
-        
-        # 그 다음 파일 내용을 불러와 채웁니다.
-        self._sync_from_file()
-
-    def _sync_from_file(self):
-        """파일에서 읽어와 세션 상태를 업데이트"""
-        try:
-            if self.storage_file.exists():
-                with open(self.storage_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    # 이제 공간이 있으므로 안전하게 업데이트 가능
-                    st.session_state.supabase_storage.update(data)
-        except Exception as e:
-            print(f"[Storage] 로드 실패: {e}")
+            try:
+                if self.storage_file.exists():
+                    with open(self.storage_file, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        st.session_state.supabase_storage.update(data)
+            except Exception:
+                pass
 
     def _save(self) -> None:
+        self._ensure_session() # 저장 전 세션 확인
         try:
             with open(self.storage_file, 'w', encoding='utf-8') as f:
                 json.dump(st.session_state.supabase_storage, f, indent=2)
@@ -55,16 +52,18 @@ class StreamlitFileStorageFixed:
             print(f"[Storage] 저장 실패: {e}")
 
     def get_item(self, key: str):
-        # 세션에 있으면 바로 반환
+        self._ensure_session() # 읽기 전 세션 확인 (필수!)
         if key in st.session_state.supabase_storage:
             return st.session_state.supabase_storage[key]
         return None
 
     def set_item(self, key: str, value) -> None:
+        self._ensure_session() # 쓰기 전 세션 확인
         st.session_state.supabase_storage[key] = value
         self._save()
 
     def remove_item(self, key: str) -> None:
+        self._ensure_session() # 삭제 전 세션 확인
         if key in st.session_state.supabase_storage:
             del st.session_state.supabase_storage[key]
         self._save()
@@ -79,7 +78,7 @@ for key in ["is_logged_in", "user_info", "code_processed"]:
 
 
 # ---------------------------------------------------------
-# [핵심 수정] Supabase 클라이언트 연결 캐싱
+# Supabase 클라이언트 연결 캐싱
 # ---------------------------------------------------------
 @st.cache_resource
 def get_supabase_client():
@@ -145,9 +144,8 @@ def check_auth_status():
             
         except Exception as e:
             error_str = str(e)
-            # 친절한 에러 메시지 처리
             if "challenge" in error_str.lower() and "verifier" in error_str.lower():
-                st.error("⚠️ 보안 토큰이 만료되었습니다. (새로고침 후 다시 로그인해주세요)")
+                st.error("⚠️ 보안 토큰 만료. 새로고침 후 다시 시도해주세요.")
             else:
                 st.error(f"🔴 인증 오류: {error_str}")
             
