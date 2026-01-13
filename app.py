@@ -374,7 +374,7 @@ def main():
                         st.info("🔒 로그인이 필요합니다.")
                         l_c1, l_c2 = st.columns(2)
                         callback_url = "https://dividend-pange.streamlit.app"
-                       with l_c1:
+                     with l_c1:
                             # [Google] 카카오 성공 공식 적용!
                             # 1. 주소: 슬래시 제거 (dividend-pange.streamlit.app)
                             # 2. 타겟: _blank (네이버 403 해결)
