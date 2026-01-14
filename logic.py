@@ -371,58 +371,57 @@ def generate_portfolio_ics(selected_stocks_data):
     cal_content.append("END:VCALENDAR")
     return "\n".join(cal_content)
 
+# [logic.py]
+
 # =========================================================
-# [관리자용] 배당금 자동 추적기 (하이브리드 엔진)
+# [관리자용] 배당금 자동 추적기 (100% 합법 API 버전)
 # =========================================================
 def fetch_dividend_yield_hybrid(code, category):
     """
-    국내 -> 네이버 금융 크롤링
-    해외 -> 야후 파이낸스 API
-    리턴값: (연배당률(%), "데이터 출처")
+    국내 -> 한국투자증권(KIS) API (정식 데이터)
+    해외 -> 야후 파이낸스 API (공식 라이브러리)
     """
     code = str(code).strip()
     
     # -----------------------------------------------
-    # Case 1: 🇰🇷 국내 주식 (네이버 금융)
+    # Case 1: 🇰🇷 국내 주식 (한투 API 사용)
     # -----------------------------------------------
     if category == '국내':
         try:
-            url = f"https://finance.naver.com/item/main.naver?code={code}"
-            # 판다스로 HTML 내의 표(Table)를 전부 긁어옴
-            dfs = pd.read_html(url, encoding='euc-kr')
+            # 1. 한투 브로커 객체 생성 (기존 secrets 활용)
+            broker = mojito.KoreaInvestment(
+                api_key=st.secrets["kis"]["app_key"],
+                api_secret=st.secrets["kis"]["app_secret"],
+                acc_no=st.secrets["kis"]["acc_no"],
+                mock=True 
+            )
             
-            # 네이버 금융 페이지 구조상 '배당수익률'은 보통 4번째 쯤 표에 있음
-            # 혹은 표 전체를 뒤져서 '배당수익률' 글자를 찾음
-            found_yield = None
+            # 2. 현재가 조회 (여기에 배당률도 들어있음!)
+            resp = broker.fetch_price(code)
             
-            for df in dfs:
-                # 데이터프레임을 문자열로 변환해서 탐색
-                if '배당수익률' in df.to_string():
-                    # '배당수익률'이 있는 행을 찾음
-                    # 보통 구조: [시가총액, ... , 배당수익률, 1.23%]
-                    # 복잡하므로 텍스트 파싱으로 접근
-                    text_blob = df.to_string()
-                    # 정규식이나 단순 스플릿으로 값 추출 시도도 가능하지만
-                    # 판다스 테이블 구조를 이용:
-                    # (구조가 복잡해 예외처리가 필요할 수 있음)
-                    
-                    # 가장 간단한 방법: requests로 텍스트 긁어서 찾기
-                    pass 
-            
-            # [더 확실한 방법] requests + 텍스트 파싱 (표 구조 무관)
-            response = requests.get(url)
-            html_text = response.text
-            
-            # "배당수익률</em>" 뒤에 있는 숫자 찾기 (네이버 HTML 구조 기반)
-            # 예: <em id="_dvr">1.23</em>
-            if '<em id="_dvr">' in html_text:
-                part = html_text.split('<em id="_dvr">')[1]
-                yield_str = part.split('</em>')[0]
-                return float(yield_str), "✅ 네이버 금융"
+            if resp and 'output' in resp:
+                # 'hts_dvsd_rate' : HTS 기준 배당수익률
+                # 'per', 'pbr' 등도 여기서 다 나옴
+                yield_str = resp['output'].get('hts_dvsd_rate', '0.0')
                 
-            return 0.0, "⚠️ 네이버 파싱 실패"
+                # 데이터가 비어있거나 '-'인 경우 방어
+                if not yield_str or yield_str == '-':
+                    yield_val = 0.0
+                else:
+                    yield_val = float(yield_str)
+                    
+                return yield_val, "✅ 한투 API(공식)"
+            
+            return 0.0, "⚠️ 데이터 없음(KIS)"
             
         except Exception as e:
+            # 한투 API 실패 시 비상용으로 야후 시도
+            try:
+                ticker = yf.Ticker(f"{code}.KS")
+                dy = ticker.info.get('dividendYield')
+                if dy: return round(dy * 100, 2), "✅ 야후(.KS)"
+            except: pass
+            
             return 0.0, f"❌ 에러: {str(e)}"
 
     # -----------------------------------------------
@@ -431,9 +430,9 @@ def fetch_dividend_yield_hybrid(code, category):
     else:
         try:
             stock = yf.Ticker(code)
+            
             # 1. info에서 배당률 가져오기 (가장 빠름)
             dy = stock.info.get('dividendYield')
-            
             if dy:
                 return round(dy * 100, 2), "✅ 야후 (Info)"
             
