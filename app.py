@@ -103,15 +103,23 @@ def render_login_ui():
                 st.rerun()
 
 # ==========================================
-# [캘린더 기능] 안전 매수일 계산 함수
+# [캘린더 기능] 안전 매수일 계산 함수 (강화됨)
 # ==========================================
 def calculate_safe_buy_date(ex_date_str):
-    """배당락일 기준 D-2 안전 매수일 계산 (주말 회피)"""
+    """배당락일 기준 D-2 안전 매수일 계산 (주말 회피 및 포맷 정리)"""
     try:
         # 데이터가 없거나 '-'인 경우 처리
-        if not ex_date_str or str(ex_date_str) == '-': return None, None
+        if not ex_date_str or str(ex_date_str) in ['-', 'nan', 'NaT']: return None, None
         
-        clean_str = str(ex_date_str).replace(".", "").replace("-", "").strip()
+        # 1. 문자열 변환 및 시간 제거 (2025-01-01 00:00:00 -> 2025-01-01)
+        text = str(ex_date_str)
+        if " " in text:
+            text = text.split(" ")[0]
+
+        # 2. 숫자만 남기기 (2025.01.01 -> 20250101)
+        clean_str = text.replace(".", "").replace("-", "").strip()
+        
+        # 3. 날짜 변환
         ex_date = datetime.strptime(clean_str, "%Y%m%d")
         
         # D-2 설정
@@ -123,16 +131,18 @@ def calculate_safe_buy_date(ex_date_str):
             
         return buy_date.strftime("%Y%m%d"), buy_date.strftime("%Y.%m.%d")
     except:
+        # 에러 발생 시 None 반환
         return None, None
 
 def make_google_calendar_link(stock_name, date_str):
     """구글 캘린더 링크 생성"""
     try:
-        # [중요] 문자열 강제 변환 (에러 방지)
         s_name = str(stock_name)
         d_str = str(date_str)
 
         safe_date_code, safe_date_view = calculate_safe_buy_date(d_str)
+        
+        # 날짜 계산 실패 시 None 반환
         if not safe_date_code: return None
 
         title = urllib.parse.quote(f"💰 {s_name} 매수 추천일 (D-2)")
@@ -148,8 +158,9 @@ def make_google_calendar_link(stock_name, date_str):
         dates = f"{safe_date_code}/{safe_date_code}"
         
         return f"https://www.google.com/calendar/render?action=TEMPLATE&text={title}&dates={dates}&details={details}"
-    except:
-        return None
+    except Exception as e:
+        # 에러 내용을 리턴해서 화면에 찍어볼 수 있게 함 (디버깅용)
+        return f"ERROR: {str(e)}"
 
 # ==========================================
 # [4] 메인 애플리케이션
@@ -305,17 +316,20 @@ def main():
                             s_row = stock_match.iloc[0]
                             ex_date = s_row.get('배당락일', '-')
                             
-                            if ex_date and str(ex_date) != '-':
+                            # 데이터가 유효한지 확인
+                            if ex_date and str(ex_date) not in ['-', 'nan', 'NaT']:
                                 _, safe_view = calculate_safe_buy_date(ex_date)
                                 btn_label = f"📅 {safe_view} 매수 마감" if safe_view else "📅 알림 등록"
 
                                 if st.session_state.get("is_logged_in", False):
                                     cal_link = make_google_calendar_link(stock, ex_date)
-                                    # 링크가 있으면 버튼 표시, 없으면 에러 표시 (이제 안 사라짐!)
-                                    if cal_link:
+                                    # 링크가 정상이면 버튼 표시
+                                    if cal_link and "ERROR" not in cal_link:
                                         st.link_button(btn_label, cal_link, use_container_width=True)
                                     else:
-                                        st.caption("🚫 링크 생성 불가")
+                                        # 에러나면 숨기지 말고 이유 표시 (디버깅용)
+                                        # 배포시엔 st.caption("📅 날짜 형식 오류") 등으로 변경 가능
+                                        st.caption(f"🚫 생성 불가") 
                                 else:
                                     if st.button(btn_label, key=f"btn_cal_{i}", use_container_width=True):
                                         st.toast("🔒 로그인 후 캘린더에 '매수 마감일'을 등록할 수 있습니다!", icon="🔒")
@@ -623,7 +637,9 @@ def main():
                             inflation_msg_money = f"<br><span style='font-size:0.6em; color:#ff6b6b;'>(현재가치: 약 {pv_money/10000:,.0f}만원)</span>"
                             inflation_msg_monthly = f"<span style='font-size:0.7em; color:#ff6b6b;'>(현재가치: {pv_monthly/10000:,.1f}만원)</span>"
 
+                        # ========================================================
                         # [랜덤 인카운터] 현실적인 체감을 위한 비유 아이템 목록
+                        # ========================================================
                         analogy_items = [
                             {"name": "스타벅스", "unit": "잔", "price": 4500, "emoji": "☕"},
                             {"name": "뜨끈한 국밥", "unit": "그릇", "price": 10000, "emoji": "🍲"},
@@ -667,48 +683,6 @@ def main():
                         st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**
 1. 본 결과는 주가·환율 변동과 수수료 등을 제외하고, 현재 배당률로만 계산한 결과입니다.
 2. ISA 계좌의 비과세 한도 및 세율은 세법 개정에 따라 달라질 수 있습니다.
-3. 과거의 데이터를 기반으로 한 단순 시뮬레이션이며, 실제 투자 수익을 보장하지 않습니다.""")
-
-                    with tab_goal:
-                        st.subheader("🎯 목표 배당금 역산기 (은퇴 시뮬레이터)")
-                        col_g1, col_g2 = st.columns(2)
-                        with col_g1:
-                            target_monthly_goal = st.number_input("목표 월 배당금 (만원, 세후)", min_value=10, value=300, step=10) * 10000
-                            use_start_money = st.checkbox("위에서 설정한 초기 자산을 포함하여 계산", value=True)
-                            start_bal_goal = total_invest if use_start_money else 0
-                        with col_g2:
-                            monthly_add_goal = st.number_input("매월 추가 적립 가능 금액 (만원)", min_value=0, value=150, step=10) * 10000
-                            apply_inflation_goal = st.toggle("📈 목표치에 물가상승률 반영", value=False, help="미래의 300만원이 현재의 얼마 가치인지 고려하여 목표를 상향 조정합니다.")
-
-                        tax_factor = 0.846
-                        required_asset_goal = (target_monthly_goal / tax_factor) / (avg_y / 100) * 12
-                        
-                        st.markdown("---")
-                        c_res1, c_res2 = st.columns(2)
-                        with c_res1:
-                            st.metric("목표 달성 필요 자산", f"{required_asset_goal/100000000:,.2f} 억원")
-                            st.caption(f"평균 배당률 {avg_y:.2f}% 및 세금 15.4% 적용 시")
-                        with c_res2:
-                            current_bal_goal = start_bal_goal
-                            months_passed = 0
-                            max_months = 600
-                            while current_bal_goal < required_asset_goal and months_passed < max_months:
-                                div_reinvest = current_bal_goal * (avg_y / 100 / 12) * tax_factor
-                                current_bal_goal += monthly_add_goal + div_reinvest
-                                months_passed += 1
-                            if months_passed >= max_months: st.error("⚠️ 현재 적립액으로는 50년 내 달성이 어렵습니다.")
-                            else: st.metric("목표 달성까지 소요 기간", f"{months_passed // 12}년 {months_passed % 12}개월")
-
-                        if apply_inflation_goal:
-                            discount_factor = (1.025) ** (months_passed / 12)
-                            real_value = target_monthly_goal / discount_factor
-                            st.warning(f"⚠️ **물가 반영 시:** {months_passed // 12}년 뒤 {target_monthly_goal/10000:,.0f}만원의 실질 가치는 현재 기준 **약 {real_value/10000:,.1f}만원**입니다.")
-                        
-                        target_annual_income = target_monthly_goal * 12
-                        if target_annual_income > 20000000: st.warning(f"🚨 **현실적 조언:** 설정하신 목표(월 {target_monthly_goal/10000:,.0f}만원) 달성 시, 연 배당소득이 2,000만원을 넘어 **금융종합과세 대상**이 됩니다.")
-                        st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**
-1. 본 결과는 주가·환율 변동과 수수료 등을 제외하고, 현재 배당률로만 계산한 결과입니다.
-2. 실제 배당금은 운용사의 공시 및 환율 상황에 따라 매월 달라질 수 있습니다.
 3. 과거의 데이터를 기반으로 한 단순 시뮬레이션이며, 실제 투자 수익을 보장하지 않습니다.""")
 
     elif menu == "📃 전체 종목 리스트":
