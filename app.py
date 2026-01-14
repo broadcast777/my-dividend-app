@@ -260,11 +260,16 @@ def main():
                             # 1. Logic.py에서 미리 계산해둔 링크 가져오기
                             cal_link = s_row.get('캘린더링크') 
                             ex_date_view = s_row.get('배당락일', '-')
+
+
+                            # 2. 버튼 라벨 결정 (D-3 반영)
+                            ex_date_view = s_row.get('배당락일', '-')
                             
-                            # 2. 버튼 라벨 결정
                             if cal_link:
-                                btn_label = f"📅 {ex_date_view} (알림)"
+                                # D-3 로직에 맞춰 멘트 변경
+                                btn_label = f"📅 {ex_date_view} (D-3 알림)" 
                             else:
+                                # 날짜가 없으면 달력 아이콘만 변경
                                 btn_label = f"🗓️ {ex_date_view}"
 
                             # 3. 버튼 그리기
