@@ -377,76 +377,139 @@ def generate_portfolio_ics(selected_stocks_data):
 
 # [logic.py]
 
+# [logic.py]
+
 def fetch_dividend_yield_hybrid(code, category):
     """
-    [전략 변경] 화면에서 숫자 찾기(Scraping) 포기!
-    대신 '최근 1년 배당금 합계 / 현재가'로 직접 계산(Calculation)합니다.
+    1단계: 한투 API (국내 전용)
+    2단계: 야후 파이낸스 (국내 백업 + 해외 메인)
+    3단계: 네이버 금융 (국내 최후 수단)
+    * 해외 주식(ETF) 로직 대폭 강화 (현재가 조회 실패 방어)
     """
     code = str(code).strip()
-    yield_val = 0.0
-    source = ""
+    
+    # ===============================================
+    # [영역 1] 🇰🇷 국내 주식 (한투 -> 야후 -> 네이버)
+    # ===============================================
+    if category == '국내':
+        # 1. 한투 API
+        try:
+            broker = mojito.KoreaInvestment(
+                api_key=st.secrets["kis"]["app_key"],
+                api_secret=st.secrets["kis"]["app_secret"],
+                acc_no=st.secrets["kis"]["acc_no"],
+                mock=True 
+            )
+            resp = broker.fetch_price(code)
+            if resp and 'output' in resp:
+                yield_str = resp['output'].get('hts_dvsd_rate', '0.0')
+                if yield_str and yield_str != '-' and float(yield_str) > 0:
+                    return float(yield_str), "✅ 한투 API"
+        except: pass
 
-    # 1. 현재가 확보 (KIS API가 가장 정확)
-    current_price = 0
-    try:
-        broker = mojito.KoreaInvestment(
-            api_key=st.secrets["kis"]["app_key"],
-            api_secret=st.secrets["kis"]["app_secret"],
-            acc_no=st.secrets["kis"]["acc_no"],
-            mock=True 
-        )
-        resp = broker.fetch_price(code)
-        if resp and 'output' in resp:
-            # 혹시 KIS가 배당률을 주면 땡큐 (일반 주식용)
-            yield_str = resp['output'].get('hts_dvsd_rate', '0.0')
-            if yield_str and yield_str != '-' and float(yield_str) > 0:
-                return float(yield_str), "✅ 한투 API(제공값)"
+        # 2. 야후 파이낸스 (국내 백업)
+        try:
+            ticker_code = f"{code}.KS"
+            stock = yf.Ticker(ticker_code)
             
-            # 배당률 없으면 현재가라도 가져감
-            current_price = int(resp['output']['stck_prpr'])
-    except: pass
+            # Info 확인
+            dy = stock.info.get('dividendYield')
+            if dy and dy > 0: return round(dy * 100, 2), "✅ 야후(Info)"
+            
+            # 직접 계산
+            divs = stock.dividends
+            if not divs.empty:
+                if divs.index.tz is not None: divs.index = divs.index.tz_localize(None)
+                one_year_ago = pd.Timestamp.now() - pd.Timedelta(days=365)
+                recent_total = divs[divs.index >= one_year_ago].sum()
+                
+                # 현재가 (국내)
+                price = stock.fast_info.get('last_price')
+                if not price: 
+                    hist = stock.history(period='1d')
+                    if not hist.empty: price = hist['Close'].iloc[-1]
+                
+                if price and price > 0:
+                    yield_cal = (recent_total / price) * 100
+                    if yield_cal > 0: return round(yield_cal, 2), "✅ 야후(Rolling)"
+        except: pass
 
-    # 2. 야후 파이낸스로 '배당금 내역' 조회 및 직접 계산
-    try:
-        # 티커 설정 (국내는 .KS)
-        ticker_code = f"{code}.KS" if category == '국내' else code
-        stock = yf.Ticker(ticker_code)
-        
-        # 현재가를 못 구했으면 야후에서라도 가져옴
-        if current_price == 0:
-            current_price = stock.fast_info.get('last_price', 0)
+        # 3. 네이버 금융 (최후의 보루)
+        try:
+            url = f"https://finance.naver.com/item/main.naver?code={code}"
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            response = requests.get(url, headers=headers)
+            response.encoding = 'euc-kr' 
+            
+            # ETF용 Table 파싱
+            dfs = pd.read_html(response.text)
+            for df in dfs:
+                table_str = df.to_string()
+                if "배당수익률" in table_str or "분배금수익률" in table_str:
+                    for col in df.columns:
+                        col_list = df[col].astype(str).tolist()
+                        for val in col_list:
+                            if "%" in val:
+                                try:
+                                    num = float(val.replace("%", "").strip())
+                                    if 0 < num < 30: return num, "✅ 네이버(Table)"
+                                except: pass
+                                
+            # ID 파싱
+            if '_dvr' in response.text:
+                part = response.text.split('<em id="_dvr">')[1]
+                val = part.split('</em>')[0]
+                return float(val), "✅ 네이버(ID)"
+        except Exception as e:
+            return 0.0, f"❌ 네이버 에러: {str(e)}"
 
-        # [핵심] 과거 배당금 내역 가져오기
-        divs = stock.dividends
-        
-        if not divs.empty:
-            # Timezone 문제 해결
+        return 0.0, "⚠️ 데이터 없음 (국내)"
+
+    # ===============================================
+    # [영역 2] 🇺🇸 해외 주식 (야후 파이낸스 집중 공략)
+    # ===============================================
+    else:
+        try:
+            stock = yf.Ticker(code)
+            
+            # [방법 A] Info에서 바로 가져오기 (운 좋으면 성공)
+            dy = stock.info.get('dividendYield')
+            if dy and dy > 0: 
+                return round(dy * 100, 2), "✅ 야후(Info)"
+            
+            # [방법 B] 배당금 내역으로 직접 계산 (PFF, QYLD 등은 이게 확실함)
+            divs = stock.dividends
+            
+            if divs.empty:
+                return 0.0, "⚠️ 배당내역 없음(Yahoo)"
+
+            # 1. Timezone 제거 (에러 방지 핵심)
             if divs.index.tz is not None:
                 divs.index = divs.index.tz_localize(None)
             
-            # 오늘 기준 1년 전 날짜 계산
+            # 2. 최근 1년 합계 계산
             one_year_ago = pd.Timestamp.now() - pd.Timedelta(days=365)
-            
-            # 최근 1년 치 배당금만 싹 긁어모아서 더하기 (Sum)
             recent_divs = divs[divs.index >= one_year_ago]
-            total_dividend_1y = recent_divs.sum()
+            recent_total = recent_divs.sum()
             
-            # 계산 실행: (1년치 배당금 / 현재가) * 100
-            if current_price > 0 and total_dividend_1y > 0:
-                calculated_yield = (total_dividend_1y / current_price) * 100
-                return round(calculated_yield, 2), f"🧮 직접계산(1년합계: {int(total_dividend_1y)}원)"
+            if recent_total == 0:
+                return 0.0, "⚠️ 1년간 배당 0원"
+
+            # 3. 현재가 조회 (안전 장치 추가)
+            price = stock.fast_info.get('last_price')
             
-            # 1년 내역이 없으면? (신규 상장 등) -> 전체 기간 평균으로 추정 시도
-            elif current_price > 0 and not divs.empty:
-                 # 상장한 지 얼마 안 된 경우, 있는 거라도 연환산
-                 days_diff = (pd.Timestamp.now() - divs.index[0]).days
-                 if 30 < days_diff < 365:
-                     total_sum = divs.sum()
-                     projected_annual = (total_sum / days_diff) * 365
-                     calc_yield = (projected_annual / current_price) * 100
-                     return round(calc_yield, 2), "⚠️ 신규상장(연환산 추정)"
-
-    except Exception as e:
-        return 0.0, f"❌ 계산 오류: {str(e)}"
-
-    return 0.0, "⚠️ 데이터 부족 (계산불가)"
+            # fast_info가 실패하면 history로 재시도 (여기서 많이 막힘!)
+            if not price or price <= 0:
+                hist = stock.history(period="1d")
+                if not hist.empty:
+                    price = hist['Close'].iloc[-1]
+            
+            # 4. 최종 계산
+            if price and price > 0:
+                yield_cal = (recent_total / price) * 100
+                return round(yield_cal, 2), f"✅ 야후(계산:${recent_total:.2f})"
+            else:
+                return 0.0, "❌ 현재가 조회 실패"
+            
+        except Exception as e:
+            return 0.0, f"❌ 해외 에러: {str(e)}"
