@@ -250,7 +250,7 @@ def main():
                             amt = total_invest * (safe_rem / 100)
                         st.caption(f"💰 투자금: **{amt/10000:,.0f}만원**")
 
-                    # =================================================
+                        # =================================================
                         # [캘린더 버튼] (Logic.py 연동 완료 버전)
                         # =================================================
                         stock_match = df[df['pure_name'] == stock]
@@ -259,10 +259,13 @@ def main():
                             
                             # 1. Logic.py에서 미리 계산해둔 링크 가져오기
                             cal_link = s_row.get('캘린더링크') 
-                            
-                            # 2. 버튼 라벨 결정 (배당락일 보여주기)
                             ex_date_view = s_row.get('배당락일', '-')
-                            btn_label = f"📅 {ex_date_view} (알림)" if cal_link else "📅 날짜 미정"
+                            
+                            # 2. 버튼 라벨 결정
+                            if cal_link:
+                                btn_label = f"📅 {ex_date_view} (알림)"
+                            else:
+                                btn_label = f"🗓️ {ex_date_view}"
 
                             # 3. 버튼 그리기
                             if cal_link:
@@ -272,23 +275,21 @@ def main():
                                 else:
                                     # 비로그인 상태 -> 로그인 유도 토스트
                                     if st.button(btn_label, key=f"btn_cal_{i}", use_container_width=True):
-                                        st.toast("🔒 로그인 후 캘린더에 '매수 마감일'을 등록할 수 있습니다!", icon="🔒")
+                                        st.toast("🔒 로그인 후 캘린더에 등록할 수 있습니다!", icon="🔒")
                             else:
-                                # [▼▼▼ 여기를 이렇게 바꿔보세요! ▼▼▼]
-                                # 링크가 안 생겼을 때, 도대체 데이터가 뭐라고 들어왔는지 화면에 뿌리기
-                                raw_date = s_row.get('배당락일')
-                               
-                                st.caption("📅 날짜 미정")
-
-                    if not stock_match.empty:
-                        s_row = stock_match.iloc[0]
-                        all_data.append({
-                            '종목': stock, '비중': weights[stock], '자산유형': s_row['자산유형'], '투자금액_만원': amt / 10000,
-                            '종목명': stock, '코드': s_row.get('코드', ''), '분류': s_row.get('분류', '국내'),
-                            '연배당률': s_row.get('연배당률', 0), '금융링크': s_row.get('금융링크', '#'),
-                            '신규상장개월수': s_row.get('신규상장개월수', 0), '현재가': s_row.get('현재가', 0),
-                            '환구분': s_row.get('환구분', '-'), '배당락일': s_row.get('배당락일', '-')
-                        })
+                                # 링크가 없는 경우 (날짜 미정 등)
+                                st.caption(f"📅 날짜 미정 ({ex_date_view})")
+                        
+                        # (데이터 수집 로직)
+                        if not stock_match.empty:
+                            s_row = stock_match.iloc[0]
+                            all_data.append({
+                                '종목': stock, '비중': weights[stock], '자산유형': s_row['자산유형'], '투자금액_만원': amt / 10000,
+                                '종목명': stock, '코드': s_row.get('코드', ''), '분류': s_row.get('분류', '국내'),
+                                '연배당률': s_row.get('연배당률', 0), '금융링크': s_row.get('금융링크', '#'),
+                                '신규상장개월수': s_row.get('신규상장개월수', 0), '현재가': s_row.get('현재가', 0),
+                                '환구분': s_row.get('환구분', '-'), '배당락일': s_row.get('배당락일', '-')
+                            })
 
                 total_y_div = sum([(total_invest * (weights[n]/100) * (df[df['pure_name']==n].iloc[0]['연배당률']/100)) for n in selected])
                 total_m = total_y_div / 12
@@ -306,6 +307,25 @@ def main():
                 c_data = pd.DataFrame({'계좌 종류': ['일반 계좌', 'ISA/연금계좌'], '월 수령액': [total_m * 0.846, total_m]})
                 chart_compare = alt.Chart(c_data).mark_bar(cornerRadiusTopLeft=10, cornerRadiusTopRight=10).encode(x=alt.X('계좌 종류', sort=None, axis=alt.Axis(labelAngle=0, title=None)), y=alt.Y('월 수령액', title=None), color=alt.Color('계좌 종류', scale=alt.Scale(domain=['일반 계좌', 'ISA/연금계좌'], range=['#95a5a6', '#f1c40f']), legend=None), tooltip=[alt.Tooltip('계좌 종류'), alt.Tooltip('월 수령액', format=',.0f')]).properties(height=220)
                 st.altair_chart(chart_compare, use_container_width=True)
+
+                # =========================================================
+                # [통합 캘린더 다운로드] (새로 추가됨!)
+                # =========================================================
+                st.divider()
+                ics_data = logic.generate_portfolio_ics(all_data)
+
+                col_d1, col_d2 = st.columns([2, 1])
+                with col_d1:
+                    st.info("💡 **팁:** 아래 버튼을 누르면 모든 종목의 알림을 한 번에 내 캘린더에 넣을 수 있습니다.")
+                with col_d2:
+                    st.download_button(
+                        label="📅 전체 일정 다운로드 (.ics)",
+                        data=ics_data,
+                        file_name="dividend_calendar.ics",
+                        mime="text/calendar",
+                        use_container_width=True,
+                        type="primary"
+                    )
 
                 # =========================================================
                 # [저장 로직] (URL 릴레이 방식)
