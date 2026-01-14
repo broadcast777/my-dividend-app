@@ -32,7 +32,7 @@ for key in ["is_logged_in", "user_info", "code_processed"]:
 supabase = db.init_supabase()
 
 # ==========================================
-# [2] 인증 상태 체크 (URL 릴레이 로직 포함)
+# [2] 인증 상태 체크 (자동 복구 기능 추가됨)
 # ==========================================
 def check_auth_status():
     if not supabase: return
@@ -43,13 +43,14 @@ def check_auth_status():
         if session and session.user:
             st.session_state.is_logged_in = True
             st.session_state.user_info = session.user
+            # 로그인 성공했으면 URL 꼬리표 떼기
             if "code" in st.query_params or "old_id" in st.query_params:
                 st.query_params.clear()
             return 
     except Exception:
         pass
 
-    # 2. 로그인 콜백 처리
+    # 2. 로그인 콜백 처리 (여기가 핵심!)
     query_params = st.query_params
     if "code" in query_params and not st.session_state.get("code_processed", False):
         st.session_state.code_processed = True
@@ -68,8 +69,17 @@ def check_auth_status():
             st.rerun()
             
         except Exception as e:
-            st.error(f"🔴 인증 오류: {e}")
-            st.query_params.clear()
+            # [오류 자동 복구 로직]
+            # 'verifier'나 'non-empty' 에러가 나면, 꼬인 것이므로 URL을 초기화하고 재시도 유도
+            err_msg = str(e).lower()
+            if "verifier" in err_msg or "non-empty" in err_msg:
+                st.warning("🔄 보안 토큰 갱신 중... 잠시만 기다려주세요.")
+                st.query_params.clear() # 꼬인 URL 파라미터 삭제
+                time.sleep(1.0)
+                st.rerun() # 앱 새로고침
+            else:
+                st.error(f"🔴 인증 오류: {e}")
+                st.query_params.clear()
 
 check_auth_status()
 
