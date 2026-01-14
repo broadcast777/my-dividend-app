@@ -528,3 +528,37 @@ def fetch_dividend_yield_hybrid(code, category):
             
         except Exception as e:
             return 0.0, f"❌ 해외 에러: {str(e)}"
+
+# [logic.py 파일 맨 아래에 추가하세요]
+
+def save_to_github(df):
+    """
+    [기능] 현재 수정된 데이터프레임(df)을 깃허브 stocks.csv 파일에 덮어쓰기 (Commit)
+    """
+    try:
+        # 1. secrets.toml에서 열쇠와 주소 꺼내기
+        token = st.secrets["github"]["token"]
+        repo_name = st.secrets["github"]["repo_name"]
+        file_path = st.secrets["github"]["file_path"]
+
+        # 2. 깃허브 문 따고 들어가기
+        g = Github(token)
+        repo = g.get_repo(repo_name)
+
+        # 3. 기존 파일 정보 가져오기 (덮어쓰려면 'SHA'라는 기존 파일 주민번호가 필요함)
+        contents = repo.get_contents(file_path)
+
+        # 4. 데이터프레임을 CSV 텍스트로 변환
+        csv_data = df.to_csv(index=False).encode("utf-8")
+
+        # 5. 파일 업데이트 (Commit)
+        repo.update_file(
+            path=contents.path,
+            message="🤖 관리자 패널에서 데이터 자동 갱신",  # 커밋 메시지
+            content=csv_data,
+            sha=contents.sha
+        )
+        return True, "✅ 깃허브 저장 성공! (반영까지 1~2분 걸립니다)"
+
+    except Exception as e:
+        return False, f"❌ 저장 실패: {str(e)}"
