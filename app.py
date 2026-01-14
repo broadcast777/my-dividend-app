@@ -274,7 +274,10 @@ def main():
                                     if st.button(btn_label, key=f"btn_cal_{i}", use_container_width=True):
                                         st.toast("🔒 로그인 후 캘린더에 '매수 마감일'을 등록할 수 있습니다!", icon="🔒")
                             else:
-                                # 링크가 없는 경우 (날짜 미정 or 에러)
+                                # [▼▼▼ 여기를 이렇게 바꿔보세요! ▼▼▼]
+                                # 링크가 안 생겼을 때, 도대체 데이터가 뭐라고 들어왔는지 화면에 뿌리기
+                                raw_date = s_row.get('배당락일')
+                                st.error(f"디버깅: 들어온 값=[{raw_date}] / 타입=[{type(raw_date)}]")
                                 st.caption("📅 날짜 미정")
 
                     if not stock_match.empty:
