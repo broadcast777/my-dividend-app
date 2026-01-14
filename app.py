@@ -310,7 +310,7 @@ def main():
 
 
                 # =========================================================
-                # [통합 캘린더 다운로드] (가이드 추가 버전)
+                # [통합 캘린더 다운로드] (로그인 잠금 기능 적용)
                 # =========================================================
                 st.divider()
                 ics_data = logic.generate_portfolio_ics(all_data)
@@ -321,23 +321,31 @@ def main():
                 with col_d1:
                     st.caption("매번 버튼을 누르기 귀찮으신가요?")
                     st.caption("아래 버튼으로 **모든 종목의 알림**을 한 번에 내 폰/PC 캘린더에 넣으세요.")
+                
                 with col_d2:
-                    st.download_button(
-                        label="📥 전체 일정 파일 받기 (.ics)",
-                        data=ics_data,
-                        file_name="dividend_calendar.ics",
-                        mime="text/calendar",
-                        use_container_width=True,
-                        type="primary"
-                    )
+                    # [수정] 로그인 여부에 따라 버튼 동작 분기
+                    if st.session_state.get("is_logged_in", False):
+                        # 1. 로그인 상태: 진짜 다운로드 버튼 표시
+                        st.download_button(
+                            label="📥 전체 일정 파일 받기 (.ics)",
+                            data=ics_data,
+                            file_name="dividend_calendar.ics",
+                            mime="text/calendar",
+                            use_container_width=True,
+                            type="primary"
+                        )
+                    else:
+                        # 2. 비로그인 상태: 가짜 버튼 (누르면 경고 토스트)
+                        if st.button("📥 전체 일정 파일 받기 (.ics)", key="ics_lock_btn", use_container_width=True):
+                            st.toast("🔒 로그인 회원만 '전체 다운로드'를 할 수 있습니다!", icon="🔒")
 
-                # [친절한 가이드 추가] 4050 맞춤형 설명
+                # [친절한 가이드]
                 with st.expander("❓ 다운로드 받은 파일은 어떻게 쓰나요? (사용법 보기)"):
                     st.markdown("""
                     **아주 간단합니다! 따라해 보세요.** 👇
                     
-                    1. 위 **[전체 일정 파일 받기]** 버튼을 누르세요.
-                    2. 다운로드된 파일(`dividend_calendar.ics`)을 **클릭(터치)**해서 여세요.
+                    1. 위 **[전체 일정 파일 받기]** 버튼을 누르세요. (로그인 필요)
+                    2. 다운로드된 파일(`dividend_calendar.ics`)을 클릭(터치)해서 여세요.
                     3. 스마트폰이나 PC에서 **"일정을 추가하시겠습니까?"** 라고 물어봅니다.
                     4. **[추가]** 또는 **[저장]** 버튼만 누르면 끝!
                     
