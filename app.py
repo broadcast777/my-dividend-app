@@ -220,14 +220,117 @@ def main():
                 # =================================================
 
                 new_div = st.number_input("이번 달 확정 배당금", value=0, step=10)
+                # ... (위쪽 코드는 기존 그대로 유지) ...
                 if st.button("계산 실행", use_container_width=True):
                     new_total, new_hist = logic.update_dividend_rolling(cur_hist, new_div)
                     st.success("완료!")
                     st.code(new_hist, language="text")
 
-    # 데이터 처리
+            # ▼▼▼ [여기서부터 붙여넣으세요] ▼▼▼
+            
+            st.markdown("---")
+            st.subheader("💾 데이터 저장 및 백업")
+
+            # ========================================================
+            # [안전 장치 1] 저장 전 자동 백업 (다운로드)
+            # ========================================================
+            csv_data = df_raw.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📂 (혹시 모르니) 현재 파일 백업하기",
+                data=csv_data,
+                file_name=f"stocks_backup_{pd.Timestamp.now().strftime('%Y%m%d')}.csv",
+                mime='text/csv',
+                use_container_width=True
+            )
+
+            st.write("") # 여백
+
+            # ========================================================
+            # [안전 장치 2] 신규 종목 보호 및 일괄 업데이트 (Bulk Update)
+            # ========================================================
+            with st.expander("⚡ 전체 종목 자동 업데이트 (신규 제외)"):
+                st.caption("신규 상장 종목(⭐)과 배당률 2% 미만은 건너뜁니다.")
+                
+                if st.button("전체 자동 갱신 시작"):
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    updated_count = 0
+                    skipped_count = 0
+                    
+                    total_stocks = len(df_raw)
+                    
+                    # 데이터프레임 복사본 생성 (안전하게)
+                    df_temp = df_raw.copy()
+                    
+                    for i, row in df_temp.iterrows():
+                        name = row['종목명']
+                        code = str(row['종목코드']).strip()
+                        category = str(row.get('분류', '국내')).strip()
+                        
+                        # 진행률 표시
+                        progress_bar.progress((i + 1) / total_stocks)
+                        status_text.text(f"검사 중: {name}...")
+                        
+                        # [핵심 로직] 신규 상장 종목은 무조건 패스!
+                        try:
+                            months = int(row.get('신규상장개월수', 0))
+                        except: months = 0
+                        
+                        if months > 0:
+                            skipped_count += 1
+                            continue 
+                        
+                        # 배당률 조회
+                        y_val, _ = logic.fetch_dividend_yield_hybrid(code, category)
+                        
+                        # [핵심 로직] 배당률이 2% 미만이면 패스 (오류 가능성)
+                        if y_val < 2.0:
+                            skipped_count += 1
+                            continue
+                        
+                        # (주의) 여기서는 '검증'까지만 하고 실제 값 변경은 
+                        # logic.update_dividend_rolling을 호출하거나 
+                        # df_temp.at[i, '연배당률'] = y_val 등으로 처리해야 함.
+                        # 현재는 '테스트' 단계이므로 카운트만 올림
+                        updated_count += 1
+                        
+                    status_text.text("완료!")
+                    st.success(f"✅ {updated_count}개 업데이트 가능 / 🛡️ {skipped_count}개 보호됨")
+                    
+                    # 변경된 내용을 세션에 임시 저장 (아직 깃허브엔 안 감)
+                    st.session_state.df_dirty = df_temp
+
+            st.markdown("---")
+
+            # ========================================================
+            # [안전 장치 3] "정말 저장할까요?" 확인 체크박스
+            # ========================================================
+            st.info("💡 위에서 내용을 충분히 검토하셨나요?")
+            
+            # 체크박스를 눌러야만 저장 버튼이 활성화됨 (Human Error 방지)
+            confirm_save = st.checkbox("네, 덮어써도 좋습니다.")
+
+            if confirm_save:
+                if st.button("🚀 깃허브에 영구 저장 (Commit)", type="primary", use_container_width=True):
+                    with st.spinner("서버에 업로드 중..."):
+                        # 현재 로딩된(혹은 수정된) 데이터프레임을 저장
+                        target_df = st.session_state.get('df_dirty', df_raw)
+                        
+                        success, msg = logic.save_to_github(target_df)
+                        
+                        if success:
+                            st.success(msg)
+                            st.balloons()
+                            import time
+                            time.sleep(2)
+                            st.rerun()
+                        else:
+                            st.error(msg)
+            else:
+                st.button("🚀 깃허브에 영구 저장", disabled=True, use_container_width=True)
+
+    # 데이터 처리 (원래 있던 코드)
     with st.spinner('⚙️ 배당 데이터베이스 엔진 가동 중...'):
-        df = logic.load_and_process_data(df_raw, is_admin=is_admin)
 
     # ---------------------------------------------------------
     # 사이드바 메뉴 & 불러오기
