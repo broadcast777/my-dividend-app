@@ -9,6 +9,7 @@ import calendar  # <--- 추가
 from urllib.parse import quote # <--- 추가
 import re
 import requests
+from github import Github
 # --- [1] 시세 조회 및 유틸 함수 ---
 def _fetch_price_raw(broker, code, category):
     try:
