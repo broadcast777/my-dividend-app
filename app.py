@@ -102,65 +102,7 @@ def render_login_ui():
                 st.session_state.code_processed = False
                 st.rerun()
 
-# ==========================================
-# [캘린더 기능] 안전 매수일 계산 함수 (강화됨)
-# ==========================================
-def calculate_safe_buy_date(ex_date_str):
-    """배당락일 기준 D-2 안전 매수일 계산 (주말 회피 및 포맷 정리)"""
-    try:
-        # 데이터가 없거나 '-'인 경우 처리
-        if not ex_date_str or str(ex_date_str) in ['-', 'nan', 'NaT']: return None, None
-        
-        # 1. 문자열 변환 및 시간 제거 (2025-01-01 00:00:00 -> 2025-01-01)
-        text = str(ex_date_str)
-        if " " in text:
-            text = text.split(" ")[0]
 
-        # 2. 숫자만 남기기 (2025.01.01 -> 20250101)
-        clean_str = text.replace(".", "").replace("-", "").strip()
-        
-        # 3. 날짜 변환
-        ex_date = datetime.strptime(clean_str, "%Y%m%d")
-        
-        # D-2 설정
-        buy_date = ex_date - timedelta(days=2)
-        
-        # 주말이면 평일 나올 때까지 후퇴
-        while buy_date.weekday() >= 5:
-            buy_date -= timedelta(days=1)
-            
-        return buy_date.strftime("%Y%m%d"), buy_date.strftime("%Y.%m.%d")
-    except:
-        # 에러 발생 시 None 반환
-        return None, None
-
-def make_google_calendar_link(stock_name, date_str):
-    """구글 캘린더 링크 생성"""
-    try:
-        s_name = str(stock_name)
-        d_str = str(date_str)
-
-        safe_date_code, safe_date_view = calculate_safe_buy_date(d_str)
-        
-        # 날짜 계산 실패 시 None 반환
-        if not safe_date_code: return None
-
-        title = urllib.parse.quote(f"💰 {s_name} 매수 추천일 (D-2)")
-        
-        desc_text = (
-            f"[{s_name} 배당 알림]\n\n"
-            f"📅 데이터상 배당락일: {d_str}\n"
-            f"✅ 안전 매수 추천일: {safe_date_view} (오늘)\n\n"
-            f"⚠️ 주의: 위 날짜는 주말을 제외하고 계산된 날짜입니다.\n"
-            f"혹시 '평일 공휴일'이 끼어 있다면 하루 더 빨리 매수하세요!"
-        )
-        details = urllib.parse.quote(desc_text)
-        dates = f"{safe_date_code}/{safe_date_code}"
-        
-        return f"https://www.google.com/calendar/render?action=TEMPLATE&text={title}&dates={dates}&details={details}"
-    except Exception as e:
-        # 에러 내용을 리턴해서 화면에 찍어볼 수 있게 함 (디버깅용)
-        return f"ERROR: {str(e)}"
 
 # ==========================================
 # [4] 메인 애플리케이션
