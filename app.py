@@ -539,10 +539,56 @@ def main():
                             inflation_msg_money = f"<br><span style='font-size:0.6em; color:#ff6b6b;'>(현재가치: 약 {pv_money/10000:,.0f}만원)</span>"
                             inflation_msg_monthly = f"<span style='font-size:0.7em; color:#ff6b6b;'>(현재가치: {pv_monthly/10000:,.1f}만원)</span>"
 
-                        analogy_items = [{"name": "스타벅스", "unit": "잔", "price": 4500, "emoji": "☕"},{"name": "치킨", "unit": "마리", "price": 23000, "emoji": "🍗"},{"name": "제주도 항공권", "unit": "장", "price": 60000, "emoji": "✈️"},{"name": "특급호텔 숙박", "unit": "박", "price": 200000, "emoji": "🏨"}]
-                        selected_item = random.choice(analogy_items)
-                        item_count = int(monthly_pocket // selected_item['price'])
 
+
+                        # ========================================================
+                        # [랜덤 인카운터] 현실적인 체감을 위한 비유 아이템 목록
+                        # ========================================================
+                        analogy_items = [
+                            {"name": "스타벅스", "unit": "잔", "price": 4500, "emoji": "☕"},
+                            {"name": "뜨끈한 국밥", "unit": "그릇", "price": 10000, "emoji": "🍲"},
+                            {"name": "넷플릭스 구독", "unit": "개월", "price": 17000, "emoji": "📺"},
+                            {"name": "치킨", "unit": "마리", "price": 23000, "emoji": "🍗"},
+                            {"name": "제주도 항공권", "unit": "장", "price": 60000, "emoji": "✈️"},
+                            {"name": "특급호텔 숙박", "unit": "박", "price": 200000, "emoji": "🏨"},
+                            {"name": "최신 아이폰", "unit": "대", "price": 1500000, "emoji": "📱"}
+                        ]
+
+                        # [스마트 로직] 내 돈으로 '1개 이상' 살 수 있는 것만 추려내기
+                        affordable_items = [item for item in analogy_items if monthly_pocket >= item['price']]
+
+                        if not affordable_items:
+                            # 돈이 너무 적어서(4500원 미만) 아무것도 못 사면 -> 제일 싼 거(스타벅스) 보여줌
+                            selected_item = analogy_items[0]
+                            item_count = 0 # 0잔이라고 솔직하게 보여주거나, 소수점으로 보여줄 수도 있음
+                            msg_count = f"{monthly_pocket / selected_item['price']:.1f}" # 예: 0.5잔
+                        else:
+                            # 살 수 있는 것 중에서만 랜덤 뽑기
+                            selected_item = random.choice(affordable_items)
+                            item_count = int(monthly_pocket // selected_item['price'])
+                            msg_count = f"{item_count:,}"
+
+                        # ========================================================
+                        # [UI] 결과 보여주기
+                        # ========================================================
+                        st.markdown(f"""
+                            <div style="background-color: #e7f3ff; border: 1.5px solid #d0e8ff; border-radius: 16px; padding: 25px; text-align: center; box-shadow: 0 4px 10px rgba(0,104,201,0.05);">
+                                <p style="color: #666; font-size: 0.95em; margin: 0 0 8px 0;">{years_sim}년 뒤 모이는 돈 (세후)</p>
+                                <h2 style="color: #0068c9; font-size: 2.2em; margin: 0; font-weight: 800; line-height: 1.2;">약 {real_money/10000:,.0f}만원{inflation_msg_money}</h2>
+                                <p style="color: #777; font-size: 0.9em; margin: 8px 0 0 0;">(투자원금 {final_principal/10000:,.0f}만원 / {tax_msg})</p>
+                                <div style="height: 1px; background-color: #d0e8ff; margin: 25px auto; width: 85%;"></div>
+                                <p style="color: #0068c9; font-weight: bold; font-size: 1.1em; margin: 0 0 12px 0;">📅 월 예상 배당금: {monthly_pocket/10000:,.1f}만원 {inflation_msg_monthly}</p>
+                                <div style="background-color: rgba(255,255,255,0.5); padding: 15px; border-radius: 12px; display: inline-block; min-width: 80%;">
+                                    <p style="color: #333; font-size: 1.1em; margin: 0; line-height: 1.6;">
+                                        매달 <b>{selected_item['emoji']} {selected_item['name']} {msg_count}{selected_item['unit']}</b><br>
+                                        마음껏 즐기기 가능! 😋
+                                    </p>
+                                </div>
+                            </div>
+                        """, unsafe_allow_html=True)
+    
+
+                        
                         st.markdown(f"""<div style="background-color: #e7f3ff; border: 1.5px solid #d0e8ff; border-radius: 16px; padding: 25px; text-align: center; box-shadow: 0 4px 10px rgba(0,104,201,0.05);"><p style="color: #666; font-size: 0.95em; margin: 0 0 8px 0;">{years_sim}년 뒤 모이는 돈 (세후)</p><h2 style="color: #0068c9; font-size: 2.2em; margin: 0; font-weight: 800; line-height: 1.2;">약 {real_money/10000:,.0f}만원{inflation_msg_money}</h2><p style="color: #777; font-size: 0.9em; margin: 8px 0 0 0;">(투자원금 {final_principal/10000:,.0f}만원 / {tax_msg})</p><div style="height: 1px; background-color: #d0e8ff; margin: 25px auto; width: 85%;"></div><p style="color: #0068c9; font-weight: bold; font-size: 1.1em; margin: 0 0 12px 0;">📅 월 예상 배당금: {monthly_pocket/10000:,.1f}만원 {inflation_msg_monthly}</p><div style="background-color: rgba(255,255,255,0.5); padding: 15px; border-radius: 12px; display: inline-block; min-width: 80%;"><p style="color: #333; font-size: 1.1em; margin: 0; line-height: 1.6;">매달 <b>{selected_item['emoji']} {selected_item['name']} {item_count:,}{selected_item['unit']}</b><br>마음껏 즐기기 가능! 😋</p></div></div>""", unsafe_allow_html=True)
                         
                         annual_div_income = monthly_div_final * 12
