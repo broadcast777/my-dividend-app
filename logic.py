@@ -373,22 +373,13 @@ def generate_portfolio_ics(selected_stocks_data):
 
 # [logic.py]
 
-# =========================================================
-# [관리자용] 배당금 자동 추적기 (100% 합법 API 버전)
-# =========================================================
-def fetch_dividend_yield_hybrid(code, category):
-    """
-    국내 -> 한국투자증권(KIS) API (정식 데이터)
-    해외 -> 야후 파이낸스 API (공식 라이브러리)
-    """
-    code = str(code).strip()
-    
 # [logic.py]
 
 def fetch_dividend_yield_hybrid(code, category):
     """
     1단계: 한투 API (정식 데이터) 시도
     2단계: 실패하거나 0이면 -> 야후 파이낸스 시도 (백업)
+    * 수정: Timezone 에러 방지 (tz_localize(None)) 적용
     """
     code = str(code).strip()
     
@@ -408,30 +399,31 @@ def fetch_dividend_yield_hybrid(code, category):
             
             if resp and 'output' in resp:
                 yield_str = resp['output'].get('hts_dvsd_rate', '0.0')
-                
-                # 값이 있고 0보다 클 때만 성공으로 인정하고 리턴
                 if yield_str and yield_str != '-' and float(yield_str) > 0:
                     return float(yield_str), "✅ 한투 API(공식)"
-                    
         except:
-            pass # 한투 에러나면 조용히 야후로 넘어감
+            pass 
 
         # [2단계] 야후 파이낸스 (국내 백업)
-        # 한투가 0을 줬거나 에러났을 때 여기로 옴
         try:
-            # 국내 코드는 뒤에 .KS 붙임
             ticker_code = f"{code}.KS"
             stock = yf.Ticker(ticker_code)
             
-            # 방법 A: Info 정보
+            # 방법 A: Info
             dy = stock.info.get('dividendYield')
             if dy: return round(dy * 100, 2), "✅ 야후(.KS)"
             
-            # 방법 B: 과거 배당금 합산 (Rolling)
+            # 방법 B: Rolling (여기서 에러 났었음)
             divs = stock.dividends
             if not divs.empty:
+                # ▼▼▼ [수정 핵심] 시간대 정보 제거 (Asia/Seoul -> None) ▼▼▼
+                if divs.index.tz is not None:
+                    divs.index = divs.index.tz_localize(None)
+                # ▲▲▲ --------------------------------------------- ▲▲▲
+
                 one_year_ago = pd.Timestamp.now() - pd.Timedelta(days=365)
                 recent_total = divs[divs.index >= one_year_ago].sum()
+                
                 price = stock.fast_info.get('last_price')
                 if price and price > 0:
                     yield_cal = (recent_total / price) * 100
@@ -440,7 +432,7 @@ def fetch_dividend_yield_hybrid(code, category):
         except Exception as e:
             return 0.0, f"❌ 모두 실패: {str(e)}"
             
-        return 0.0, "⚠️ 데이터 없음 (한투/야후 모두)"
+        return 0.0, "⚠️ 데이터 없음"
 
     # -----------------------------------------------
     # Case 2: 🇺🇸 해외 주식 (야후 파이낸스)
@@ -454,17 +446,19 @@ def fetch_dividend_yield_hybrid(code, category):
             
             divs = stock.dividends
             if not divs.empty:
+                # ▼▼▼ [수정 핵심] 해외 주식도 시간대 제거 ▼▼▼
+                if divs.index.tz is not None:
+                    divs.index = divs.index.tz_localize(None)
+                # ▲▲▲ --------------------------------- ▲▲▲
+
                 one_year_ago = pd.Timestamp.now() - pd.Timedelta(days=365)
                 recent_total = divs[divs.index >= one_year_ago].sum()
+                
                 price = stock.fast_info.get('last_price')
                 if price and price > 0:
                     yield_cal = (recent_total / price) * 100
                     return round(yield_cal, 2), "✅ 야후 (Rolling)"
             
-            return 0.0, "⚠️ 데이터 없음"
-            
-        except Exception as e:
-            return 0.0, f"❌ 에러: {str(e)}"
             return 0.0, "⚠️ 데이터 없음"
             
         except Exception as e:
