@@ -197,6 +197,7 @@ def load_and_process_data(df_raw, is_admin=False):
                 '배당락일': str(row.get('배당락일', '-')), 
                 '분류': category,
                 '자산유형': classify_asset(row),
+                '캘린더링크': calculate_google_calendar_url(display_name, str(row.get('배당락일', '-'))),
                 'pure_name': name.replace("🚫 ", "").replace(" (필터대상)", ""), # 순수 이름 저장
                 '신규상장개월수': months
             }
