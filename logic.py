@@ -4,6 +4,9 @@ import yfinance as yf
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 import mojito 
+import datetime  # <--- 추가
+import calendar  # <--- 추가
+from urllib.parse import quote # <--- 추가
 
 # --- [1] 시세 조회 및 유틸 함수 ---
 def _fetch_price_raw(broker, code, category):
@@ -52,6 +55,90 @@ def get_hedge_status(name, category):
     if "환노출" in name_str or "UNHEDGED" in name_str: return "⚡환노출"
     if any(x in name_str for x in ["(H)", "헤지", "합성"]): return "🛡️환헤지(H)"
     return "⚡환노출" if any(x in name_str for x in ['미국', 'GLOBAL', 'S&P500', '나스닥']) else "-"
+
+
+
+def calculate_google_calendar_url(ticker_name, pay_date_str):
+    """
+    입력: "매월 15일" 또는 "2025-12-30" (문자열)
+    출력: 구글 캘린더 등록 링크 (URL 문자열)
+    """
+    try:
+        today = datetime.date.today()
+        target_date = None
+        
+        # 1. 데이터 클렌징 (공백 제거, 문자열 변환)
+        if not isinstance(pay_date_str, str):
+            pay_date_str = str(pay_date_str)
+        clean_str = pay_date_str.replace(" ", "").strip()
+
+        # 2. 날짜 파싱 로직 ("매월 15일" 처리)
+        if "매월" in clean_str and "일" in clean_str:
+            # "매월15일" -> 숫자 15 추출
+            day_part = clean_str.replace("매월", "").replace("일", "")
+            if not day_part.isdigit(): return None # 숫자가 아니면 패스
+            
+            day = int(day_part)
+            
+            # 이번 달 배당일 계산
+            try:
+                candidate_date = datetime.date(today.year, today.month, day)
+            except ValueError:
+                # 2월 30일 같은 경우 예외 처리 -> 그 달의 마지막 날로 설정
+                last_day = calendar.monthrange(today.year, today.month)[1]
+                candidate_date = datetime.date(today.year, today.month, last_day)
+
+            # 이미 지났으면 다음 달로 설정
+            if candidate_date < today:
+                next_month = today.month + 1 if today.month < 12 else 1
+                next_year = today.year if today.month < 12 else today.year + 1
+                try:
+                    target_date = datetime.date(next_year, next_month, day)
+                except ValueError:
+                    last_day = calendar.monthrange(next_year, next_month)[1]
+                    target_date = datetime.date(next_year, next_month, last_day)
+            else:
+                target_date = candidate_date
+                
+        # 3. 날짜 파싱 로직 ("2025-01-15" 처리)
+        elif "-" in clean_str:
+            target_date = datetime.datetime.strptime(clean_str, "%Y-%m-%d").date()
+        
+        else:
+            return None # 알 수 없는 형식이면 링크 생성 안 함
+
+        if target_date is None:
+            return None
+
+        # 4. 안전 매수일 (D-2) 계산
+        safe_buy_date = target_date - datetime.timedelta(days=2)
+
+        # 5. 주말 보정 (토요일이면 금요일로, 일요일이면 금요일로)
+        # weekday(): 0=월, 5=토, 6=일
+        while safe_buy_date.weekday() >= 5:
+            safe_buy_date -= datetime.timedelta(days=1)
+
+        # 6. 구글 캘린더 URL 생성
+        # 날짜 포맷: YYYYMMDD
+        start_str = safe_buy_date.strftime("%Y%m%d")
+        end_str = (safe_buy_date + datetime.timedelta(days=1)).strftime("%Y%m%d")
+        
+        title = quote(f"[{ticker_name}] 매수 마감일 (D-2)")
+        details = quote(f"배당 기준일: {target_date} \n안전하게 오늘까지 매수하세요!")
+        
+        google_url = (
+            f"https://www.google.com/calendar/render?action=TEMPLATE"
+            f"&text={title}"
+            f"&dates={start_str}/{end_str}"
+            f"&details={details}"
+        )
+        
+        return google_url
+
+    except Exception as e:
+        # 에러 나면 멈추지 말고 그냥 None 반환 (버튼 안 보이게 처리)
+        print(f"Calendar Error: {e}") 
+        return None
 
 # --- [2] 메인 데이터 로직 (스마트 계산 복구) ---
 @st.cache_data(ttl=600, show_spinner=False)
