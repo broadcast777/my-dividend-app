@@ -1,5 +1,5 @@
 # ==========================================
-# db.py : 데이터베이스 및 토큰 관리 (Fail-safe 강화판)
+# db.py : 데이터베이스 및 토큰 관리 (Read-Fallback 방식)
 # ==========================================
 import streamlit as st
 from supabase import create_client, ClientOptions
@@ -11,13 +11,14 @@ import os
 from streamlit.runtime.scriptrunner import get_script_run_ctx
 
 # ---------------------------------------------------------
-# [1] 파일 직통 저장소 (지연 마이그레이션 적용)
+# [1] 파일 직통 저장소 (수정됨: 파일 이동 없이 읽기만 함)
 # ---------------------------------------------------------
 class StreamlitFileStorageFixed:
     """
     사용자별 토큰 저장소.
-    초기에 파일을 못 찾으면, URL의 old_id를 추적하여
-    데이터를 요청하는 시점(get_item)에 파일을 찾아오는 '지연 마이그레이션' 방식 적용.
+    파일을 옮기거나 이름을 바꾸지 않고,
+    현재 파일에 데이터가 없으면 '옛날 파일(old_id)'을 읽어서 반환합니다.
+    (파일 잠금/삭제 오류 원천 차단)
     """
     def __init__(self):
         try:
@@ -26,74 +27,65 @@ class StreamlitFileStorageFixed:
         except:
             self.current_id = "unknown"
 
-        self.storage_file = Path(f"auth_token_{self.current_id}.json")
-        self.old_file = None
+        # 1. 내 현재 사물함
+        self.main_file = Path(f"auth_token_{self.current_id}.json")
+        
+        # 2. (만약 있다면) 옛날 사물함 위치 기억
+        self.fallback_file = None
+        if "old_id" in st.query_params:
+            old_id = st.query_params["old_id"]
+            self.fallback_file = Path(f"auth_token_{old_id}.json")
 
-        # URL에 꼬리표(old_id)가 있으면 옛날 파일 경로도 기억해둠
-        query_params = st.query_params
-        if "old_id" in query_params:
-            old_id = query_params["old_id"]
-            self.old_file = Path(f"auth_token_{old_id}.json")
+    def _read_json(self, file_path):
+        """안전하게 파일 읽기"""
+        if file_path and file_path.exists():
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except:
+                return {}
+        return {}
+
+    def get_item(self, key: str) -> str:
+        # 1. [우선순위 1] 현재 내 파일 뒤져보기
+        data = self._read_json(self.main_file)
+        if key in data:
+            return data[key]
+            
+        # 2. [우선순위 2] 없으면 옛날 파일 뒤져보기 (Fail-safe)
+        if self.fallback_file:
+            data_old = self._read_json(self.fallback_file)
+            if key in data_old:
+                # 옛날 파일에 있으면 가져옴 (파일을 지우거나 옮기지 않음!)
+                return data_old[key]
+        return None
 
     def set_item(self, key: str, value: str) -> None:
         try:
-            data = {}
-            # 현재 파일 읽기 시도
-            if self.storage_file.exists():
-                with open(self.storage_file, 'r', encoding='utf-8') as f:
-                    try: data = json.load(f)
-                    except: pass
-            
+            # 쓰기는 무조건 '현재 내 파일'에만 함
+            data = self._read_json(self.main_file)
             data[key] = value
-            
-            # 파일 쓰기
-            with open(self.storage_file, 'w', encoding='utf-8') as f:
+            with open(self.main_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f)
         except Exception as e:
             print(f"Set Error: {e}")
 
-    def get_item(self, key: str) -> str:
-        try:
-            # 1. [정석] 현재 내 ID로 된 파일이 있으면 거기서 읽음
-            if self.storage_file.exists():
-                with open(self.storage_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    val = data.get(key)
-                    if val: return val # 데이터 있으면 바로 리턴
-
-            # 2. [구조대] 현재 파일에 없는데, 옛날 ID(old_id)가 있다면?
-            # -> 옛날 사물함(old_file)을 뒤져본다! (여기가 핵심)
-            if self.old_file and self.old_file.exists():
-                with open(self.old_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    val = data.get(key)
-                    
-                    if val:
-                        # 옛날 파일에서 데이터를 찾았으면 -> 현재 파일로 이사 시킴 (마이그레이션)
-                        self.set_item(key, val)
-                        # 옛날 파일은 이제 삭제해도 됨
-                        try: self.old_file.unlink()
-                        except: pass
-                        return val
-                        
-        except Exception as e:
-            print(f"Get Error: {e}")
-        return None
-
     def remove_item(self, key: str) -> None:
         try:
-            target_file = self.storage_file
-            # 파일이 없으면 옛날 파일이라도 지움
-            if not target_file.exists() and self.old_file and self.old_file.exists():
-                target_file = self.old_file
-
-            if target_file.exists():
-                with open(target_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                if key in data:
-                    del data[key]
-                    with open(target_file, 'w', encoding='utf-8') as f:
-                        json.dump(data, f)
+            # 현재 파일에서 삭제 시도
+            data = self._read_json(self.main_file)
+            if key in data:
+                del data[key]
+                with open(self.main_file, 'w', encoding='utf-8') as f:
+                    json.dump(data, f)
+            
+            # 옛날 파일에서도 삭제 시도 (청소)
+            if self.fallback_file:
+                data_old = self._read_json(self.fallback_file)
+                if key in data_old:
+                    del data_old[key]
+                    with open(self.fallback_file, 'w', encoding='utf-8') as f:
+                        json.dump(data_old, f)
         except Exception as e:
             print(f"Remove Error: {e}")
 
@@ -102,7 +94,6 @@ class StreamlitFileStorageFixed:
 # ---------------------------------------------------------
 def init_supabase():
     try:
-        # Streamlit Cloud 배포 시 secrets에서 가져옴
         URL = st.secrets["SUPABASE_URL"]
         KEY = st.secrets["SUPABASE_KEY"]
         
