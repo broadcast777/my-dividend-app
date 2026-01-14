@@ -464,8 +464,10 @@ def fetch_dividend_yield_hybrid(code, category):
             return 0.0, f"❌ 네이버 에러: {str(e)}"
 
         return 0.0, "⚠️ 데이터 없음 (국내)"
-        # ===============================================
-    # [영역 2] 🇺🇸 해외 주식 (순서 변경: 직접 계산 우선!)
+        # [logic.py] fetch_dividend_yield_hybrid 함수 내부...
+
+    # ===============================================
+    # [영역 2] 🇺🇸 해외 주식 (소수점 자동 보정 탑재)
     # ===============================================
     else:
         try:
@@ -478,38 +480,48 @@ def fetch_dividend_yield_hybrid(code, category):
                 divs = stock.dividends
                 
                 if not divs.empty:
-                    # Timezone 제거
                     if divs.index.tz is not None:
                         divs.index = divs.index.tz_localize(None)
                     
-                    # 최근 1년 합계 계산
                     one_year_ago = pd.Timestamp.now() - pd.Timedelta(days=365)
                     recent_divs = divs[divs.index >= one_year_ago]
                     recent_total = recent_divs.sum()
                     
-                    # 현재가 조회 (2중 안전장치)
                     price = stock.fast_info.get('last_price')
                     if not price or price <= 0:
                         hist = stock.history(period="1d")
-                        if not hist.empty:
-                            price = hist['Close'].iloc[-1]
+                        if not hist.empty: price = hist['Close'].iloc[-1]
                     
-                    # 최종 계산
                     if price and price > 0 and recent_total > 0:
                         yield_cal = (recent_total / price) * 100
-                        # 400% 같은 이상치 필터링 (보통 배당이 100% 넘을 순 없음)
-                        if 0 < yield_cal < 100: 
+                        
+                        # [🚨 눈치 챙겨 로직 1] 
+                        # 계산값이 100%를 넘으면 뭔가 이상한 거임 (데이터 단위 오류 등)
+                        # 혹시 모르니 소수점 조정 시도
+                        if yield_cal > 50: 
+                            yield_cal = yield_cal / 100
+                            
+                        # 그래도 50% 넘으면 에러 처리 (배당률이 50%일 리가 없음)
+                        if 0 < yield_cal < 50:
                             return round(yield_cal, 2), f"✅ 야후(계산:${recent_total:.2f})"
             except:
-                pass # 계산 실패하면 아래 Info로 넘어감
+                pass 
 
             # -----------------------------------------------------------
-            # [2순위] Info에서 가져오기 (계산 실패 시 백업용)
+            # [2순위] Info에서 가져오기 (백업용)
             # -----------------------------------------------------------
             dy = stock.info.get('dividendYield')
             if dy and dy > 0: 
-                # 야후는 0.041 (=4.1%) 형태로 줌
-                return round(dy * 100, 2), "✅ 야후(Info)"
+                # [🚨 눈치 챙겨 로직 2]
+                # 야후가 0.041(정상)이 아니라 4.1(비정상)을 줬을 때 방어
+                # 일단 100을 곱해보고
+                calc_dy = dy * 100
+                
+                # 50%가 넘어가면 "아, 이거 이미 퍼센트구나" 하고 100으로 나눔
+                if calc_dy > 50:
+                    calc_dy = dy # 그냥 원래 값(4.1)을 씀
+                
+                return round(calc_dy, 2), "✅ 야후(Info)"
                 
             return 0.0, "⚠️ 데이터 없음"
             
