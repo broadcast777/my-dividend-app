@@ -383,46 +383,64 @@ def fetch_dividend_yield_hybrid(code, category):
     """
     code = str(code).strip()
     
+# [logic.py]
+
+def fetch_dividend_yield_hybrid(code, category):
+    """
+    1단계: 한투 API (정식 데이터) 시도
+    2단계: 실패하거나 0이면 -> 야후 파이낸스 시도 (백업)
+    """
+    code = str(code).strip()
+    
     # -----------------------------------------------
-    # Case 1: 🇰🇷 국내 주식 (한투 API 사용)
+    # Case 1: 🇰🇷 국내 주식
     # -----------------------------------------------
     if category == '국내':
+        # [1단계] 한투 API 시도
         try:
-            # 1. 한투 브로커 객체 생성 (기존 secrets 활용)
             broker = mojito.KoreaInvestment(
                 api_key=st.secrets["kis"]["app_key"],
                 api_secret=st.secrets["kis"]["app_secret"],
                 acc_no=st.secrets["kis"]["acc_no"],
                 mock=True 
             )
-            
-            # 2. 현재가 조회 (여기에 배당률도 들어있음!)
             resp = broker.fetch_price(code)
             
             if resp and 'output' in resp:
-                # 'hts_dvsd_rate' : HTS 기준 배당수익률
-                # 'per', 'pbr' 등도 여기서 다 나옴
                 yield_str = resp['output'].get('hts_dvsd_rate', '0.0')
                 
-                # 데이터가 비어있거나 '-'인 경우 방어
-                if not yield_str or yield_str == '-':
-                    yield_val = 0.0
-                else:
-                    yield_val = float(yield_str)
+                # 값이 있고 0보다 클 때만 성공으로 인정하고 리턴
+                if yield_str and yield_str != '-' and float(yield_str) > 0:
+                    return float(yield_str), "✅ 한투 API(공식)"
                     
-                return yield_val, "✅ 한투 API(공식)"
+        except:
+            pass # 한투 에러나면 조용히 야후로 넘어감
+
+        # [2단계] 야후 파이낸스 (국내 백업)
+        # 한투가 0을 줬거나 에러났을 때 여기로 옴
+        try:
+            # 국내 코드는 뒤에 .KS 붙임
+            ticker_code = f"{code}.KS"
+            stock = yf.Ticker(ticker_code)
             
-            return 0.0, "⚠️ 데이터 없음(KIS)"
+            # 방법 A: Info 정보
+            dy = stock.info.get('dividendYield')
+            if dy: return round(dy * 100, 2), "✅ 야후(.KS)"
             
+            # 방법 B: 과거 배당금 합산 (Rolling)
+            divs = stock.dividends
+            if not divs.empty:
+                one_year_ago = pd.Timestamp.now() - pd.Timedelta(days=365)
+                recent_total = divs[divs.index >= one_year_ago].sum()
+                price = stock.fast_info.get('last_price')
+                if price and price > 0:
+                    yield_cal = (recent_total / price) * 100
+                    return round(yield_cal, 2), "✅ 야후(Rolling)"
+                    
         except Exception as e:
-            # 한투 API 실패 시 비상용으로 야후 시도
-            try:
-                ticker = yf.Ticker(f"{code}.KS")
-                dy = ticker.info.get('dividendYield')
-                if dy: return round(dy * 100, 2), "✅ 야후(.KS)"
-            except: pass
+            return 0.0, f"❌ 모두 실패: {str(e)}"
             
-            return 0.0, f"❌ 에러: {str(e)}"
+        return 0.0, "⚠️ 데이터 없음 (한투/야후 모두)"
 
     # -----------------------------------------------
     # Case 2: 🇺🇸 해외 주식 (야후 파이낸스)
@@ -431,23 +449,22 @@ def fetch_dividend_yield_hybrid(code, category):
         try:
             stock = yf.Ticker(code)
             
-            # 1. info에서 배당률 가져오기 (가장 빠름)
             dy = stock.info.get('dividendYield')
-            if dy:
-                return round(dy * 100, 2), "✅ 야후 (Info)"
+            if dy: return round(dy * 100, 2), "✅ 야후 (Info)"
             
-            # 2. info에 없으면 과거 배당금 합산 (Rolling)
             divs = stock.dividends
             if not divs.empty:
                 one_year_ago = pd.Timestamp.now() - pd.Timedelta(days=365)
                 recent_total = divs[divs.index >= one_year_ago].sum()
-                
-                # 현재가 조회
                 price = stock.fast_info.get('last_price')
                 if price and price > 0:
                     yield_cal = (recent_total / price) * 100
                     return round(yield_cal, 2), "✅ 야후 (Rolling)"
             
+            return 0.0, "⚠️ 데이터 없음"
+            
+        except Exception as e:
+            return 0.0, f"❌ 에러: {str(e)}"
             return 0.0, "⚠️ 데이터 없음"
             
         except Exception as e:
