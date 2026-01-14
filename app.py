@@ -149,6 +149,7 @@ def main():
     df_raw = logic.load_stock_data_from_csv()
     if df_raw.empty: st.stop()
 
+
     # [관리자] 갱신 도구
     if is_admin:
         with st.sidebar:
@@ -278,9 +279,11 @@ def main():
                             st.error(msg)
             else:
                 st.button("🚀 깃허브에 영구 저장", disabled=True, use_container_width=True)
+    # ▼▼▼ [중요] 여기입니다! ▼▼▼
+    # 'if is_admin:' 과 머리(시작점)를 똑같이 맞추세요!
+    with st.spinner('⚙️ 배당 데이터베이스 엔진 가동 중...'):
+        df = logic.load_and_process_data(df_raw, is_admin=is_admin)
 
-     # 데이터 처리 (원래 있던 코드)
- with st.spinner('⚙️ 배당 데이터베이스 엔진 가동 중...'):
 
     # ---------------------------------------------------------
     # 사이드바 메뉴 & 불러오기
