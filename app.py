@@ -1,92 +1,20 @@
 import streamlit as st
-from supabase import create_client, ClientOptions
 import pandas as pd
 import altair as alt
 import hashlib
-import json
-import os
-from pathlib import Path
-import random
 import time
-# [필수] 세션 ID 확인용 라이브러리
+import random
 from streamlit.runtime.scriptrunner import get_script_run_ctx
 
 # [모듈화] 분리한 파일들을 불러옵니다
 import logic 
 import ui
+import db  # <--- [New] 방금 만든 db.py를 불러옵니다!
 
 # ==========================================
 # [1] 기본 설정
 # ==========================================
 st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
-
-# ==========================================
-# [수정 2] 파일 직통 저장소 (자동 이름표 교체 기능 추가)
-# ==========================================
-class StreamlitFileStorageFixed:
-    """
-    사용자별 토큰 저장소입니다.
-    URL에 'old_id'가 있다면, 옛날 파일의 이름을 현재 ID로 바꿔서
-    로그인이 끊기지 않게 연결해주는(Migration) 똑똑한 기능이 추가되었습니다.
-    """
-    def __init__(self):
-        # 1. 현재 내 번호표(Session ID) 확인
-        try:
-            ctx = get_script_run_ctx()
-            self.session_id = ctx.session_id
-        except:
-            self.session_id = "unknown"
-
-        self.storage_file = Path(f"auth_token_{self.session_id}.json")
-
-        # 2. [핵심] 꼬리표(old_id)가 있다면? -> 파일 주인을 '현재 내 번호'로 바꿈
-        query_params = st.query_params
-        if "old_id" in query_params:
-            old_id = query_params["old_id"]
-            old_file = Path(f"auth_token_{old_id}.json")
-            
-            # 옛날 파일이 있고, 내 지금 파일이 없으면 -> 이름표 바꿔달기 (Rename)
-            if old_file.exists() and not self.storage_file.exists():
-                try:
-                    old_file.rename(self.storage_file)
-                    # print(f"🔄 세션 연결 성공: {old_id} -> {self.session_id}")
-                except Exception as e:
-                    print(f"세션 연결 실패: {e}")
-
-    def set_item(self, key: str, value: str) -> None:
-        try:
-            data = {}
-            if self.storage_file.exists():
-                with open(self.storage_file, 'r', encoding='utf-8') as f:
-                    try: data = json.load(f)
-                    except: pass
-            data[key] = value
-            with open(self.storage_file, 'w', encoding='utf-8') as f:
-                json.dump(data, f)
-        except Exception as e:
-            print(f"Set Error: {e}")
-
-    def get_item(self, key: str) -> str:
-        try:
-            if self.storage_file.exists():
-                with open(self.storage_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    return data.get(key)
-        except Exception as e:
-            print(f"Get Error: {e}")
-        return None
-
-    def remove_item(self, key: str) -> None:
-        try:
-            if self.storage_file.exists():
-                with open(self.storage_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                if key in data:
-                    del data[key]
-                    with open(self.storage_file, 'w', encoding='utf-8') as f:
-                        json.dump(data, f)
-        except Exception as e:
-            print(f"Remove Error: {e}")
 
 # ---------------------------------------------------------
 # 세션 상태 변수 초기화
@@ -96,31 +24,12 @@ for key in ["is_logged_in", "user_info", "code_processed"]:
         st.session_state[key] = False if key != "user_info" else None
 
 # ---------------------------------------------------------
-# Supabase 클라이언트 연결
+# Supabase 연결 (이제 db.py에서 가져옵니다)
 # ---------------------------------------------------------
-def get_supabase_client():
-    try:
-        URL = st.secrets["SUPABASE_URL"]
-        KEY = st.secrets["SUPABASE_KEY"]
-        
-        return create_client(
-            URL, 
-            KEY,
-            options=ClientOptions(
-                storage=StreamlitFileStorageFixed(),
-                persist_session=True, 
-                auto_refresh_token=True,
-            )
-        )
-    except Exception as e:
-        st.error(f"🚨 Supabase 연결 오류: {e}")
-        return None
-
-supabase = get_supabase_client()
-
+supabase = db.init_supabase()
 
 # ==========================================
-# [2] 인증 상태 체크
+# [2] 인증 상태 체크 (URL 릴레이 로직 포함)
 # ==========================================
 def check_auth_status():
     if not supabase: return
@@ -131,7 +40,7 @@ def check_auth_status():
         if session and session.user:
             st.session_state.is_logged_in = True
             st.session_state.user_info = session.user
-            # 로그인 성공 후 URL 청소 (old_id 등 제거)
+            # 로그인 성공 후 URL 꼬리표 청소
             if "code" in st.query_params or "old_id" in st.query_params:
                 st.query_params.clear()
             return 
@@ -157,16 +66,10 @@ def check_auth_status():
             st.rerun()
             
         except Exception as e:
-            error_str = str(e)
-            if "challenge" in error_str.lower() and "verifier" in error_str.lower():
-                st.error("⚠️ 보안 토큰 만료. (새로고침 후 다시 시도해주세요)")
-            else:
-                st.error(f"🔴 인증 오류: {error_str}")
-            # 실패 시에도 URL 파라미터 초기화
+            st.error(f"🔴 인증 오류: {e}")
             st.query_params.clear()
 
 check_auth_status()
-
 
 # ==========================================
 # [3] 로그인 UI 함수 (사이드바용)
@@ -190,29 +93,11 @@ def render_login_ui():
                 st.rerun()
 
 # ==========================================
-# [유지보수] 오래된 토큰 파일 청소 (24시간 경과 시 삭제)
-# ==========================================
-def cleanup_old_tokens():
-    try:
-        # 현재 시간
-        now = time.time()
-        # 24시간 = 86400초 (원하는 시간으로 조절 가능)
-        retention_period = 86400 
-        
-        # 현재 폴더에서 'auth_token_'으로 시작하고 '.json'으로 끝나는 파일 찾기
-        for file_path in Path(".").glob("auth_token_*.json"):
-            # 파일의 수정 시간 확인
-            if now - file_path.stat().st_mtime > retention_period:
-                file_path.unlink() # 파일 삭제
-    except Exception as e:
-        print(f"청소 중 오류: {e}")
-
-# ==========================================
 # [4] 메인 애플리케이션
 # ==========================================
 def main():
-    # [추가됨] 앱 시작 시 청소기 가동! 🧹
-    cleanup_old_tokens()
+    # [청소기 가동] 앱 시작 시 24시간 지난 토큰 삭제
+    db.cleanup_old_tokens()
 
     MAINTENANCE_MODE = False
     
@@ -242,7 +127,7 @@ def main():
     if is_admin: st.title("💰 배당팽이 대시보드 (관리자 모드)")
     else: st.title("💰 배당팽이 월배당 계산기")
 
-    # [수정] 로그인 했을 때만 환영 메시지 표시
+    # [로그인 상태바]
     if st.session_state.get("is_logged_in", False):
         user = st.session_state.user_info
         nickname = user.email.split("@")[0] if user.email else "User"
@@ -382,7 +267,7 @@ def main():
                 st.altair_chart(chart_compare, use_container_width=True)
 
                 # =========================================================
-                # [저장 로직] (URL 릴레이 방식 적용)
+                # [저장 로직] (URL 릴레이 방식)
                 # =========================================================
                 st.write("") 
                 with st.container(border=True):
@@ -393,11 +278,9 @@ def main():
                              st.info("🔄 로그인 확인 중입니다... 잠시만 기다려주세요.")
                         else:
                             st.info("🔒 로그인이 필요합니다.")
-                            
-                            # [UX] 4050 타겟 맞춤형 안내
                             st.caption("✅ **카카오 로그인을 추천합니다!** (네이버/카카오 앱에서도 바로 됩니다)")
                             
-                            # [핵심] 현재 내 ID를 챙깁니다.
+                            # 현재 세션 ID 가져오기 (old_id 전달용)
                             try:
                                 ctx = get_script_run_ctx()
                                 current_session_id = ctx.session_id
@@ -409,7 +292,6 @@ def main():
                                 res_kakao = supabase.auth.sign_in_with_oauth({
                                     "provider": "kakao",
                                     "options": {
-                                        # [중요] 돌아올 때 내 원래 ID(old_id)를 달고 오라고 시킵니다.
                                         "redirect_to": f"https://dividend-pange.streamlit.app?old_id={current_session_id}",
                                         "skip_browser_redirect": True
                                     }
@@ -439,7 +321,6 @@ def main():
                                     res = supabase.auth.sign_in_with_oauth({
                                         "provider": "google",
                                         "options": {
-                                            # [중요] 구글도 마찬가지로 old_id를 달고 오게 합니다.
                                             "redirect_to": f"https://dividend-pange.streamlit.app?old_id={current_session_id}",
                                             "queryParams": {"access_type": "offline", "prompt": "consent"},
                                             "skip_browser_redirect": False
@@ -664,13 +545,6 @@ def main():
                         item_count = int(monthly_pocket // selected_item['price'])
 
                         st.markdown(f"""<div style="background-color: #e7f3ff; border: 1.5px solid #d0e8ff; border-radius: 16px; padding: 25px; text-align: center; box-shadow: 0 4px 10px rgba(0,104,201,0.05);"><p style="color: #666; font-size: 0.95em; margin: 0 0 8px 0;">{years_sim}년 뒤 모이는 돈 (세후)</p><h2 style="color: #0068c9; font-size: 2.2em; margin: 0; font-weight: 800; line-height: 1.2;">약 {real_money/10000:,.0f}만원{inflation_msg_money}</h2><p style="color: #777; font-size: 0.9em; margin: 8px 0 0 0;">(투자원금 {final_principal/10000:,.0f}만원 / {tax_msg})</p><div style="height: 1px; background-color: #d0e8ff; margin: 25px auto; width: 85%;"></div><p style="color: #0068c9; font-weight: bold; font-size: 1.1em; margin: 0 0 12px 0;">📅 월 예상 배당금: {monthly_pocket/10000:,.1f}만원 {inflation_msg_monthly}</p><div style="background-color: rgba(255,255,255,0.5); padding: 15px; border-radius: 12px; display: inline-block; min-width: 80%;"><p style="color: #333; font-size: 1.1em; margin: 0; line-height: 1.6;">매달 <b>{selected_item['emoji']} {selected_item['name']} {item_count:,}{selected_item['unit']}</b><br>마음껏 즐기기 가능! 😋</p></div></div>""", unsafe_allow_html=True)
-                        
-                        annual_div_income = monthly_div_final * 12
-                        if annual_div_income > 20000000: st.warning(f"🚨 **주의:** {years_sim}년 뒤 연간 배당금이 2,000만원을 초과하여 금융소득종합과세 대상이 될 수 있습니다.")
-                        st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**
-1. 본 결과는 주가·환율 변동과 수수료 등을 제외하고, 현재 배당률로만 계산한 결과입니다.
-2. ISA 계좌의 비과세 한도 및 세율은 세법 개정에 따라 달라질 수 있습니다.
-3. 과거의 데이터를 기반으로 한 단순 시뮬레이션이며, 실제 투자 수익을 보장하지 않습니다.""")
 
     elif menu == "📃 전체 종목 리스트":
         st.info("💡 **이동 안내:** '코드' 클릭 시 블로그 분석글로, '🔗정보' 클릭 시 네이버/야후 금융 정보로 이동합니다. (**⭐ 표시는 상장 1년 미만 종목입니다.**)")
