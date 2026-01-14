@@ -145,16 +145,28 @@ def calculate_google_calendar_url(ticker_name, pay_date_str):
 
         if target_date is None: return None
 
-        # --- D-2 및 캘린더 생성 (기존 동일) ---
-        safe_buy_date = target_date - datetime.timedelta(days=2)
+    # ▼▼▼ [여기서부터 덮어쓰기 시작] ▼▼▼
+        
+        # 2. D-3 (3일 전) 안전 매수일 계산 (수정됨: days=2 -> days=3)
+        safe_buy_date = target_date - datetime.timedelta(days=3)
+        
+        # 주말 보정 (토/일이면 금요일로)
         while safe_buy_date.weekday() >= 5:
             safe_buy_date -= datetime.timedelta(days=1)
 
         start_str = safe_buy_date.strftime("%Y%m%d")
         end_str = (safe_buy_date + datetime.timedelta(days=1)).strftime("%Y%m%d")
         
-        title = quote(f"[{ticker_name}] 매수 마감 (D-2)")
-        details = quote(f"배당 기준일: {target_date}\n안전 매수 추천일: {safe_buy_date}\n(주말/공휴일 고려됨)")
+        # 3. 문구 수정 (매수 마감 -> 매수 준비 / 경고 문구 추가)
+        title = quote(f"💰 [{ticker_name}] 매수 준비 (D-3)")
+        
+        details = quote(
+            f"배당 기준일(예상): {target_date}\n"
+            f"✅ 안전 매수 추천일: {safe_buy_date} (오늘)\n\n"
+            f"⚠️ 주의: 본 일정은 과거 데이터 기반의 추정일입니다.\n"
+            f"실제 배당락일은 운용사 사정이나 휴장에 따라 변동될 수 있으니, "
+            f"매수 전 반드시 증권사 앱에서 확정 일자를 재확인해주세요!"
+        )
         
         google_url = (
             f"https://www.google.com/calendar/render?action=TEMPLATE"
@@ -163,6 +175,7 @@ def calculate_google_calendar_url(ticker_name, pay_date_str):
             f"&details={details}"
         )
         return google_url
+        # ▲▲▲ [여기까지 덮어쓰기 끝] ▲▲▲
 
     except Exception as e:
         print(f"Calendar Error: {e}") 
@@ -315,39 +328,44 @@ def generate_portfolio_ics(selected_stocks_data):
                 clean_str = clean_str.split("(")[0].replace(".", "-")
                 target_date = datetime.datetime.strptime(clean_str, "%Y-%m-%d").date()
              except: pass
-             
-        # 날짜가 유효하면 D-2 계산
+             # ▼▼▼ [여기서부터 덮어쓰기 시작] ▼▼▼
+        # 날짜가 유효하면 D-3 계산 (수정됨)
         if target_date:
-            # 과거면 내년/다음달 처리 (간소화)
+            # 과거면 내년/다음달 처리 (간소화 로직)
             if target_date < today:
-                 # 단순하게 다음달 같은 날짜로 가정 (정밀 계산은 생략)
                  if today.month == 12:
                      target_date = datetime.date(today.year + 1, 1, target_date.day)
                  else:
                      try:
                         target_date = datetime.date(today.year, today.month + 1, target_date.day)
                      except:
-                        target_date = datetime.date(today.year, today.month + 1, 28) # 말일 예외처리
+                        target_date = datetime.date(today.year, today.month + 1, 28)
 
-            safe_buy_date = target_date - datetime.timedelta(days=2)
+            # D-3 계산 (days=3)
+            safe_buy_date = target_date - datetime.timedelta(days=3)
             while safe_buy_date.weekday() >= 5:
                 safe_buy_date -= datetime.timedelta(days=1)
             
-            # 3. 일정 포맷(ICS) 만들기
+            # ICS 포맷 생성
             dt_start = safe_buy_date.strftime("%Y%m%d")
-            dt_end = (safe_buy_date + datetime.timedelta(days=1)).strftime("%Y%m%d") # 하루 뒤
+            dt_end = (safe_buy_date + datetime.timedelta(days=1)).strftime("%Y%m%d")
             
             event = [
                 "BEGIN:VEVENT",
                 f"DTSTART;VALUE=DATE:{dt_start}",
                 f"DTEND;VALUE=DATE:{dt_end}",
-                f"SUMMARY:💰 [{name}] 매수 마감 (D-2)",
-                f"DESCRIPTION:배당 기준일: {target_date}\\n안전하게 오늘까지 매수하세요!",
+                f"SUMMARY:💰 [{name}] 매수 준비 (D-3)",  # 제목 변경됨
+                f"DESCRIPTION:배당 기준일(예상): {target_date}\\n"  # 내용 변경됨
+                  f"✅ 안전하게 오늘 매수하세요! (D-3일전)\\n\\n"
+                  f"⚠️ 필독: 본 알림은 과거 기록 기반의 추정일입니다.\\n"
+                  f"실제 지급일은 운용사 사정에 따라 변동될 수 있으니, "
+                  f"매수 전 반드시 증권사/공시를 통해 확정 일자를 확인하시기 바랍니다.",
                 "STATUS:CONFIRMED",
                 "sequence:0",
                 "END:VEVENT"
             ]
             cal_content.extend(event)
+        # ▲▲▲ [여기까지 덮어쓰기 끝] ▲▲▲
 
     cal_content.append("END:VCALENDAR")
     return "\n".join(cal_content)
