@@ -5,7 +5,7 @@ import hashlib
 import time
 import random
 from streamlit.runtime.scriptrunner import get_script_run_ctx
-# [추가] 날짜 계산 및 URL 처리 라이브러리
+# [필수] 날짜 및 URL 라이브러리
 from datetime import datetime, timedelta
 import urllib.parse
 
@@ -32,7 +32,7 @@ for key in ["is_logged_in", "user_info", "code_processed"]:
 supabase = db.init_supabase()
 
 # ==========================================
-# [2] 인증 상태 체크 (URL 릴레이 로직 포함)
+# [2] 인증 상태 체크 (자동 복구 로직 포함)
 # ==========================================
 def check_auth_status():
     if not supabase: return
@@ -68,7 +68,7 @@ def check_auth_status():
             st.rerun()
             
         except Exception as e:
-            # [오류 자동 복구] non-empty 에러 시 리셋
+            # 오류 자동 복구 (verifier 오류 시 리셋)
             err_msg = str(e).lower()
             if "verifier" in err_msg or "non-empty" in err_msg:
                 st.warning("🔄 보안 토큰 갱신 중... 잠시만 기다려주세요.")
@@ -103,13 +103,15 @@ def render_login_ui():
                 st.rerun()
 
 # ==========================================
-# [추가] 캘린더 기능 함수들
+# [캘린더 기능] 안전 매수일 계산 함수
 # ==========================================
 def calculate_safe_buy_date(ex_date_str):
     """배당락일 기준 D-2 안전 매수일 계산 (주말 회피)"""
     try:
-        if not ex_date_str or ex_date_str == '-': return None, None
-        clean_str = ex_date_str.replace(".", "").replace("-", "").strip()
+        # 데이터가 없거나 '-'인 경우 처리
+        if not ex_date_str or str(ex_date_str) == '-': return None, None
+        
+        clean_str = str(ex_date_str).replace(".", "").replace("-", "").strip()
         ex_date = datetime.strptime(clean_str, "%Y%m%d")
         
         # D-2 설정
@@ -126,17 +128,21 @@ def calculate_safe_buy_date(ex_date_str):
 def make_google_calendar_link(stock_name, date_str):
     """구글 캘린더 링크 생성"""
     try:
-        safe_date_code, safe_date_view = calculate_safe_buy_date(date_str)
+        # [중요] 문자열 강제 변환 (에러 방지)
+        s_name = str(stock_name)
+        d_str = str(date_str)
+
+        safe_date_code, safe_date_view = calculate_safe_buy_date(d_str)
         if not safe_date_code: return None
 
-        title = urllib.parse.quote(f"💰 {stock_name} 매수 추천일 (D-2)")
+        title = urllib.parse.quote(f"💰 {s_name} 매수 추천일 (D-2)")
+        
         desc_text = (
-            f"[{stock_name} 배당 알림]\n\n"
-            f"📅 데이터상 배당락일: {date_str}\n"
+            f"[{s_name} 배당 알림]\n\n"
+            f"📅 데이터상 배당락일: {d_str}\n"
             f"✅ 안전 매수 추천일: {safe_date_view} (오늘)\n\n"
             f"⚠️ 주의: 위 날짜는 주말을 제외하고 계산된 날짜입니다.\n"
-            f"혹시 '평일 공휴일(현충일, 크리스마스 등)'이 끼어 있다면,\n"
-            f"그보다 하루 더 빨리 매수하셔야 안전합니다!"
+            f"혹시 '평일 공휴일'이 끼어 있다면 하루 더 빨리 매수하세요!"
         )
         details = urllib.parse.quote(desc_text)
         dates = f"{safe_date_code}/{safe_date_code}"
@@ -292,21 +298,24 @@ def main():
                         st.caption(f"💰 투자금: **{amt/10000:,.0f}만원**")
                     
                         # =================================================
-                        # [추가] 📅 캘린더 알림 버튼 (안전 날짜 + 로그인 분기)
+                        # [캘린더 버튼] (안전 장치 추가됨)
                         # =================================================
                         stock_match = df[df['pure_name'] == stock]
                         if not stock_match.empty:
                             s_row = stock_match.iloc[0]
                             ex_date = s_row.get('배당락일', '-')
                             
-                            if ex_date and ex_date != '-':
+                            if ex_date and str(ex_date) != '-':
                                 _, safe_view = calculate_safe_buy_date(ex_date)
                                 btn_label = f"📅 {safe_view} 매수 마감" if safe_view else "📅 알림 등록"
 
                                 if st.session_state.get("is_logged_in", False):
                                     cal_link = make_google_calendar_link(stock, ex_date)
+                                    # 링크가 있으면 버튼 표시, 없으면 에러 표시 (이제 안 사라짐!)
                                     if cal_link:
                                         st.link_button(btn_label, cal_link, use_container_width=True)
+                                    else:
+                                        st.caption("🚫 링크 생성 불가")
                                 else:
                                     if st.button(btn_label, key=f"btn_cal_{i}", use_container_width=True):
                                         st.toast("🔒 로그인 후 캘린더에 '매수 마감일'을 등록할 수 있습니다!", icon="🔒")
@@ -614,9 +623,7 @@ def main():
                             inflation_msg_money = f"<br><span style='font-size:0.6em; color:#ff6b6b;'>(현재가치: 약 {pv_money/10000:,.0f}만원)</span>"
                             inflation_msg_monthly = f"<span style='font-size:0.7em; color:#ff6b6b;'>(현재가치: {pv_monthly/10000:,.1f}만원)</span>"
 
-                        # ========================================================
                         # [랜덤 인카운터] 현실적인 체감을 위한 비유 아이템 목록
-                        # ========================================================
                         analogy_items = [
                             {"name": "스타벅스", "unit": "잔", "price": 4500, "emoji": "☕"},
                             {"name": "뜨끈한 국밥", "unit": "그릇", "price": 10000, "emoji": "🍲"},
@@ -633,7 +640,7 @@ def main():
                         if not affordable_items:
                             selected_item = analogy_items[0]
                             item_count = 0
-                            msg_count = f"{monthly_pocket / selected_item['price']:.1f}" # 예: 0.5잔
+                            msg_count = f"{monthly_pocket / selected_item['price']:.1f}"
                         else:
                             selected_item = random.choice(affordable_items)
                             item_count = int(monthly_pocket // selected_item['price'])
