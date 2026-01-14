@@ -277,7 +277,7 @@ def main():
                                 # [▼▼▼ 여기를 이렇게 바꿔보세요! ▼▼▼]
                                 # 링크가 안 생겼을 때, 도대체 데이터가 뭐라고 들어왔는지 화면에 뿌리기
                                 raw_date = s_row.get('배당락일')
-                                st.error(f"디버깅: 들어온 값=[{raw_date}] / 타입=[{type(raw_date)}]")
+                               
                                 st.caption("📅 날짜 미정")
 
                     if not stock_match.empty:
