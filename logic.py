@@ -8,6 +8,7 @@ import datetime  # <--- 추가
 import calendar  # <--- 추가
 from urllib.parse import quote # <--- 추가
 import re
+import requests
 # --- [1] 시세 조회 및 유틸 함수 ---
 def _fetch_price_raw(broker, code, category):
     try:
@@ -369,3 +370,86 @@ def generate_portfolio_ics(selected_stocks_data):
 
     cal_content.append("END:VCALENDAR")
     return "\n".join(cal_content)
+
+# =========================================================
+# [관리자용] 배당금 자동 추적기 (하이브리드 엔진)
+# =========================================================
+def fetch_dividend_yield_hybrid(code, category):
+    """
+    국내 -> 네이버 금융 크롤링
+    해외 -> 야후 파이낸스 API
+    리턴값: (연배당률(%), "데이터 출처")
+    """
+    code = str(code).strip()
+    
+    # -----------------------------------------------
+    # Case 1: 🇰🇷 국내 주식 (네이버 금융)
+    # -----------------------------------------------
+    if category == '국내':
+        try:
+            url = f"https://finance.naver.com/item/main.naver?code={code}"
+            # 판다스로 HTML 내의 표(Table)를 전부 긁어옴
+            dfs = pd.read_html(url, encoding='euc-kr')
+            
+            # 네이버 금융 페이지 구조상 '배당수익률'은 보통 4번째 쯤 표에 있음
+            # 혹은 표 전체를 뒤져서 '배당수익률' 글자를 찾음
+            found_yield = None
+            
+            for df in dfs:
+                # 데이터프레임을 문자열로 변환해서 탐색
+                if '배당수익률' in df.to_string():
+                    # '배당수익률'이 있는 행을 찾음
+                    # 보통 구조: [시가총액, ... , 배당수익률, 1.23%]
+                    # 복잡하므로 텍스트 파싱으로 접근
+                    text_blob = df.to_string()
+                    # 정규식이나 단순 스플릿으로 값 추출 시도도 가능하지만
+                    # 판다스 테이블 구조를 이용:
+                    # (구조가 복잡해 예외처리가 필요할 수 있음)
+                    
+                    # 가장 간단한 방법: requests로 텍스트 긁어서 찾기
+                    pass 
+            
+            # [더 확실한 방법] requests + 텍스트 파싱 (표 구조 무관)
+            response = requests.get(url)
+            html_text = response.text
+            
+            # "배당수익률</em>" 뒤에 있는 숫자 찾기 (네이버 HTML 구조 기반)
+            # 예: <em id="_dvr">1.23</em>
+            if '<em id="_dvr">' in html_text:
+                part = html_text.split('<em id="_dvr">')[1]
+                yield_str = part.split('</em>')[0]
+                return float(yield_str), "✅ 네이버 금융"
+                
+            return 0.0, "⚠️ 네이버 파싱 실패"
+            
+        except Exception as e:
+            return 0.0, f"❌ 에러: {str(e)}"
+
+    # -----------------------------------------------
+    # Case 2: 🇺🇸 해외 주식 (야후 파이낸스)
+    # -----------------------------------------------
+    else:
+        try:
+            stock = yf.Ticker(code)
+            # 1. info에서 배당률 가져오기 (가장 빠름)
+            dy = stock.info.get('dividendYield')
+            
+            if dy:
+                return round(dy * 100, 2), "✅ 야후 (Info)"
+            
+            # 2. info에 없으면 과거 배당금 합산 (Rolling)
+            divs = stock.dividends
+            if not divs.empty:
+                one_year_ago = pd.Timestamp.now() - pd.Timedelta(days=365)
+                recent_total = divs[divs.index >= one_year_ago].sum()
+                
+                # 현재가 조회
+                price = stock.fast_info.get('last_price')
+                if price and price > 0:
+                    yield_cal = (recent_total / price) * 100
+                    return round(yield_cal, 2), "✅ 야후 (Rolling)"
+            
+            return 0.0, "⚠️ 데이터 없음"
+            
+        except Exception as e:
+            return 0.0, f"❌ 에러: {str(e)}"
