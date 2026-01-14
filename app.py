@@ -251,8 +251,13 @@ def main():
                         if y_val < 2.0:
                             skipped_count += 1
                             continue
-                            
+
+                        # ▼ 이 한 줄을 추가해야 '연배당률' 열에 데이터가 기록됩니다.
+                        df_temp.at[i, '연배당률'] = round(y_val, 2) 
+                        
                         updated_count += 1
+                            
+                        
                         
                     status_text.text("완료!")
                     st.success(f"✅ {updated_count}개 업데이트 대기 / 🛡️ {skipped_count}개 보호됨")
