@@ -209,19 +209,33 @@ def load_and_process_data(df_raw, is_admin=False):
             price = get_safe_price(broker, code, category)
             if not price: return idx, None
 
-            # [핵심 수정] 신규 상장주면 알아서 1년치로 환산해주는 로직
-            raw_div = float(row.get('연배당금', 0))
-            months = int(row.get('신규상장개월수', 0))
-            
-            # months가 0보다 크면(신규면) "지금까지 받은 돈 / 개월수 * 12" 로 연환산
-            if months > 0:
-                annual_div = (raw_div / months) * 12
-                display_name = f"{name} ⭐" # 별표 표시
-            else:
-                annual_div = raw_div
-                display_name = name
+            # -------------------------------------------------------
+            # [업그레이드] 스마트 배당률 결정 로직 (API 시세 연동 유지)
+            # -------------------------------------------------------
+            try:
+                months = int(row.get('신규상장개월수', 0))
+            except:
+                months = 0
 
-            yield_val = (annual_div / price) * 100
+            # 1. 1년 미만 신규 종목 (⭐ 별표 표시 및 실시간 현재가 기반 계산)
+            if 0 < months < 12:
+                raw_div = float(row.get('연배당금', 0))
+                # 지금까지 받은 돈을 1년치로 환산 (API 현재가 price 활용)
+                annual_div_calc = (raw_div / months) * 12
+                yield_val = (annual_div_calc / price) * 100
+                display_name = f"{name} ⭐"
+                
+            # 2. 일반 종목: CSV에 '연배당률' 기록이 있으면 그것을 최우선 사용 (422% 오류 방어)
+            elif '연배당률' in row and pd.notnull(row['연배당률']) and str(row['연배당률']).strip() != "":
+                yield_val = float(row['연배당률'])
+                display_name = name
+            
+            # 3. 그 외: 기존 방식대로 '연배당금' 기반 실시간 계산 (API 현재가 price 활용)
+            else:
+                raw_div = float(row.get('연배당금', 0))
+                yield_val = (raw_div / price) * 100
+                display_name = name
+            # -------------------------------------------------------
             
             # 필터링
             if not is_admin and (yield_val < 2.0 or yield_val > 25.0): return idx, None
@@ -372,11 +386,6 @@ def generate_portfolio_ics(selected_stocks_data):
     cal_content.append("END:VCALENDAR")
     return "\n".join(cal_content)
 
-# [logic.py]
-
-# [logic.py]
-
-# [logic.py]
 
 # [logic.py]
 
