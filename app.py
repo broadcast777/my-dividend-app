@@ -5,6 +5,9 @@ import hashlib
 import time
 import random
 from streamlit.runtime.scriptrunner import get_script_run_ctx
+# [추가] 날짜 계산 라이브러리
+from datetime import datetime, timedelta
+import urllib.parse
 
 # [모듈화] 분리한 파일들을 불러옵니다
 import logic 
@@ -90,6 +93,64 @@ def render_login_ui():
                 st.session_state.user_info = None
                 st.session_state.code_processed = False
                 st.rerun()
+
+# ==========================================
+# [캘린더 기능] 안전 매수일 계산 함수
+# ==========================================
+def calculate_safe_buy_date(ex_date_str):
+    """
+    배당락일(Ex-Date) 기준 'D-2 영업일'을 계산합니다.
+    (주말/공휴일 변수를 고려하여 2일 정도 미리 알림을 주는 것이 안전함)
+    """
+    try:
+        if not ex_date_str or ex_date_str == '-': return None, None
+        
+        # 1. 문자열 정리 및 날짜 객체 변환
+        clean_str = ex_date_str.replace(".", "").replace("-", "").strip()
+        ex_date = datetime.strptime(clean_str, "%Y%m%d")
+        
+        # 2. 여유 있게 '2일 전'으로 설정 (D-2)
+        buy_date = ex_date - timedelta(days=2)
+        
+        # 3. 그 날이 주말(토=5, 일=6)이면 평일(금요일)이 나올 때까지 계속 뒤로 뺌
+        while buy_date.weekday() >= 5:
+            buy_date -= timedelta(days=1)
+            
+        # 4. 결과 반환 (구글용 코드, 화면용 텍스트)
+        return buy_date.strftime("%Y%m%d"), buy_date.strftime("%Y.%m.%d")
+    except:
+        return None, None
+
+def make_google_calendar_link(stock_name, date_str):
+    """
+    구글 캘린더 링크 생성 (D-2 안전일 기준)
+    """
+    try:
+        # 안전 날짜 계산
+        safe_date_code, safe_date_view = calculate_safe_buy_date(date_str)
+        
+        if not safe_date_code: return None
+
+        # 제목 설정
+        title = urllib.parse.quote(f"💰 {stock_name} 매수 추천일 (D-2)")
+        
+        # 내용 설정 (주의 문구 포함)
+        desc_text = (
+            f"[{stock_name} 배당 알림]\n\n"
+            f"📅 데이터상 배당락일: {date_str}\n"
+            f"✅ 안전 매수 추천일: {safe_date_view} (오늘)\n\n"
+            f"⚠️ 주의: 위 날짜는 주말을 제외하고 계산된 날짜입니다.\n"
+            f"혹시 '평일 공휴일(현충일, 크리스마스 등)'이 끼어 있다면,\n"
+            f"그보다 하루 더 빨리 매수하셔야 안전합니다!"
+        )
+        details = urllib.parse.quote(desc_text)
+        
+        # 날짜 설정 (하루 종일)
+        dates = f"{safe_date_code}/{safe_date_code}"
+        
+        return f"https://www.google.com/calendar/render?action=TEMPLATE&text={title}&dates={dates}&details={details}"
+    except:
+        return None
 
 # ==========================================
 # [4] 메인 애플리케이션
@@ -236,8 +297,33 @@ def main():
                             weights[stock] = safe_rem
                             amt = total_invest * (safe_rem / 100)
                         st.caption(f"💰 투자금: **{amt/10000:,.0f}만원**")
+
+                        # =================================================
+                        # [캘린더 버튼] 배당락일 알림 버튼 (로그인 분기 처리)
+                        # =================================================
+                        stock_match = df[df['pure_name'] == stock]
+                        if not stock_match.empty:
+                            s_row = stock_match.iloc[0]
+                            ex_date = s_row.get('배당락일', '-')
+                            
+                            # 배당락일 정보가 있을 때만 버튼 표시
+                            if ex_date and ex_date != '-':
+                                # 안전 날짜 미리 계산해서 버튼 이름에 박아주기
+                                _, safe_view = calculate_safe_buy_date(ex_date)
+                                btn_label = f"📅 {safe_view} 매수 마감" if safe_view else "📅 알림 등록"
+
+                                # 1. 로그인 상태 -> 진짜 링크 버튼
+                                if st.session_state.get("is_logged_in", False):
+                                    cal_link = make_google_calendar_link(stock, ex_date)
+                                    if cal_link:
+                                        st.link_button(btn_label, cal_link, use_container_width=True)
+                                # 2. 비로그인 상태 -> 가짜 버튼 (토스트 메시지)
+                                else:
+                                    if st.button(btn_label, key=f"btn_cal_{i}", use_container_width=True):
+                                        st.toast("🔒 로그인 후 캘린더에 '매수 마감일'을 등록할 수 있습니다!", icon="🔒")
+                            else:
+                                st.caption("📅 날짜 미정")
                     
-                    stock_match = df[df['pure_name'] == stock]
                     if not stock_match.empty:
                         s_row = stock_match.iloc[0]
                         all_data.append({
