@@ -21,31 +21,37 @@ import ui
 st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
 
 # ==========================================
-# [수정 1] 파일 직통 저장소 (URL 릴레이 방식 적용)
+# [수정 2] 파일 직통 저장소 (자동 이름표 교체 기능 추가)
 # ==========================================
 class StreamlitFileStorageFixed:
     """
-    사용자별로 격리된 파일에 토큰을 저장합니다.
-    URL 파라미터(old_id)를 통해 리다이렉트 후에도 원래 파일을 찾아냅니다.
+    사용자별 토큰 저장소입니다.
+    URL에 'old_id'가 있다면, 옛날 파일의 이름을 현재 ID로 바꿔서
+    로그인이 끊기지 않게 연결해주는(Migration) 똑똑한 기능이 추가되었습니다.
     """
     def __init__(self):
-        # 1. 현재 접속한 세션 ID 가져오기
+        # 1. 현재 내 번호표(Session ID) 확인
         try:
             ctx = get_script_run_ctx()
-            self.current_id = ctx.session_id
+            self.session_id = ctx.session_id
         except:
-            self.current_id = "unknown"
+            self.session_id = "unknown"
 
-        # 2. 돌아온 유저인지 확인 (URL에 'old_id' 쪽지가 있는지 체크)
-        # 쪽지가 있으면 그 ID(과거의 나)를 쓰고, 없으면 지금 ID를 씁니다.
+        self.storage_file = Path(f"auth_token_{self.session_id}.json")
+
+        # 2. [핵심] 꼬리표(old_id)가 있다면? -> 파일 주인을 '현재 내 번호'로 바꿈
         query_params = st.query_params
         if "old_id" in query_params:
-            self.target_id = query_params["old_id"]
-        else:
-            self.target_id = self.current_id
+            old_id = query_params["old_id"]
+            old_file = Path(f"auth_token_{old_id}.json")
             
-        # 3. 파일명 결정
-        self.storage_file = Path(f"auth_token_{self.target_id}.json")
+            # 옛날 파일이 있고, 내 지금 파일이 없으면 -> 이름표 바꿔달기 (Rename)
+            if old_file.exists() and not self.storage_file.exists():
+                try:
+                    old_file.rename(self.storage_file)
+                    # print(f"🔄 세션 연결 성공: {old_id} -> {self.session_id}")
+                except Exception as e:
+                    print(f"세션 연결 실패: {e}")
 
     def set_item(self, key: str, value: str) -> None:
         try:
