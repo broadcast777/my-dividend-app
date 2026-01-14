@@ -316,9 +316,152 @@ def render_calculator_page(df, is_authenticated):
 3. 실제 배당금 지급일과 금액은 운용사의 사정에 따라 변경될 수 있습니다.""")
 
                 with tab_simulation:
-                    # 나머지 시뮬레이션 코드는 매우 길어서 간략화
-                    # 당신의 코드를 그대로 여기 붙여넣으면 됨
-                    # (들여쓰기 4칸 유지)
+                        start_money = total_invest
+                        is_over_100m = start_money > 100000000
+                        st.info(f"📊 상단에서 설정한 **초기 자산 {start_money/10000:,.0f}만원**으로 시뮬레이션을 시작합니다.")
+                        c1, c2 = st.columns([1.5, 1])
+                        with c1:
+                            if is_over_100m:
+                                is_isa_mode = st.toggle("🛡️ ISA 계좌 불가 (한도 1억 초과)", value=False, disabled=True)
+                                st.caption("🚫 초기 투자금이 1억원을 초과하여 일반 계좌로만 진행됩니다.")
+                            else:
+                                is_isa_mode = st.toggle("🛡️ ISA (절세) 계좌로 모으기", value=True)
+                                if is_isa_mode: st.caption("💡 **ISA 모드:** 비과세 + 과세이연 효과")
+                                else: st.caption("💡 **일반 모드:** 배당소득세(15.4%) 납부 후 재투자")
+                        with c2:
+                            years_sim = st.select_slider("⏳ 투자 기간", options=[3, 5, 10, 15, 20, 30], value=5, format_func=lambda x: f"{x}년")
+                            apply_inflation = st.toggle("📉 물가상승률(2.5%) 반영", value=False)
+                        
+                        reinvest_ratio = 100
+                        isa_exempt = 0
+                        if is_isa_mode:
+                            isa_type = st.radio("ISA 유형", ["일반형 (비과세 200만)", "서민형 (비과세 400만)"], horizontal=True, label_visibility="collapsed")
+                            isa_exempt = 400 if "서민형" in isa_type else 200
+                            if start_money > 20000000: st.warning(f"⚠️ 기존에 선택한 {start_money/10000:,.0f}만원은 ISA 총 한도(1억)에서 차감됩니다.")
+                        else:
+                            if not is_over_100m:
+                                st.caption("설정한 비율만큼만 재투자하고 나머지는 생활비로 씁니다.")
+                                reinvest_ratio = st.slider("💰 재투자 비율 (%)", 0, 100, 100, step=10)
+                        
+                        st.markdown("---")
+                        monthly_input = st.number_input("➕ 매월 추가 적립 (만원)", min_value=0, max_value=3000, value=150, step=10) * 10000
+                        monthly_add = monthly_input
+                        if is_isa_mode and monthly_add > 1666666:
+                            st.warning("⚠️ **ISA 연간 한도 제한:** 월 납입금이 **약 166만원(연 2,000만원)**으로 자동 조정되어 계산됩니다.")
+                            monthly_add = 1666666 
+                        
+                        months_sim = years_sim * 12
+                        monthly_yld = avg_y / 100 / 12
+                        current_bal = start_money
+                        total_principal = start_money
+                        ISA_YEARLY_CAP = 20000000
+                        ISA_TOTAL_CAP = 100000000
+                        sim_data = [{"년차": 0, "자산총액": current_bal/10000, "총원금": total_principal/10000, "실제월배당": 0}]
+                        yearly_contribution = 0
+                        year_tracker = 0
+                        total_tax_paid_general = 0
+
+                        for m in range(1, months_sim + 1):
+                            if m // 12 > year_tracker:
+                                yearly_contribution = 0
+                                year_tracker = m // 12
+                            actual_add = monthly_add
+                            if is_isa_mode:
+                                remaining_yearly = max(0, ISA_YEARLY_CAP - yearly_contribution)
+                                remaining_total = max(0, ISA_TOTAL_CAP - total_principal)
+                                actual_add = min(monthly_add, remaining_yearly, remaining_total)
+                            current_bal += actual_add
+                            total_principal += actual_add
+                            yearly_contribution += actual_add
+                            div_earned = current_bal * monthly_yld
+                            if is_isa_mode: reinvest = div_earned
+                            else:
+                                this_tax = div_earned * 0.154
+                                total_tax_paid_general += this_tax
+                                after_tax = div_earned - this_tax
+                                reinvest = after_tax * (reinvest_ratio / 100)
+                            current_bal += reinvest
+                            sim_data.append({"년차": m / 12, "자산총액": current_bal / 10000, "총원금": total_principal / 10000, "실제월배당": div_earned})
+                        
+                        df_sim_chart = pd.DataFrame(sim_data)
+                        base = alt.Chart(df_sim_chart).encode(x=alt.X('년차:Q', title='경과 기간 (년)'))
+                        area = base.mark_area(opacity=0.3, color='#0068c9').encode(y=alt.Y('자산총액:Q', title='자산 (만원)'))
+                        line = base.mark_line(color='#ff9f43', strokeDash=[5,5]).encode(y='총원금:Q')
+                        st.altair_chart((area + line).properties(height=280), use_container_width=True)
+
+                        final_row = df_sim_chart.iloc[-1]
+                        final_asset = final_row['자산총액'] * 10000
+                        final_principal = final_row['총원금'] * 10000
+                        profit = final_asset - final_principal
+                        monthly_div_final = final_row['실제월배당']
+
+                        if is_isa_mode:
+                            taxable = max(0, profit - (isa_exempt * 10000))
+                            tax = taxable * 0.099
+                            real_money = final_asset - tax
+                            tax_msg = f"예상 세금 {tax/10000:,.0f}만원 (9.9% 분리과세)"
+                            monthly_pocket = monthly_div_final 
+                        else:
+                            real_money = final_asset
+                            tax_msg = f"기납부 세금 {total_tax_paid_general/10000:,.0f}만원 (15.4% 원천징수)"
+                            monthly_pocket = monthly_div_final * 0.846
+
+                        inflation_msg_money = ""
+                        inflation_msg_monthly = ""
+                        if apply_inflation:
+                            discount_rate = (1.025) ** years_sim 
+                            pv_money = real_money / discount_rate
+                            pv_monthly = monthly_pocket / discount_rate
+                            inflation_msg_money = f"<br><span style='font-size:0.6em; color:#ff6b6b;'>(현재가치: 약 {pv_money/10000:,.0f}만원)</span>"
+                            inflation_msg_monthly = f"<span style='font-size:0.7em; color:#ff6b6b;'>(현재가치: {pv_monthly/10000:,.1f}만원)</span>"
+
+                        # ========================================================
+                        # [랜덤 인카운터] 현실적인 체감을 위한 비유 아이템 목록
+                        # ========================================================
+                        analogy_items = [
+                            {"name": "스타벅스", "unit": "잔", "price": 4500, "emoji": "☕"},
+                            {"name": "뜨끈한 국밥", "unit": "그릇", "price": 10000, "emoji": "🍲"},
+                            {"name": "넷플릭스 구독", "unit": "개월", "price": 17000, "emoji": "📺"},
+                            {"name": "치킨", "unit": "마리", "price": 23000, "emoji": "🍗"},
+                            {"name": "제주도 항공권", "unit": "장", "price": 60000, "emoji": "✈️"},
+                            {"name": "특급호텔 숙박", "unit": "박", "price": 200000, "emoji": "🏨"},
+                            {"name": "최신 아이폰", "unit": "대", "price": 1500000, "emoji": "📱"}
+                        ]
+
+                        # [스마트 로직] 내 돈으로 '1개 이상' 살 수 있는 것만 추려내기
+                        affordable_items = [item for item in analogy_items if monthly_pocket >= item['price']]
+
+                        if not affordable_items:
+                            selected_item = analogy_items[0]
+                            item_count = 0
+                            msg_count = f"{monthly_pocket / selected_item['price']:.1f}"
+                        else:
+                            selected_item = random.choice(affordable_items)
+                            item_count = int(monthly_pocket // selected_item['price'])
+                            msg_count = f"{item_count:,}"
+
+                        st.markdown(f"""
+                            <div style="background-color: #e7f3ff; border: 1.5px solid #d0e8ff; border-radius: 16px; padding: 25px; text-align: center; box-shadow: 0 4px 10px rgba(0,104,201,0.05);">
+                                <p style="color: #666; font-size: 0.95em; margin: 0 0 8px 0;">{years_sim}년 뒤 모이는 돈 (세후)</p>
+                                <h2 style="color: #0068c9; font-size: 2.2em; margin: 0; font-weight: 800; line-height: 1.2;">약 {real_money/10000:,.0f}만원{inflation_msg_money}</h2>
+                                <p style="color: #777; font-size: 0.9em; margin: 8px 0 0 0;">(투자원금 {final_principal/10000:,.0f}만원 / {tax_msg})</p>
+                                <div style="height: 1px; background-color: #d0e8ff; margin: 25px auto; width: 85%;"></div>
+                                <p style="color: #0068c9; font-weight: bold; font-size: 1.1em; margin: 0 0 12px 0;">📅 월 예상 배당금: {monthly_pocket/10000:,.1f}만원 {inflation_msg_monthly}</p>
+                                <div style="background-color: rgba(255,255,255,0.5); padding: 15px; border-radius: 12px; display: inline-block; min-width: 80%;">
+                                    <p style="color: #333; font-size: 1.1em; margin: 0; line-height: 1.6;">
+                                        매달 <b>{selected_item['emoji']} {selected_item['name']} {msg_count}{selected_item['unit']}</b><br>
+                                        마음껏 즐기기 가능! 😋
+                                    </p>
+                                </div>
+                            </div>
+                        """, unsafe_allow_html=True)
+                        
+                        annual_div_income = monthly_div_final * 12
+                        if annual_div_income > 20000000: st.warning(f"🚨 **주의:** {years_sim}년 뒤 연간 배당금이 2,000만원을 초과하여 금융소득종합과세 대상이 될 수 있습니다.")
+                        st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**
+1. 본 결과는 주가·환율 변동과 수수료 등을 제외하고, 현재 배당률로만 계산한 결과입니다.
+2. ISA 계좌의 비과세 한도 및 세율은 세법 개정에 따라 달라질 수 있습니다.
+3. 과거의 데이터를 기반으로 한 단순 시뮬레이션이며, 실제 투자 수익을 보장하지 않습니다.""")
                     pass
 
 
