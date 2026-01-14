@@ -154,18 +154,47 @@ def main():
         with st.sidebar:
             st.markdown("---")
             st.subheader("🛠️ 배당금 갱신 도구")
-            target_stock = st.selectbox("갱신할 종목 선택", df_raw['종목명'].unique())
             
+            # -------------------------------------------------------
+            # [수정됨] 신규 종목 식별 로직 (⭐ 라벨링)
+            # -------------------------------------------------------
+            stock_options = {}
+            
+            # 데이터프레임을 한 줄씩 읽으면서 라벨(이름표)을 만듭니다.
+            for idx, row in df_raw.iterrows():
+                name = row['종목명']
+                # '신규상장개월수' 컬럼을 안전하게 정수로 변환 (없으면 0)
+                try:
+                    months = int(row.get('신규상장개월수', 0))
+                except: 
+                    months = 0
+                
+                # 신규 상장이면 앞에 별표와 개월 수 표시
+                if months > 0:
+                    label = f"⭐ [신규 {months}개월] {name}"
+                else:
+                    label = name
+                
+                # 딕셔너리에 저장: { "보이는 이름": "진짜 종목명" }
+                stock_options[label] = name
+
+            # 선택 박스에는 '라벨(label)'을 보여줌
+            selected_label = st.selectbox("갱신할 종목 선택", list(stock_options.keys()))
+            
+            # 선택된 라벨을 통해 '진짜 종목명'을 찾아냄
+            target_stock = stock_options[selected_label]
+            # -------------------------------------------------------
+
             if target_stock:
                 row = df_raw[df_raw['종목명'] == target_stock].iloc[0]
                 cur_hist = row.get('배당기록', "")
                 
-                # [추가됨] 코드와 분류 정보 가져오기
+                # [기존 기능 유지] 코드와 분류 정보 가져오기
                 code = str(row.get('종목코드', '')).strip()
                 category = str(row.get('분류', '국내')).strip()
                 
                 # =================================================
-                # [기능 추가] 배당률 자동 조회 버튼 (네이버/야후)
+                # [기능 유지] 배당률 자동 조회 버튼 (네이버/야후)
                 # =================================================
                 st.write("") # 여백
                 col_info, col_btn = st.columns([1, 1.5])
@@ -177,7 +206,7 @@ def main():
                 with col_btn:
                     if st.button("🔍 배당률 조회", key="btn_auto_check", use_container_width=True):
                         with st.spinner("탐색 중..."):
-                            # logic.py에 새로 만든 하이브리드 함수 호출
+                            # logic.py의 하이브리드 함수 호출
                             y_val, src = logic.fetch_dividend_yield_hybrid(code, category)
                             
                             if y_val > 0:
