@@ -149,17 +149,49 @@ def main():
     df_raw = logic.load_stock_data_from_csv()
     if df_raw.empty: st.stop()
     
-    # [관리자] 갱신 도구
+# [관리자] 갱신 도구
     if is_admin:
         with st.sidebar:
             st.markdown("---")
             st.subheader("🛠️ 배당금 갱신 도구")
             target_stock = st.selectbox("갱신할 종목 선택", df_raw['종목명'].unique())
+            
             if target_stock:
                 row = df_raw[df_raw['종목명'] == target_stock].iloc[0]
                 cur_hist = row.get('배당기록', "")
+                
+                # [추가됨] 코드와 분류 정보 가져오기
+                code = str(row.get('종목코드', '')).strip()
+                category = str(row.get('분류', '국내')).strip()
+                
+                # =================================================
+                # [기능 추가] 배당률 자동 조회 버튼 (네이버/야후)
+                # =================================================
+                st.write("") # 여백
+                col_info, col_btn = st.columns([1, 1.5])
+                
+                with col_info:
+                    st.caption(f"코드: {code}")
+                    st.caption(f"분류: {category}")
+                    
+                with col_btn:
+                    if st.button("🔍 배당률 조회", key="btn_auto_check", use_container_width=True):
+                        with st.spinner("탐색 중..."):
+                            # logic.py에 새로 만든 하이브리드 함수 호출
+                            y_val, src = logic.fetch_dividend_yield_hybrid(code, category)
+                            
+                            if y_val > 0:
+                                st.success(f"📈 {y_val}%")
+                                st.caption(f"출처: {src}")
+                            else:
+                                st.error("실패")
+                                st.caption(f"원인: {src}")
+                                
+                st.divider() # 구분선
+                # =================================================
+
                 new_div = st.number_input("이번 달 확정 배당금", value=0, step=10)
-                if st.button("계산 실행"):
+                if st.button("계산 실행", use_container_width=True):
                     new_total, new_hist = logic.update_dividend_rolling(cur_hist, new_div)
                     st.success("완료!")
                     st.code(new_hist, language="text")
