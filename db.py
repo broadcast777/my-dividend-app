@@ -1,5 +1,5 @@
 # ==========================================
-# db.py : 데이터베이스 및 토큰 관리 (Read-Fallback 방식)
+# db.py : 데이터베이스 접속 및 토큰 관리 (Read-Fallback 안전 버전)
 # ==========================================
 import streamlit as st
 from supabase import create_client, ClientOptions
@@ -7,7 +7,6 @@ from pathlib import Path
 import json
 import time
 import os
-# [필수] 세션 ID 확인용
 from streamlit.runtime.scriptrunner import get_script_run_ctx
 
 # ---------------------------------------------------------
@@ -16,9 +15,9 @@ from streamlit.runtime.scriptrunner import get_script_run_ctx
 class StreamlitFileStorageFixed:
     """
     사용자별 토큰 저장소.
-    파일을 옮기거나 이름을 바꾸지 않고,
+    파일을 옮기거나 이름을 바꾸지 않고(Rename X),
     현재 파일에 데이터가 없으면 '옛날 파일(old_id)'을 읽어서 반환합니다.
-    (파일 잠금/삭제 오류 원천 차단)
+    (새로고침 시 파일 소멸 문제 해결)
     """
     def __init__(self):
         try:
@@ -37,7 +36,7 @@ class StreamlitFileStorageFixed:
             self.fallback_file = Path(f"auth_token_{old_id}.json")
 
     def _read_json(self, file_path):
-        """안전하게 파일 읽기"""
+        """안전하게 파일 읽기 헬퍼 함수"""
         if file_path and file_path.exists():
             try:
                 with open(file_path, 'r', encoding='utf-8') as f:
@@ -118,7 +117,6 @@ def cleanup_old_tokens():
         now = time.time()
         retention_period = 86400  # 24시간
         for file_path in Path(".").glob("auth_token_*.json"):
-            # 파일이 생성된 지 24시간 넘었으면 삭제
             if now - file_path.stat().st_mtime > retention_period:
                 try: file_path.unlink()
                 except: pass
