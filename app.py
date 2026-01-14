@@ -8,6 +8,8 @@ import os
 from pathlib import Path
 import random
 import time
+# [필수] 세션 ID 확인용 라이브러리
+from streamlit.runtime.scriptrunner import get_script_run_ctx
 
 # [모듈화] 분리한 파일들을 불러옵니다
 import logic 
@@ -19,16 +21,31 @@ import ui
 st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
 
 # ==========================================
-# [긴급 수정] 파일 직통 저장소 (Session ID 제거 - 원복)
+# [수정 1] 파일 직통 저장소 (URL 릴레이 방식 적용)
 # ==========================================
 class StreamlitFileStorageFixed:
     """
-    Session ID 변동 이슈로 인해 단일 파일 방식으로 원복합니다.
-    현재 단계에서는 이 방식이 가장 안정적으로 로그인이 작동합니다.
+    사용자별로 격리된 파일에 토큰을 저장합니다.
+    URL 파라미터(old_id)를 통해 리다이렉트 후에도 원래 파일을 찾아냅니다.
     """
     def __init__(self):
-        # [원복] 복잡한 ID 다 떼고 그냥 고정 파일명 씁니다.
-        self.storage_file = Path("auth_token.json")
+        # 1. 현재 접속한 세션 ID 가져오기
+        try:
+            ctx = get_script_run_ctx()
+            self.current_id = ctx.session_id
+        except:
+            self.current_id = "unknown"
+
+        # 2. 돌아온 유저인지 확인 (URL에 'old_id' 쪽지가 있는지 체크)
+        # 쪽지가 있으면 그 ID(과거의 나)를 쓰고, 없으면 지금 ID를 씁니다.
+        query_params = st.query_params
+        if "old_id" in query_params:
+            self.target_id = query_params["old_id"]
+        else:
+            self.target_id = self.current_id
+            
+        # 3. 파일명 결정
+        self.storage_file = Path(f"auth_token_{self.target_id}.json")
 
     def set_item(self, key: str, value: str) -> None:
         try:
@@ -108,7 +125,8 @@ def check_auth_status():
         if session and session.user:
             st.session_state.is_logged_in = True
             st.session_state.user_info = session.user
-            if "code" in st.query_params:
+            # 로그인 성공 후 URL 청소 (old_id 등 제거)
+            if "code" in st.query_params or "old_id" in st.query_params:
                 st.query_params.clear()
             return 
     except Exception:
@@ -138,6 +156,7 @@ def check_auth_status():
                 st.error("⚠️ 보안 토큰 만료. (새로고침 후 다시 시도해주세요)")
             else:
                 st.error(f"🔴 인증 오류: {error_str}")
+            # 실패 시에도 URL 파라미터 초기화
             st.query_params.clear()
 
 check_auth_status()
@@ -196,7 +215,7 @@ def main():
     if is_admin: st.title("💰 배당팽이 대시보드 (관리자 모드)")
     else: st.title("💰 배당팽이 월배당 계산기")
 
-    # [수정] 로그인 했을 때만 환영 메시지 표시 (로그인 안 했을 땐 숨김)
+    # [수정] 로그인 했을 때만 환영 메시지 표시
     if st.session_state.get("is_logged_in", False):
         user = st.session_state.user_info
         nickname = user.email.split("@")[0] if user.email else "User"
@@ -336,7 +355,7 @@ def main():
                 st.altair_chart(chart_compare, use_container_width=True)
 
                 # =========================================================
-                # [저장 로직] (4050 친화적 개편: 카카오 우선 + 안내 문구 강화)
+                # [저장 로직] (URL 릴레이 방식 적용)
                 # =========================================================
                 st.write("") 
                 with st.container(border=True):
@@ -351,12 +370,20 @@ def main():
                             # [UX] 4050 타겟 맞춤형 안내
                             st.caption("✅ **카카오 로그인을 추천합니다!** (네이버/카카오 앱에서도 바로 됩니다)")
                             
-                            # 1. 카카오 로그인 (제일 위에 배치, 크게)
+                            # [핵심] 현재 내 ID를 챙깁니다.
+                            try:
+                                ctx = get_script_run_ctx()
+                                current_session_id = ctx.session_id
+                            except:
+                                current_session_id = "unknown"
+
+                            # 1. 카카오 로그인
                             try:
                                 res_kakao = supabase.auth.sign_in_with_oauth({
                                     "provider": "kakao",
                                     "options": {
-                                        "redirect_to": "https://dividend-pange.streamlit.app",
+                                        # [중요] 돌아올 때 내 원래 ID(old_id)를 달고 오라고 시킵니다.
+                                        "redirect_to": f"https://dividend-pange.streamlit.app?old_id={current_session_id}",
                                         "skip_browser_redirect": True
                                     }
                                 })
@@ -374,8 +401,8 @@ def main():
                             except Exception as e:
                                 st.error(f"Kakao 오류: {e}")
 
-                            # 2. 구글 로그인 안내 및 버튼 (그 아래에 배치)
-                            st.write("") # 간격
+                            # 2. 구글 로그인
+                            st.write("") 
                             st.markdown("---")
                             st.caption("🚨 **구글 로그인 안 되시나요?** (네이버/카카오 앱 보안 정책 때문입니다)")
                             st.caption("👉 화면 구석의 **[ ··· ]** 버튼 → **'다른 브라우저로 열기'**를 이용하시거나, 위쪽 **카카오 로그인**을 이용해 주세요.")
@@ -385,7 +412,8 @@ def main():
                                     res = supabase.auth.sign_in_with_oauth({
                                         "provider": "google",
                                         "options": {
-                                            "redirect_to": "https://dividend-pange.streamlit.app",
+                                            # [중요] 구글도 마찬가지로 old_id를 달고 오게 합니다.
+                                            "redirect_to": f"https://dividend-pange.streamlit.app?old_id={current_session_id}",
                                             "queryParams": {"access_type": "offline", "prompt": "consent"},
                                             "skip_browser_redirect": False
                                         }
