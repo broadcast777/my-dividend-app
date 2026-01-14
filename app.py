@@ -308,18 +308,22 @@ def main():
                 chart_compare = alt.Chart(c_data).mark_bar(cornerRadiusTopLeft=10, cornerRadiusTopRight=10).encode(x=alt.X('계좌 종류', sort=None, axis=alt.Axis(labelAngle=0, title=None)), y=alt.Y('월 수령액', title=None), color=alt.Color('계좌 종류', scale=alt.Scale(domain=['일반 계좌', 'ISA/연금계좌'], range=['#95a5a6', '#f1c40f']), legend=None), tooltip=[alt.Tooltip('계좌 종류'), alt.Tooltip('월 수령액', format=',.0f')]).properties(height=220)
                 st.altair_chart(chart_compare, use_container_width=True)
 
+
                 # =========================================================
-                # [통합 캘린더 다운로드] (새로 추가됨!)
+                # [통합 캘린더 다운로드] (가이드 추가 버전)
                 # =========================================================
                 st.divider()
                 ics_data = logic.generate_portfolio_ics(all_data)
 
-                col_d1, col_d2 = st.columns([2, 1])
+                st.subheader("📅 캘린더 일괄 등록")
+                
+                col_d1, col_d2 = st.columns([1.5, 1])
                 with col_d1:
-                    st.info("💡 **팁:** 아래 버튼을 누르면 모든 종목의 알림을 한 번에 내 캘린더에 넣을 수 있습니다.")
+                    st.caption("매번 버튼을 누르기 귀찮으신가요?")
+                    st.caption("아래 버튼으로 **모든 종목의 알림**을 한 번에 내 폰/PC 캘린더에 넣으세요.")
                 with col_d2:
                     st.download_button(
-                        label="📅 전체 일정 다운로드 (.ics)",
+                        label="📥 전체 일정 파일 받기 (.ics)",
                         data=ics_data,
                         file_name="dividend_calendar.ics",
                         mime="text/calendar",
@@ -327,6 +331,20 @@ def main():
                         type="primary"
                     )
 
+                # [친절한 가이드 추가] 4050 맞춤형 설명
+                with st.expander("❓ 다운로드 받은 파일은 어떻게 쓰나요? (사용법 보기)"):
+                    st.markdown("""
+                    **아주 간단합니다! 따라해 보세요.** 👇
+                    
+                    1. 위 **[전체 일정 파일 받기]** 버튼을 누르세요.
+                    2. 다운로드된 파일(`dividend_calendar.ics`)을 **클릭(터치)**해서 여세요.
+                    3. 스마트폰이나 PC에서 **"일정을 추가하시겠습니까?"** 라고 물어봅니다.
+                    4. **[추가]** 또는 **[저장]** 버튼만 누르면 끝!
+                    
+                    ---
+                    💡 **팁:** - **아이폰/갤럭시:** 파일이 열리면서 자동으로 캘린더 앱이 켜집니다.
+                    - **PC(컴퓨터):** 파일이 다운로드 폴더에 저장됩니다. 더블 클릭하면 아웃룩이나 기본 캘린더가 열립니다.
+                    """)
                 # =========================================================
                 # [저장 로직] (URL 릴레이 방식)
                 # =========================================================
