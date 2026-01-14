@@ -9,7 +9,7 @@ from streamlit.runtime.scriptrunner import get_script_run_ctx
 # [모듈화] 분리한 파일들을 불러옵니다
 import logic 
 import ui
-import db  # <--- [New] 방금 만든 db.py를 불러옵니다!
+import db
 
 # ==========================================
 # [1] 기본 설정
@@ -24,7 +24,7 @@ for key in ["is_logged_in", "user_info", "code_processed"]:
         st.session_state[key] = False if key != "user_info" else None
 
 # ---------------------------------------------------------
-# Supabase 연결 (이제 db.py에서 가져옵니다)
+# Supabase 연결
 # ---------------------------------------------------------
 supabase = db.init_supabase()
 
@@ -40,7 +40,6 @@ def check_auth_status():
         if session and session.user:
             st.session_state.is_logged_in = True
             st.session_state.user_info = session.user
-            # 로그인 성공 후 URL 꼬리표 청소
             if "code" in st.query_params or "old_id" in st.query_params:
                 st.query_params.clear()
             return 
@@ -545,6 +544,55 @@ def main():
                         item_count = int(monthly_pocket // selected_item['price'])
 
                         st.markdown(f"""<div style="background-color: #e7f3ff; border: 1.5px solid #d0e8ff; border-radius: 16px; padding: 25px; text-align: center; box-shadow: 0 4px 10px rgba(0,104,201,0.05);"><p style="color: #666; font-size: 0.95em; margin: 0 0 8px 0;">{years_sim}년 뒤 모이는 돈 (세후)</p><h2 style="color: #0068c9; font-size: 2.2em; margin: 0; font-weight: 800; line-height: 1.2;">약 {real_money/10000:,.0f}만원{inflation_msg_money}</h2><p style="color: #777; font-size: 0.9em; margin: 8px 0 0 0;">(투자원금 {final_principal/10000:,.0f}만원 / {tax_msg})</p><div style="height: 1px; background-color: #d0e8ff; margin: 25px auto; width: 85%;"></div><p style="color: #0068c9; font-weight: bold; font-size: 1.1em; margin: 0 0 12px 0;">📅 월 예상 배당금: {monthly_pocket/10000:,.1f}만원 {inflation_msg_monthly}</p><div style="background-color: rgba(255,255,255,0.5); padding: 15px; border-radius: 12px; display: inline-block; min-width: 80%;"><p style="color: #333; font-size: 1.1em; margin: 0; line-height: 1.6;">매달 <b>{selected_item['emoji']} {selected_item['name']} {item_count:,}{selected_item['unit']}</b><br>마음껏 즐기기 가능! 😋</p></div></div>""", unsafe_allow_html=True)
+                        
+                        annual_div_income = monthly_div_final * 12
+                        if annual_div_income > 20000000: st.warning(f"🚨 **주의:** {years_sim}년 뒤 연간 배당금이 2,000만원을 초과하여 금융소득종합과세 대상이 될 수 있습니다.")
+                        st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**
+1. 본 결과는 주가·환율 변동과 수수료 등을 제외하고, 현재 배당률로만 계산한 결과입니다.
+2. ISA 계좌의 비과세 한도 및 세율은 세법 개정에 따라 달라질 수 있습니다.
+3. 과거의 데이터를 기반으로 한 단순 시뮬레이션이며, 실제 투자 수익을 보장하지 않습니다.""")
+
+                    with tab_goal:
+                        st.subheader("🎯 목표 배당금 역산기 (은퇴 시뮬레이터)")
+                        col_g1, col_g2 = st.columns(2)
+                        with col_g1:
+                            target_monthly_goal = st.number_input("목표 월 배당금 (만원, 세후)", min_value=10, value=300, step=10) * 10000
+                            use_start_money = st.checkbox("위에서 설정한 초기 자산을 포함하여 계산", value=True)
+                            start_bal_goal = total_invest if use_start_money else 0
+                        with col_g2:
+                            monthly_add_goal = st.number_input("매월 추가 적립 가능 금액 (만원)", min_value=0, value=150, step=10) * 10000
+                            apply_inflation_goal = st.toggle("📈 목표치에 물가상승률 반영", value=False, help="미래의 300만원이 현재의 얼마 가치인지 고려하여 목표를 상향 조정합니다.")
+
+                        tax_factor = 0.846
+                        required_asset_goal = (target_monthly_goal / tax_factor) / (avg_y / 100) * 12
+                        
+                        st.markdown("---")
+                        c_res1, c_res2 = st.columns(2)
+                        with c_res1:
+                            st.metric("목표 달성 필요 자산", f"{required_asset_goal/100000000:,.2f} 억원")
+                            st.caption(f"평균 배당률 {avg_y:.2f}% 및 세금 15.4% 적용 시")
+                        with c_res2:
+                            current_bal_goal = start_bal_goal
+                            months_passed = 0
+                            max_months = 600
+                            while current_bal_goal < required_asset_goal and months_passed < max_months:
+                                div_reinvest = current_bal_goal * (avg_y / 100 / 12) * tax_factor
+                                current_bal_goal += monthly_add_goal + div_reinvest
+                                months_passed += 1
+                            if months_passed >= max_months: st.error("⚠️ 현재 적립액으로는 50년 내 달성이 어렵습니다.")
+                            else: st.metric("목표 달성까지 소요 기간", f"{months_passed // 12}년 {months_passed % 12}개월")
+
+                        if apply_inflation_goal:
+                            discount_factor = (1.025) ** (months_passed / 12)
+                            real_value = target_monthly_goal / discount_factor
+                            st.warning(f"⚠️ **물가 반영 시:** {months_passed // 12}년 뒤 {target_monthly_goal/10000:,.0f}만원의 실질 가치는 현재 기준 **약 {real_value/10000:,.1f}만원**입니다.")
+                        
+                        target_annual_income = target_monthly_goal * 12
+                        if target_annual_income > 20000000: st.warning(f"🚨 **현실적 조언:** 설정하신 목표(월 {target_monthly_goal/10000:,.0f}만원) 달성 시, 연 배당소득이 2,000만원을 넘어 **금융종합과세 대상**이 됩니다.")
+                        st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**
+1. 본 결과는 주가·환율 변동과 수수료 등을 제외하고, 현재 배당률로만 계산한 결과입니다.
+2. 실제 배당금은 운용사의 공시 및 환율 상황에 따라 매월 달라질 수 있습니다.
+3. 과거의 데이터를 기반으로 한 단순 시뮬레이션이며, 실제 투자 수익을 보장하지 않습니다.""")
 
     elif menu == "📃 전체 종목 리스트":
         st.info("💡 **이동 안내:** '코드' 클릭 시 블로그 분석글로, '🔗정보' 클릭 시 네이버/야후 금융 정보로 이동합니다. (**⭐ 표시는 상장 1년 미만 종목입니다.**)")
