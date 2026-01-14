@@ -184,9 +184,30 @@ def render_login_ui():
                 st.rerun()
 
 # ==========================================
+# [유지보수] 오래된 토큰 파일 청소 (24시간 경과 시 삭제)
+# ==========================================
+def cleanup_old_tokens():
+    try:
+        # 현재 시간
+        now = time.time()
+        # 24시간 = 86400초 (원하는 시간으로 조절 가능)
+        retention_period = 86400 
+        
+        # 현재 폴더에서 'auth_token_'으로 시작하고 '.json'으로 끝나는 파일 찾기
+        for file_path in Path(".").glob("auth_token_*.json"):
+            # 파일의 수정 시간 확인
+            if now - file_path.stat().st_mtime > retention_period:
+                file_path.unlink() # 파일 삭제
+    except Exception as e:
+        print(f"청소 중 오류: {e}")
+
+# ==========================================
 # [4] 메인 애플리케이션
 # ==========================================
 def main():
+    # [추가됨] 앱 시작 시 청소기 가동! 🧹
+    cleanup_old_tokens()
+
     MAINTENANCE_MODE = False
     
     # [1] 값 초기화
