@@ -267,3 +267,87 @@ def update_dividend_rolling(current_history_str, new_dividend_amount):
     new_history_str = "|".join(map(str, history))
     
     return new_annual_total, new_history_str
+
+# [logic.py 맨 아래에 추가]
+
+def generate_portfolio_ics(selected_stocks_data):
+    """
+    선택된 종목들의 일정 데이터를 받아서 
+    하나의 통합 ICS(캘린더 파일) 텍스트를 생성함
+    """
+    cal_content = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//DividendPange//Portfolio//KO",
+        "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH"
+    ]
+    
+    today = datetime.date.today()
+    
+    for item in selected_stocks_data:
+        # 1. 데이터 가져오기
+        name = item.get('종목', '종목명')
+        pay_date_str = item.get('배당락일', '-')
+        
+        # 2. 날짜 계산 (아까 그 로직 재사용)
+        # (코드를 재사용하기 위해 logic.py 안의 함수를 호출하거나 로직을 가져옴)
+        # 여기서 간단히 처리하기 위해 calculate_google_calendar_url 내부 로직을 
+        # 살짝 변형해서 날짜만 추출하는 게 정석이지만, 
+        # 편의상 '배당락일' 텍스트를 파싱하는 핵심 로직만 가져옵니다.
+        
+        target_date = None
+        clean_str = str(pay_date_str).replace(" ", "").strip()
+        
+        # 날짜 파싱 (숫자 추출)
+        numbers = re.findall(r'\d+', clean_str)
+        if "마지막" in clean_str or "말일" in clean_str:
+             last_day = calendar.monthrange(today.year, today.month)[1]
+             target_date = datetime.date(today.year, today.month, last_day)
+        elif numbers:
+             day = int(numbers[0])
+             try:
+                 target_date = datetime.date(today.year, today.month, day)
+             except:
+                 target_date = datetime.date(today.year, today.month, 1) # 에러나면 1일로
+        elif "-" in clean_str or "." in clean_str:
+             try:
+                clean_str = clean_str.split("(")[0].replace(".", "-")
+                target_date = datetime.datetime.strptime(clean_str, "%Y-%m-%d").date()
+             except: pass
+             
+        # 날짜가 유효하면 D-2 계산
+        if target_date:
+            # 과거면 내년/다음달 처리 (간소화)
+            if target_date < today:
+                 # 단순하게 다음달 같은 날짜로 가정 (정밀 계산은 생략)
+                 if today.month == 12:
+                     target_date = datetime.date(today.year + 1, 1, target_date.day)
+                 else:
+                     try:
+                        target_date = datetime.date(today.year, today.month + 1, target_date.day)
+                     except:
+                        target_date = datetime.date(today.year, today.month + 1, 28) # 말일 예외처리
+
+            safe_buy_date = target_date - datetime.timedelta(days=2)
+            while safe_buy_date.weekday() >= 5:
+                safe_buy_date -= datetime.timedelta(days=1)
+            
+            # 3. 일정 포맷(ICS) 만들기
+            dt_start = safe_buy_date.strftime("%Y%m%d")
+            dt_end = (safe_buy_date + datetime.timedelta(days=1)).strftime("%Y%m%d") # 하루 뒤
+            
+            event = [
+                "BEGIN:VEVENT",
+                f"DTSTART;VALUE=DATE:{dt_start}",
+                f"DTEND;VALUE=DATE:{dt_end}",
+                f"SUMMARY:💰 [{name}] 매수 마감 (D-2)",
+                f"DESCRIPTION:배당 기준일: {target_date}\\n안전하게 오늘까지 매수하세요!",
+                "STATUS:CONFIRMED",
+                "sequence:0",
+                "END:VEVENT"
+            ]
+            cal_content.extend(event)
+
+    cal_content.append("END:VCALENDAR")
+    return "\n".join(cal_content)
