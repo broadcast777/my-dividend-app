@@ -249,33 +249,32 @@ def main():
                             weights[stock] = safe_rem
                             amt = total_invest * (safe_rem / 100)
                         st.caption(f"💰 투자금: **{amt/10000:,.0f}만원**")
-                    
-                        # =================================================
-                        # [캘린더 버튼] (안전 장치 추가됨)
+
+                    # =================================================
+                        # [캘린더 버튼] (Logic.py 연동 완료 버전)
                         # =================================================
                         stock_match = df[df['pure_name'] == stock]
                         if not stock_match.empty:
                             s_row = stock_match.iloc[0]
-                            ex_date = s_row.get('배당락일', '-')
                             
-                            # 데이터가 유효한지 확인
-                            if ex_date and str(ex_date) not in ['-', 'nan', 'NaT']:
-                                _, safe_view = calculate_safe_buy_date(ex_date)
-                                btn_label = f"📅 {safe_view} 매수 마감" if safe_view else "📅 알림 등록"
+                            # 1. Logic.py에서 미리 계산해둔 링크 가져오기
+                            cal_link = s_row.get('캘린더링크') 
+                            
+                            # 2. 버튼 라벨 결정 (배당락일 보여주기)
+                            ex_date_view = s_row.get('배당락일', '-')
+                            btn_label = f"📅 {ex_date_view} (알림)" if cal_link else "📅 날짜 미정"
 
+                            # 3. 버튼 그리기
+                            if cal_link:
                                 if st.session_state.get("is_logged_in", False):
-                                    cal_link = make_google_calendar_link(stock, ex_date)
-                                    # 링크가 정상이면 버튼 표시
-                                    if cal_link and "ERROR" not in cal_link:
-                                        st.link_button(btn_label, cal_link, use_container_width=True)
-                                    else:
-                                        # 에러나면 숨기지 말고 이유 표시 (디버깅용)
-                                        # 배포시엔 st.caption("📅 날짜 형식 오류") 등으로 변경 가능
-                                        st.caption(f"🚫 생성 불가") 
+                                    # 로그인 상태 -> 바로 구글 캘린더로 이동
+                                    st.link_button(btn_label, cal_link, use_container_width=True)
                                 else:
+                                    # 비로그인 상태 -> 로그인 유도 토스트
                                     if st.button(btn_label, key=f"btn_cal_{i}", use_container_width=True):
                                         st.toast("🔒 로그인 후 캘린더에 '매수 마감일'을 등록할 수 있습니다!", icon="🔒")
                             else:
+                                # 링크가 없는 경우 (날짜 미정 or 에러)
                                 st.caption("📅 날짜 미정")
 
                     if not stock_match.empty:
