@@ -377,9 +377,9 @@ def generate_portfolio_ics(selected_stocks_data):
 
 def fetch_dividend_yield_hybrid(code, category):
     """
-    1단계: 한투 API (정식 데이터) 시도
-    2단계: 실패하거나 0이면 -> 야후 파이낸스 시도 (백업)
-    * 수정: Timezone 에러 방지 (tz_localize(None)) 적용
+    1단계: 한투 API
+    2단계: 야후 파이낸스
+    3단계: 네이버 금융 (크롤링) - 최후의 수단
     """
     code = str(code).strip()
     
@@ -396,43 +396,70 @@ def fetch_dividend_yield_hybrid(code, category):
                 mock=True 
             )
             resp = broker.fetch_price(code)
-            
             if resp and 'output' in resp:
                 yield_str = resp['output'].get('hts_dvsd_rate', '0.0')
                 if yield_str and yield_str != '-' and float(yield_str) > 0:
-                    return float(yield_str), "✅ 한투 API(공식)"
-        except:
-            pass 
+                    return float(yield_str), "✅ 한투 API"
+        except: pass
 
         # [2단계] 야후 파이낸스 (국내 백업)
         try:
             ticker_code = f"{code}.KS"
             stock = yf.Ticker(ticker_code)
             
-            # 방법 A: Info
+            # Info 정보 확인
             dy = stock.info.get('dividendYield')
-            if dy: return round(dy * 100, 2), "✅ 야후(.KS)"
+            if dy and dy > 0: return round(dy * 100, 2), "✅ 야후(Info)"
             
-            # 방법 B: Rolling (여기서 에러 났었음)
+            # Rolling 계산 (Timezone 이슈 해결됨)
             divs = stock.dividends
             if not divs.empty:
-                # ▼▼▼ [수정 핵심] 시간대 정보 제거 (Asia/Seoul -> None) ▼▼▼
-                if divs.index.tz is not None:
-                    divs.index = divs.index.tz_localize(None)
-                # ▲▲▲ --------------------------------------------- ▲▲▲
-
+                if divs.index.tz is not None: divs.index = divs.index.tz_localize(None)
                 one_year_ago = pd.Timestamp.now() - pd.Timedelta(days=365)
                 recent_total = divs[divs.index >= one_year_ago].sum()
-                
                 price = stock.fast_info.get('last_price')
                 if price and price > 0:
                     yield_cal = (recent_total / price) * 100
-                    return round(yield_cal, 2), "✅ 야후(Rolling)"
-                    
-        except Exception as e:
-            return 0.0, f"❌ 모두 실패: {str(e)}"
+                    if yield_cal > 0: return round(yield_cal, 2), "✅ 야후(Rolling)"
+        except: pass
+
+        # [3단계] 네이버 금융 크롤링 (최후의 보루)
+        # 한투/야후 다 안되면 무조건 여기로 옴
+        try:
+            url = f"https://finance.naver.com/item/main.naver?code={code}"
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'}
             
-        return 0.0, "⚠️ 데이터 없음"
+            response = requests.get(url, headers=headers)
+            response.encoding = 'euc-kr' # 한글 깨짐 방지
+            html = response.text
+            
+            # 방법 A: ID 파싱 (_dvr)
+            if '_dvr' in html:
+                try:
+                    # <em id="_dvr">3.62</em> 형태
+                    part = html.split('<em id="_dvr">')[1]
+                    val = part.split('</em>')[0]
+                    return float(val), "✅ 네이버(파싱)"
+                except: pass
+            
+            # 방법 B: 테이블 텍스트 검색 (배당수익률 글자 찾기)
+            # "배당수익률" 뒤에 오는 숫자 찾기 (간이 파싱)
+            if "배당수익률" in html:
+                # 테이블 구조가 복잡하므로 단순하게 텍스트 내 위치로 추정 시도
+                # (정확도를 위해 requests + pandas read_html 사용 권장)
+                dfs = pd.read_html(html)
+                for df in dfs:
+                    # 데이터프레임을 문자열로 바꿔서 '배당수익률'이 있는지 확인
+                    if '배당수익률' in df.to_string():
+                        # 해당 데이터프레임에서 값 추출 시도
+                        # 보통 4번째 열이나 특정 위치에 있음. 
+                        # 여기서는 복잡하니 패스하고, ID 파싱 실패시 0 반환
+                        pass
+
+        except Exception as e:
+            return 0.0, f"❌ 네이버 실패: {str(e)}"
+
+        return 0.0, "⚠️ 데이터 없음 (3단계 모두 실패)"
 
     # -----------------------------------------------
     # Case 2: 🇺🇸 해외 주식 (야후 파이낸스)
@@ -440,26 +467,23 @@ def fetch_dividend_yield_hybrid(code, category):
     else:
         try:
             stock = yf.Ticker(code)
-            
             dy = stock.info.get('dividendYield')
             if dy: return round(dy * 100, 2), "✅ 야후 (Info)"
             
             divs = stock.dividends
             if not divs.empty:
-                # ▼▼▼ [수정 핵심] 해외 주식도 시간대 제거 ▼▼▼
-                if divs.index.tz is not None:
-                    divs.index = divs.index.tz_localize(None)
-                # ▲▲▲ --------------------------------- ▲▲▲
-
+                if divs.index.tz is not None: divs.index = divs.index.tz_localize(None)
                 one_year_ago = pd.Timestamp.now() - pd.Timedelta(days=365)
                 recent_total = divs[divs.index >= one_year_ago].sum()
-                
                 price = stock.fast_info.get('last_price')
                 if price and price > 0:
                     yield_cal = (recent_total / price) * 100
                     return round(yield_cal, 2), "✅ 야후 (Rolling)"
             
             return 0.0, "⚠️ 데이터 없음"
+            
+        except Exception as e:
+            return 0.0, f"❌ 에러: {str(e)}"
             
         except Exception as e:
             return 0.0, f"❌ 에러: {str(e)}"
