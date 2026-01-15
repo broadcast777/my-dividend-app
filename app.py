@@ -13,6 +13,7 @@ import urllib.parse
 import logic 
 import ui
 import db
+import auth  # 보안실 부품 추가
 
 # ==========================================
 # [1] 기본 설정
@@ -32,54 +33,30 @@ for key in ["is_logged_in", "user_info", "code_processed"]:
 supabase = db.init_supabase()
 
 # ==========================================
-# [2] 인증 상태 체크 (자동 복구 로직 포함)
+# [2] 인증 상태 체크 (auth.py 엔진 연동)
 # ==========================================
 def check_auth_status():
-    if not supabase: return
-
-    # 1. 이미 로그인된 상태인지 확인
-    try:
-        session = supabase.auth.get_session()
-        if session and session.user:
-            st.session_state.is_logged_in = True
-            st.session_state.user_info = session.user
-            if "code" in st.query_params or "old_id" in st.query_params:
-                st.query_params.clear()
-            return 
-    except Exception:
-        pass
-
-    # 2. 로그인 콜백 처리
-    query_params = st.query_params
-    if "code" in query_params and not st.session_state.get("code_processed", False):
-        st.session_state.code_processed = True
-        
-        try:
-            auth_code = query_params["code"]
-            auth_response = supabase.auth.exchange_code_for_session({"auth_code": auth_code})
-            session = auth_response.session
-            
-            if session and session.user:
-                st.session_state.is_logged_in = True
-                st.session_state.user_info = session.user
-            
+    success, user_info, status_type = auth.check_auth_logic(supabase)
+    
+    if success:
+        st.session_state.is_logged_in = True
+        st.session_state.user_info = user_info
+        if status_type == "CALLBACK":
             st.query_params.clear()
             st.success("✅ 로그인되었습니다!")
             st.rerun()
-            
-        except Exception as e:
-            # 오류 자동 복구 (verifier 오류 시 리셋)
-            err_msg = str(e).lower()
-            if "verifier" in err_msg or "non-empty" in err_msg:
-                st.warning("🔄 보안 토큰 갱신 중... 잠시만 기다려주세요.")
-                st.query_params.clear()
-                time.sleep(1.0)
-                st.rerun()
-            else:
-                st.error(f"🔴 인증 오류: {e}")
-                st.query_params.clear()
-
-check_auth_status()
+        elif "code" in st.query_params or "old_id" in st.query_params:
+            st.query_params.clear()
+    
+    elif status_type == "VERIFIER_ERROR":
+        st.warning("🔄 보안 토큰 갱신 중... 잠시만 기다려주세요.")
+        st.query_params.clear()
+        time.sleep(1.0)
+        st.rerun()
+    
+    elif status_type == "OTHER_ERROR":
+        st.error(f"🔴 인증 오류: {user_info}") # user_info에 에러메시지가 담겨옴
+        st.query_params.clear()
 
 # ==========================================
 # [3] 로그인 UI 함수 (사이드바용)
@@ -124,7 +101,7 @@ def main():
         with st.expander("🔐 관리자 접속 (Admin)", expanded=False):
             password_input = st.text_input("비밀번호 입력", type="password")
             if password_input:
-                if hashlib.sha256(password_input.encode()).hexdigest() == ADMIN_HASH:
+                if auth.verify_admin(password_input):
                     is_admin = True
                     st.success("관리자 모드 ON 🚀")
                 else:
