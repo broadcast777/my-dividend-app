@@ -9,6 +9,7 @@ import calendar  # <--- 추가
 from urllib.parse import quote # <--- 추가
 import re
 import requests
+import os
 from github import Github
 # --- [1] 시세 조회 및 유틸 함수 ---
 def _fetch_price_raw(broker, code, category):
@@ -293,18 +294,32 @@ def load_and_process_data(df_raw, is_admin=False):
     final_data = [r for r in results if r is not None]
     return pd.DataFrame(final_data).sort_values('연배당률', ascending=False) if final_data else pd.DataFrame()
 
-# --- [3] 데이터 로드 ---
 @st.cache_data(ttl=600)
 def load_stock_data_from_csv():
+    """
+    [패치 적용] 데이터 로드 안전장치 강화
+    - 파일 읽기 실패 시 빈 껍데기 반환
+    - 필수 컬럼 없으면 자동 생성 (에러 방지)
+    """
     url = "https://raw.githubusercontent.com/broadcast777/my-dividend-app/main/stocks.csv"
     try:
-        return pd.read_csv(url, dtype={'종목코드': str})
-    # [안전장치] 연배당금_크롤링 열이 없으면 0.0으로 생성
+        df = pd.read_csv(url, dtype={'종목코드': str})
+        
+        # [방어 로직] 필수 컬럼이 없으면 0으로 채워서 생성
         if '연배당금_크롤링' not in df.columns:
             df['연배당금_크롤링'] = 0.0
             
+        # [방어 로직] 문자열 컬럼에 NaN(빈값)이 있으면 에러나니까 빈칸("")으로 채움
+        for col in ['종목명', '분류', '블로그링크', '배당기록']:
+            if col not in df.columns:
+                df[col] = ""
+            else:
+                df[col] = df[col].fillna("").astype(str)
+                
         return df
-    except:
+    except Exception as e:
+        print(f"❌ [CSV 로드 실패] Error: {e}")
+        # 실패하면 빈 데이터프레임이라도 줘야 앱이 안 꺼짐
         return pd.DataFrame()
         
 # --- [4] 배당금 갱신 로직 (스마트 Rolling) ---
@@ -568,37 +583,44 @@ def fetch_dividend_yield_hybrid(code, category):
 
 # [logic.py 파일 맨 아래에 추가하세요]
 
-def save_to_github(df):
+def save_to_github(df, create_local_backup_on_fail=True):
     """
-    [기능] 현재 수정된 데이터프레임(df)을 깃허브 stocks.csv 파일에 덮어쓰기 (Commit)
+    [패치 적용] 깃허브 저장 안정화 & 백업 기능
     """
     try:
-        # 1. secrets.toml에서 열쇠와 주소 꺼내기
         token = st.secrets["github"]["token"]
         repo_name = st.secrets["github"]["repo_name"]
         file_path = st.secrets["github"]["file_path"]
 
-        # 2. 깃허브 문 따고 들어가기
         g = Github(token)
         repo = g.get_repo(repo_name)
-
-        # 3. 기존 파일 정보 가져오기 (덮어쓰려면 'SHA'라는 기존 파일 주민번호가 필요함)
         contents = repo.get_contents(file_path)
 
-        # 4. 데이터프레임을 CSV 텍스트로 변환
-        csv_data = df.to_csv(index=False).encode("utf-8")
-
-        # 5. 파일 업데이트 (Commit)
+        # [수정] 데이터프레임을 문자열(CSV)로 확실하게 변환
+        csv_text = df.to_csv(index=False)
+        
         repo.update_file(
             path=contents.path,
-            message="🤖 관리자 패널에서 데이터 자동 갱신",  # 커밋 메시지
-            content=csv_data,
+            message="🤖 관리자 패널에서 데이터 자동 갱신",
+            content=csv_text,
             sha=contents.sha
         )
         return True, "✅ 깃허브 저장 성공! (반영까지 1~2분 걸립니다)"
-
+        
     except Exception as e:
-        return False, f"❌ 저장 실패: {str(e)}"
+        err_msg = f"❌ 저장 실패: {str(e)}"
+        print(f"[Github 저장 오류] {err_msg}")
+        
+        # [추가 기능] 실패 시 로컬에 백업 파일 생성 (보험)
+        if create_local_backup_on_fail:
+            try:
+                backup_name = f"stocks_backup_failed_{int(time.time())}.csv"
+                df.to_csv(backup_name, index=False)
+                err_msg += f" | 💾 로컬 백업됨: {backup_name}"
+            except Exception as be:
+                err_msg += f" | 😱 로컬 백업도 실패: {be}"
+                
+        return False, err_msg
 
 # ▼▼▼ [1단계] 여기에 새 함수 추가 (save_to_github 바로 위에 붙여넣으세요) ▼▼▼
 
