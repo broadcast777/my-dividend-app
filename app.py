@@ -26,10 +26,7 @@ for key in ["is_logged_in", "user_info", "code_processed"]:
     if key not in st.session_state:
         st.session_state[key] = False if key != "user_info" else None
 
-# ▼▼▼ [추가할 코드] 스위치 변수도 미리 만들어둡니다 ▼▼▼
-if "ai_modal_open" not in st.session_state:
-    st.session_state.ai_modal_open = False
-# ▲▲▲
+
 
 # ---------------------------------------------------------
 # Supabase 연결
@@ -375,8 +372,7 @@ def main():
             
             st.button("🕵️ AI 로보어드바이저 실행", use_container_width=True, type="primary", on_click=try_open_modal)
 
-            if st.session_state.get("ai_modal_open", False):
-                recommendation.show_wizard()
+        
         st.markdown("---") 
         # -----------------------------------------------------------------
 
