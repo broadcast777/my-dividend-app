@@ -26,6 +26,9 @@ for key in ["is_logged_in", "user_info", "code_processed"]:
     if key not in st.session_state:
         st.session_state[key] = False if key != "user_info" else None
 
+if "ai_modal_open" not in st.session_state:
+    st.session_state.ai_modal_open = False
+
 
 
 # ---------------------------------------------------------
