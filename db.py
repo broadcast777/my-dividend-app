@@ -2,7 +2,7 @@
 # db.py : 데이터베이스 접속 및 토큰 관리 (Read-Fallback 안전 버전)
 # ==========================================
 import streamlit as st
-from supabase import create_client, ClientOptions
+from supabase import create_client, ClientOptions, Client
 from pathlib import Path
 import json
 import time
@@ -121,3 +121,53 @@ def cleanup_old_tokens():
                 try: file_path.unlink()
                 except: pass
     except: pass
+
+
+# ---------------------------------------------------------
+# [4] DB 기능 확장 (app.py 모듈화용)
+# ---------------------------------------------------------
+
+def get_user_portfolios(supabase: Client, user_id: str):
+    """사용자의 포트폴리오 리스트를 최신순으로 가져옵니다."""
+    return supabase.table("portfolios") \
+        .select("*") \
+        .eq("user_id", user_id) \
+        .order("created_at", desc=True) \
+        .execute()
+
+def delete_portfolio(supabase: Client, portfolio_id: str):
+    """특정 포트폴리오를 삭제합니다."""
+    return supabase.table("portfolios") \
+        .delete() \
+        .eq("id", portfolio_id) \
+        .execute()
+
+def get_portfolio_count(supabase: Client, user_id: str):
+    """사용자의 포트폴리오 개수를 확인합니다."""
+    return supabase.table("portfolios") \
+        .select("id", count="exact") \
+        .eq("user_id", user_id) \
+        .execute()
+
+def insert_portfolio(supabase: Client, data: dict):
+    """새 포트폴리오를 저장합니다."""
+    return supabase.table("portfolios").insert(data).execute()
+
+def update_portfolio(supabase: Client, portfolio_id: str, data: dict):
+    """기존 포트폴리오를 업데이트합니다."""
+    return supabase.table("portfolios") \
+        .update(data) \
+        .eq("id", portfolio_id) \
+        .execute()
+
+def log_visit(supabase: Client, source_tag: str):
+    """방문 로그를 기록합니다."""
+    return supabase.table("visit_logs").insert({"referer": source_tag}).execute()
+
+def get_visit_count(supabase: Client):
+    """누적 방문자 수를 가져옵니다."""
+    return supabase.table("visit_counts").select("count").eq("id", 1).execute()
+
+def update_visit_count(supabase: Client, new_count: int):
+    """누적 방문자 수를 업데이트합니다."""
+    return supabase.table("visit_counts").update({"count": new_count}).eq("id", 1).execute()
