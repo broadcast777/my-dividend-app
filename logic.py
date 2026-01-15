@@ -15,33 +15,37 @@ from github import Github
 # [1] 시세 조회 및 자산 분류 유틸리티
 # ==========================================
 
-def _fetch_price_raw(broker, code, category):
+def fetch_dividend_yield_hybrid(code, category):
+    """국내(네이버)/해외(야후) 배당률 진짜로 긁어오기"""
     try:
-        code_str = str(code).strip()
         if category == '국내':
-            try:
-                resp = broker.fetch_price(code_str)
-                if resp and isinstance(resp, dict) and 'output' in resp:
-                    if resp['output'] and resp['output'].get('stck_prpr'):
-                        return int(resp['output']['stck_prpr'])
-            except: pass
-        
-        ticker_code = f"{code_str}.KS" if category == '국내' else code_str
-        ticker = yf.Ticker(ticker_code)
-        price = ticker.fast_info.get('last_price')
-        if not price:
-            hist = ticker.history(period="1d")
-            if not hist.empty:
-                price = hist['Close'].iloc[-1]
-        return float(price) if price else None
-    except: return None
+            url = f"https://finance.naver.com/item/main.naver?code={code}"
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'}
+            res = requests.get(url, headers=headers)
+            
+            # 정규표현식으로 '배당수익률' 뒤의 숫자만 쏙 뽑아냅니다.
+            # (BeautifulSoup보다 이 방식이 네이버 금융에선 더 빠르고 정확할 때가 많습니다)
+            match = re.search(r'<em>배당수익률</em>.*?<em id="_dvd_rt">([\d.]+)</em>', res.text, re.S)
+            
+            if match:
+                val = float(match.group(1))
+                return val, "네이버금융"
+            else:
+                return 0.0, "배당정보없음"
+                
+        else: # 해외 종목
+            stock = yf.Ticker(code)
+            # yfinance에서 dividendYield는 0.08 형식으로 오므로 100을 곱해줍니다.
+            y_val = stock.info.get('dividendYield')
+            if y_val:
+                return round(y_val * 100, 2), "야후파이낸스"
+            return 0.0, "해외배당없음"
 
-def get_safe_price(broker, code, category):
-    for _ in range(2):
-        price = _fetch_price_raw(broker, code, category)
-        if price is not None: return price
-        time.sleep(0.5)
-    return None
+    except Exception as e:
+        return 0.0, f"오류: {str(e)}"
+
+
+
 
 def classify_asset(row):
     name, symbol = str(row.get('종목명', '')).upper(), str(row.get('종목코드', '')).upper()
