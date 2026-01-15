@@ -595,45 +595,80 @@ def save_to_github(df):
 
 # ▼▼▼ [1단계] 여기에 새 함수 추가 (save_to_github 바로 위에 붙여넣으세요) ▼▼▼
 
+# [logic.py] 맨 아래 fetch_dividend_amount_hybrid 함수를 이걸로 통째로 교체하세요!
+
 def fetch_dividend_amount_hybrid(code, category):
     """
-    [신규 엔진] %가 아니라 '연간 배당금 총액(원/달러)'을 긁어옵니다.
+    [디버깅 강화 버전] 에러 발생 시 원인을 구체적으로 리턴함
     """
+    # 1. 라이브러리 긴급 호출 (함수 안에서 불러와서 에러 방지)
+    import requests
+    import yfinance as yf
+    
     code = str(code).strip()
     
-    # 1. 국내 (네이버 금융 API 사용)
+    # ------------------------------------------------
+    # 1. 국내 (네이버 금융)
+    # ------------------------------------------------
     if category == '국내':
         try:
-            # 네이버 모바일 API (가장 정확함)
+            # [자릿수 보정] 6자리 미만이면 앞에 0 채우기
+            code = code.zfill(6)
+            
             url = f"https://m.stock.naver.com/api/stock/{code}/dividend"
-            headers = {'User-Agent': 'Mozilla/5.0'}
+            # [헤더 보강] 봇 차단 방지용 신분증
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Referer': 'https://m.stock.naver.com/'
+            }
+            
+            # 타임아웃 5초 설정
             res = requests.get(url, headers=headers, timeout=5)
             
-            if res.status_code == 200:
-                data = res.json()
-                items = data.get('items', [])
-                
-                # 가장 최신 배당금 1회분 추출
-                if items:
-                    latest_div = float(str(items[0].get('dividend', 0)).replace(',', ''))
-                    
-                    if latest_div > 0:
-                        # [중요] 월배당주라고 가정하고 12를 곱해서 연환산 금액 리턴
-                        # (491620의 경우 141 * 12 = 1692원이 나옵니다)
-                        annual_amount = latest_div * 12
-                        return annual_amount, "✅ 네이버(최신x12)"
-        except Exception as e:
-            pass
+            if res.status_code != 200:
+                return 0.0, f"❌ 네이버 접속불가(Code:{res.status_code})"
+
+            data = res.json()
+            items = data.get('items', [])
             
+            if items:
+                # 가장 최신 배당금 1회분 추출
+                # (예: '141' 문자열을 숫자로 변환)
+                latest_div_str = str(items[0].get('dividend', 0)).replace(',', '')
+                latest_div = float(latest_div_str)
+                
+                if latest_div > 0:
+                    # 월배당 가정 연환산
+                    return latest_div * 12, "✅ 네이버(성공)"
+            
+            return 0.0, "⚠️ 데이터없음(배당이력없음)"
+            
+        except Exception as e:
+            # 에러 메시지를 그대로 리턴해서 화면에 보여줌
+            return 0.0, f"❌ 국내에러: {str(e)}"
+            
+    # ------------------------------------------------
     # 2. 해외 (야후 파이낸스)
+    # ------------------------------------------------
     else:
         try:
             stock = yf.Ticker(code)
-            # 야후는 dividendRate가 이미 '연간 배당금'입니다.
+            # 야후 데이터 조회 (info)
             rate = stock.info.get('dividendRate')
+            
             if rate and rate > 0:
                 return float(rate), "✅ 야후(Rate)"
-        except:
-            pass
-            
-    return 0.0, "❌ 조회실패"
+            else:
+                # 데이터가 없으면 배당 내역으로 재시도
+                hist = stock.dividends
+                if not hist.empty:
+                    # 최근 1년치 합계
+                    one_year = pd.Timestamp.now() - pd.Timedelta(days=365)
+                    total = hist[hist.index >= one_year].sum()
+                    if total > 0:
+                        return float(total), "✅ 야후(Sum)"
+                
+                return 0.0, "⚠️ 야후(데이터없음)"
+                
+        except Exception as e:
+            return 0.0, f"❌ 해외에러: {str(e)}"
