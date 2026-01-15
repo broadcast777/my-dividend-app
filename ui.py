@@ -40,3 +40,26 @@ def render_custom_table(data_frame):
         </table>
     </div>
     """, unsafe_allow_html=True)
+
+# [ui.py] 테스트용 코드 (나중에 지우세요)
+
+# 1. 토스 스타일 팝업창 정의
+@st.dialog("🕵️ 투자 성향 진단")
+def open_toss_modal():
+    st.write("Q1. 투자할 때 가장 중요하게 생각하는 것은?")
+    
+    # 2. 질문과 선택지
+    answer = st.radio("하나만 골라주세요", ["🔥 수익률 (인생은 한방)", "🛡️ 안정성 (잃으면 잠 못잠)", "⚖️ 밸런스 (반반 무 많이)"], index=None)
+    
+    if answer:
+        st.write(f"아하! **{answer}**을(를) 선호하시는군요.")
+        st.write("")
+        
+        # 3. 결과 적용 버튼
+        if st.button("결과 확인하고 적용하기", type="primary"):
+            st.session_state.toss_result = answer # 결과 저장
+            st.rerun() # 팝업 닫기
+
+# 4. 메인 화면의 버튼
+if st.button("코치님, 저 뭐 살까요? (클릭)"):
+    open_toss_modal()
