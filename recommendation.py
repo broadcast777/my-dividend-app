@@ -152,5 +152,7 @@ def show_wizard():
             
             # 3. 완료 메시지
             st.toast("장바구니에 담았습니다! 🛒", icon="✅")
-            
-            # ✅ 이것으로 끝! (st.rerun() 제거, wiz_step 초기화 제거)
+                
+        col_b.button("✅ 장바구니 담기", 
+                     type="primary", 
+                     on_click=finish)
