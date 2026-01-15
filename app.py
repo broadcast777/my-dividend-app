@@ -256,7 +256,8 @@ def main():
                             df_temp.at[i, '연배당금_크롤링'] = amt
                             updated_count += 1
                         else:
-                            # 실패하면 건너뜀 (기존 데이터 유지)
+                            # [디버그 모드] 실패 시 원인을 화면에 출력 (나중에 지우면 됩니다)
+                            st.warning(f"⚠️ {row['종목명']}({code}) 실패 -> 원인: {src}")
                             pass
                             
                     status_text.text("완료!")
