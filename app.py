@@ -374,6 +374,15 @@ def main():
                     st.session_state.ai_modal_open = False
             
             st.button("🕵️ AI 로보어드바이저 실행", use_container_width=True, type="primary", on_click=try_open_modal)
+                        # ✅ 이 부분도 다시 추가하세요!
+            if st.session_state.get("ai_modal_open", False):
+                # ✅ 팝업이 열릴 때 wizard 상태 초기화
+                if "wiz_step" not in st.session_state:
+                    st.session_state.wiz_step = 1
+                if "wiz_data" not in st.session_state:
+                    st.session_state.wiz_data = {}
+                
+                recommendation.show_wizard()
 
         
         st.markdown("---") 
