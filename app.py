@@ -26,6 +26,11 @@ for key in ["is_logged_in", "user_info", "code_processed"]:
     if key not in st.session_state:
         st.session_state[key] = False if key != "user_info" else None
 
+# ▼▼▼ [추가할 코드] 스위치 변수도 미리 만들어둡니다 ▼▼▼
+if "ai_modal_open" not in st.session_state:
+    st.session_state.ai_modal_open = False
+# ▲▲▲
+
 # ---------------------------------------------------------
 # Supabase 연결
 # ---------------------------------------------------------
@@ -353,21 +358,22 @@ def main():
             
         with col_rec2:
             st.write("") # 줄바꿈으로 높이 맞추기
-            def open_modal():
-                st.session_state.ai_modal_open = True
-                
-          
-            
-            if st.button("🕵️ AI 로보어드바이저 실행", use_container_width=True, type="primary", on_click=open_modal):
-                if not st.session_state.get("is_logged_in"):
+            # [수정] 콜백 함수 안에서 '로그인 체크'와 '스위치 ON'을 한방에 처리
+            def try_open_modal():
+                if st.session_state.get("is_logged_in"):
+                    # 로그인 했으면 -> 문 열어라
+                    st.session_state.ai_modal_open = True
+                else:
+                    # 로그인 안했으면 -> 경고하고 문 닫아라
                     st.toast("🔒 로그인이 필요한 기능입니다!", icon="🔒")
-                    st.session_state.ai_modal_open = False # 로그인 안됐으면 다시 끔
+                    st.session_state.ai_modal_open = False
+            
+            # 버튼에는 on_click만 달아두면 됩니다. (if문 불필요)
+            st.button("🕵️ AI 로보어드바이저 실행", use_container_width=True, type="primary", on_click=try_open_modal)
 
-            # 2. 스위치가 'ON'일 때만 마법사를 부릅니다.
+            # 스위치가 'ON'일 때만 마법사를 부릅니다.
             if st.session_state.get("ai_modal_open", False):
                 recommendation.show_wizard()
-            # ▲▲▲ [끝] ▲▲▲
-
         st.markdown("---") 
         # -----------------------------------------------------------------
 
