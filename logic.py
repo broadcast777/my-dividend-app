@@ -212,36 +212,52 @@ def load_and_process_data(df_raw, is_admin=False):
             # -------------------------------------------------------
             # [업그레이드] 스마트 배당률 결정 로직 (API 시세 연동 유지)
             # -------------------------------------------------------
-            try:
-                months = int(row.get('신규상장개월수', 0))
-            except:
-                months = 0
+            # ▼▼▼▼▼ [여기서부터 덮어쓰기 시작하세요] ▼▼▼▼▼
 
-            # 1. 1년 미만 신규 종목 (⭐ 별표 표시 및 실시간 현재가 기반 계산)
-            if 0 < months < 12:
-                raw_div = float(row.get('연배당금', 0))
-                # 지금까지 받은 돈을 1년치로 환산 (API 현재가 price 활용)
-                annual_div_calc = (raw_div / months) * 12
-                yield_val = (annual_div_calc / price) * 100
-                display_name = f"{name} ⭐"
-                
-            # 2. 일반 종목: CSV에 '연배당률' 기록이 있으면 그것을 최우선 사용 (422% 오류 방어)
-            elif '연배당률' in row and pd.notnull(row['연배당률']) and str(row['연배당률']).strip() != "":
-                yield_val = float(row['연배당률'])
-                display_name = name
-            
-            # 3. 그 외: 기존 방식대로 '연배당금' 기반 실시간 계산 (API 현재가 price 활용)
-            else:
-                raw_div = float(row.get('연배당금', 0))
-                yield_val = (raw_div / price) * 100
-                display_name = name
+            # -------------------------------------------------------
+            # [업그레이드 완료] 교차 검증 및 우선순위 로직
             # -------------------------------------------------------
             
-            # 필터링
+            # 1. 사용할 데이터 후보군 준비
+            crawled_div = float(row.get('연배당금_크롤링', 0)) # 기계가 긁어온 값 (1순위)
+            manual_div = float(row.get('연배당금', 0))       # 수동으로 적은 값 (2순위)
+            
+            try: months = int(row.get('신규상장개월수', 0))
+            except: months = 0
+
+            # 2. 분자(연배당금) 확정 ("어떤 돈을 믿을 것인가?")
+            
+            # (A) 신규 상장 종목 (12개월 미만) -> 수동 데이터 신뢰
+            if 0 < months < 12:
+                # 491620 오차 원인 제거: 불필요한 나눗셈 삭제
+                # 만약 수동 입력값이 500원 미만(1회분)이면 12를 곱하고, 아니면(합계면) 그대로 씀
+                if manual_div < 500 and category == '국내':
+                    target_div = manual_div * 12
+                else:
+                    target_div = manual_div
+                display_name = f"{name} ⭐"
+
+            # (B) 일반 종목 -> 크롤링 데이터 신뢰 (없으면 수동)
+            else:
+                if crawled_div > 0:
+                    target_div = crawled_div # 어제 만든 크롤러가 가져온 값
+                else:
+                    target_div = manual_div  # 기존 수동 값
+                
+                # 기존 로직 방어 (연배당률 열이 이미 계산되어 있어도 무시하고 재계산)
+                display_name = name
+
+            # 3. 최종 실시간 배당률 계산
+            # 분자(확정된 배당금) / 분모(한투 실시간 현재가)
+            yield_val = (target_div / price) * 100
+
+            # 필터링 및 서식 지정
             if not is_admin and (yield_val < 2.0 or yield_val > 25.0): return idx, None
             if is_admin and (yield_val < 2.0 or yield_val > 25.0): display_name = f"🚫 {display_name}"
 
             price_fmt = f"{int(price):,}원" if category == '국내' else f"${price:.2f}"
+
+            # ▲▲▲▲▲ [여기까지 덮어쓰고 바로 return idx, {...} 로 이어집니다] ▲▲▲▲▲
             
             return idx, {
                 '코드': code, 
@@ -276,9 +292,14 @@ def load_stock_data_from_csv():
     url = "https://raw.githubusercontent.com/broadcast777/my-dividend-app/main/stocks.csv"
     try:
         return pd.read_csv(url, dtype={'종목코드': str})
+    # [안전장치] 연배당금_크롤링 열이 없으면 0.0으로 생성
+        if '연배당금_크롤링' not in df.columns:
+            df['연배당금_크롤링'] = 0.0
+            
+        return df
     except:
         return pd.DataFrame()
-
+        
 # --- [4] 배당금 갱신 로직 (스마트 Rolling) ---
 def update_dividend_rolling(current_history_str, new_dividend_amount):
     if pd.isna(current_history_str) or str(current_history_str).strip() == "":
@@ -571,3 +592,48 @@ def save_to_github(df):
 
     except Exception as e:
         return False, f"❌ 저장 실패: {str(e)}"
+
+# ▼▼▼ [1단계] 여기에 새 함수 추가 (save_to_github 바로 위에 붙여넣으세요) ▼▼▼
+
+def fetch_dividend_amount_hybrid(code, category):
+    """
+    [신규 엔진] %가 아니라 '연간 배당금 총액(원/달러)'을 긁어옵니다.
+    """
+    code = str(code).strip()
+    
+    # 1. 국내 (네이버 금융 API 사용)
+    if category == '국내':
+        try:
+            # 네이버 모바일 API (가장 정확함)
+            url = f"https://m.stock.naver.com/api/stock/{code}/dividend"
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            res = requests.get(url, headers=headers, timeout=5)
+            
+            if res.status_code == 200:
+                data = res.json()
+                items = data.get('items', [])
+                
+                # 가장 최신 배당금 1회분 추출
+                if items:
+                    latest_div = float(str(items[0].get('dividend', 0)).replace(',', ''))
+                    
+                    if latest_div > 0:
+                        # [중요] 월배당주라고 가정하고 12를 곱해서 연환산 금액 리턴
+                        # (491620의 경우 141 * 12 = 1692원이 나옵니다)
+                        annual_amount = latest_div * 12
+                        return annual_amount, "✅ 네이버(최신x12)"
+        except Exception as e:
+            pass
+            
+    # 2. 해외 (야후 파이낸스)
+    else:
+        try:
+            stock = yf.Ticker(code)
+            # 야후는 dividendRate가 이미 '연간 배당금'입니다.
+            rate = stock.info.get('dividendRate')
+            if rate and rate > 0:
+                return float(rate), "✅ 야후(Rate)"
+        except:
+            pass
+            
+    return 0.0, "❌ 조회실패"
