@@ -143,7 +143,7 @@ def show_wizard():
         col_a, col_b = st.columns(2)
         col_a.button("🔄 다시 하기", on_click=reset_wizard)
         
-        def finish(selected_picks):
+        def finish():
             # 1. 장바구니에 담기
             st.session_state.selected_stocks = picks
             
