@@ -359,19 +359,22 @@ def main():
         with col_rec2:
             st.write("") # 줄바꿈으로 높이 맞추기
             # [수정] 콜백 함수 안에서 '로그인 체크'와 '스위치 ON'을 한방에 처리
+            # [app.py] 버튼 클릭 함수 수정
             def try_open_modal():
                 if st.session_state.get("is_logged_in"):
-                    # 로그인 했으면 -> 문 열어라
+                    # 1. 문을 엽니다.
                     st.session_state.ai_modal_open = True
+                    
+                    # ▼▼▼ [추가] 열 때마다 1단계로 확실히 초기화! ▼▼▼
+                    st.session_state.wiz_step = 1
+                    st.session_state.wiz_data = {}
+                    # ▲▲▲
                 else:
-                    # 로그인 안했으면 -> 경고하고 문 닫아라
                     st.toast("🔒 로그인이 필요한 기능입니다!", icon="🔒")
                     st.session_state.ai_modal_open = False
             
-            # 버튼에는 on_click만 달아두면 됩니다. (if문 불필요)
             st.button("🕵️ AI 로보어드바이저 실행", use_container_width=True, type="primary", on_click=try_open_modal)
 
-            # 스위치가 'ON'일 때만 마법사를 부릅니다.
             if st.session_state.get("ai_modal_open", False):
                 recommendation.show_wizard()
         st.markdown("---") 
