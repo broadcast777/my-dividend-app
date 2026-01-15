@@ -11,40 +11,60 @@ import re
 import requests
 from github import Github
 
-# ==========================================
-# [1] 시세 조회 및 부품 함수 (Global Scope)
-# ==========================================
+def fetch_dividend_yield_hybrid(code, category):
+    """476800 및 신규 ETF까지 대응하는 3단계 정밀 조회 로직"""
+    import requests
+    import re
+    import yfinance as yf
 
-def _fetch_price_raw(broker, code, category):
-    """실제 가격 정보를 1회 조회하는 하위 부품"""
+    code_str = str(code).strip().zfill(6)
+    
+    # 1단계: 국내 종목이면 네이버 금융 정밀 타격
+    if category == '국내':
+        try:
+            url = f"https://finance.naver.com/item/main.naver?code={code_str}"
+            # 실제 사용자가 브라우저로 접속하는 것처럼 '신분증'을 더 강화
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Referer': 'https://finance.naver.com/'
+            }
+            res = requests.get(url, headers=headers, timeout=5)
+            
+            # [경로 A] 표준 배당수익률 태그 탐색
+            match = re.search(r'<em id="_dvd_rt">([\d.]+)</em>', res.text)
+            if match:
+                return float(match.group(1)), "네이버"
+
+            # [경로 B] 페이지 하단 요약 테이블 탐색 (476800 등 특정 종목 대응)
+            match_alt = re.search(r'배당수익률.*?([\d.]+)%?', res.text, re.S)
+            if match_alt:
+                # 숫자만 걸러내기
+                val = re.findall(r'\d+\.\d+', match_alt.group(0))
+                if val: return float(val[0]), "네이버(B)"
+
+        except:
+            pass # 네이버 실패 시 야후로 넘어감
+
+    # 2단계: 야후 파이낸스 시도 (어제 성공했던 예비 엔진)
     try:
-        code_str = str(code).strip()
-        if category == '국내':
-            try:
-                resp = broker.fetch_price(code_str)
-                if resp and isinstance(resp, dict) and 'output' in resp:
-                    if resp['output'] and resp['output'].get('stck_prpr'):
-                        return int(resp['output']['stck_prpr'])
-            except: pass
+        ticker_code = f"{code_str}.KS" if (category == '국내' and code_str.isdigit()) else code_str
+        stock = yf.Ticker(ticker_code)
         
-        # 한국투자증권 실패 시 야후로 백업
-        ticker_code = f"{code_str}.KS" if category == '국내' else code_str
-        ticker = yf.Ticker(ticker_code)
-        price = ticker.fast_info.get('last_price')
-        if not price:
-            hist = ticker.history(period="1d")
-            if not hist.empty:
-                price = hist['Close'].iloc[-1]
-        return float(price) if price else None
-    except: return None
+        # info가 막힐 수 있으므로 fast_info와 info를 차례로 확인
+        y_val = None
+        try:
+            info = stock.info
+            y_val = info.get('dividendYield') or info.get('trailingAnnualDividendYield')
+        except:
+            pass
 
-def get_safe_price(broker, code, category):
-    """[복구 포인트] 시세를 2번 시도해서 안전하게 가져오는 함수"""
-    for _ in range(2):
-        price = _fetch_price_raw(broker, code, category)
-        if price is not None: return price
-        time.sleep(0.5)
-    return None
+        if y_val:
+            return round(float(y_val) * 100, 2), "야후"
+            
+    except:
+        return 0.0, "엔진오류"
+
+    return 0.0, "데이터없음"
 
 def classify_asset(row):
     """종목명과 코드를 분석해 자산 유형 분류"""
