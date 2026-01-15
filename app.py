@@ -363,7 +363,7 @@ def main():
             def try_open_modal():
                 if st.session_state.get("is_logged_in"):
                     # 1. 문을 엽니다.
-                    st.session_state.ai_modal_open = True
+                 
                     
                     # ▼▼▼ [추가] 열 때마다 1단계로 확실히 초기화! ▼▼▼
                     st.session_state.wiz_step = 1
@@ -371,18 +371,11 @@ def main():
                     # ▲▲▲
                 else:
                     st.toast("🔒 로그인이 필요한 기능입니다!", icon="🔒")
-                    st.session_state.ai_modal_open = False
+                    
             
             st.button("🕵️ AI 로보어드바이저 실행", use_container_width=True, type="primary", on_click=try_open_modal)
                         # ✅ 이 부분도 다시 추가하세요!
-            if st.session_state.get("ai_modal_open", False):
-                # ✅ 팝업이 열릴 때 wizard 상태 초기화
-                if "wiz_step" not in st.session_state:
-                    st.session_state.wiz_step = 1
-                if "wiz_data" not in st.session_state:
-                    st.session_state.wiz_data = {}
-                
-                recommendation.show_wizard()
+            
 
         
         st.markdown("---") 
