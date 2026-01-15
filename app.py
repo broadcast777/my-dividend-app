@@ -353,15 +353,20 @@ def main():
             
         with col_rec2:
             st.write("") # 줄바꿈으로 높이 맞추기
-            if st.button("🕵️ AI 로보어드바이저 실행", use_container_width=True, type="primary"):
-                # [검문소] 로그인 여부 확인 ('is_logged_in' 변수 사용)
-                if st.session_state.get("is_logged_in") == True:
-                    # [통과] 로그인 됨 -> 마법사 실행 (df 데이터 전달 필수!)
-                    recommendation.show_wizard()
-                else:
-                    # [차단] 로그인 안 됨 -> 경고 메시지
+            def open_modal():
+                st.session_state.ai_modal_open = True
+                
+          
+            
+            if st.button("🕵️ AI 로보어드바이저 실행", use_container_width=True, type="primary", on_click=open_modal):
+                if not st.session_state.get("is_logged_in"):
                     st.toast("🔒 로그인이 필요한 기능입니다!", icon="🔒")
-                    st.error("이 기능은 로그인 후 이용하실 수 있습니다.")
+                    st.session_state.ai_modal_open = False # 로그인 안됐으면 다시 끔
+
+            # 2. 스위치가 'ON'일 때만 마법사를 부릅니다.
+            if st.session_state.get("ai_modal_open", False):
+                recommendation.show_wizard()
+            # ▲▲▲ [끝] ▲▲▲
 
         st.markdown("---") 
         # -----------------------------------------------------------------
