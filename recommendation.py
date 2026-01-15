@@ -141,11 +141,25 @@ def show_wizard():
         """)
         
         col_a, col_b = st.columns(2)
+        # [recommendation.py 파일의 맨 끝부분]
+
+        # 버튼 로직도 on_click으로 교체
         col_a.button("🔄 다시 하기", on_click=reset_wizard)
         
         def finish():
+            # 1. 장바구니에 담기
             st.session_state.selected_stocks = picks
+            
+            # 2. 다음을 위해 1단계로 초기화
             st.session_state.wiz_step = 1
+            
+            # ▼▼▼ [핵심] 스위치를 끕니다! (이 코드가 있어야 팝업이 닫힘) ▼▼▼
+            st.session_state.ai_modal_open = False 
+            # ▲▲▲
+            
+            # 3. 완료 메시지
+            st.toast("장바구니에 담았습니다! 🛒", icon="✅")
 
+        # 버튼을 누르면 finish()가 실행되어 스위치가 꺼지고 -> st.rerun()으로 화면이 새로고침되면서 팝업이 사라짐
         if col_b.button("✅ 장바구니 담기", type="primary", on_click=finish):
             st.rerun()
