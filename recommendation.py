@@ -40,11 +40,11 @@ def get_smart_recommendation(df, user_choices):
         
     theme_title = ""
     if style == 'growth':
-        theme_title = f"🚀 목표 {target_yield}%: 미국 성장주 중심 ({len(final_picks)}종목)"
+        theme_title = f"🚀 목표 {target_yield}%: 성장주 중심 ({len(final_picks)}종목)"
     elif style == 'safe':
         theme_title = f"🛡️ 목표 {target_yield}%: 안전자산 위주 ({len(final_picks)}종목)"
     else:
-        theme_title = f"💰 목표 {target_yield}%: 강력한 현금흐름 ({len(final_picks)}종목)"
+        theme_title = f"💰 목표 {target_yield}%: 현금흐름 추구 ({len(final_picks)}종목)"
         
     return theme_title, final_picks
 
@@ -179,4 +179,4 @@ def show_wizard():
             # dialog 안에서 toast는 잘 안 보일 수 있으니 생략하거나 여기서 종료
 
         if col_b.button("✅ 장바구니 담기", type="primary", on_click=finish):
-            st.rerun() # 팝업 닫고 메인 화면 갱신을 위해 여기만 rerun 사용
+            
