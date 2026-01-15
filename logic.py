@@ -11,39 +11,70 @@ import re
 import requests
 from github import Github
 
-# ==========================================
-# [1] 시세 조회 센서 (Safety Sensor)
-# ==========================================
-
-def _fetch_price_raw(broker, code, category):
+def fetch_dividend_yield_hybrid(code, category):
+    """
+    [최종 해결책] 
+    1. 차단이 적은 네이버 모바일 API 사용
+    2. 배당금(원)을 가져와서 현재가로 직접 계산
+    3. 실패 시 에러 원인을 상세히 표시
+    """
+    import requests
+    import yfinance as yf
+    
+    code_str = str(code).strip().zfill(6)
+    
+    # 1. 시세 확보 (야후 파이낸스가 시세는 차단이 덜함)
     try:
-        code_str = str(code).strip().zfill(6) if category == '국내' else str(code).strip()
-        if category == '국내':
-            try:
-                resp = broker.fetch_price(code_str)
-                if resp and isinstance(resp, dict) and 'output' in resp:
-                    if resp['output'] and resp['output'].get('stck_prpr'):
-                        return int(resp['output']['stck_prpr'])
-            except: pass
-        
-        ticker_code = f"{code_str}.KS" if category == '국내' else code_str
-        ticker = yf.Ticker(ticker_code)
-        price = ticker.fast_info.get('last_price')
-        if not price:
-            hist = ticker.history(period="1d")
-            if not hist.empty:
-                price = hist['Close'].iloc[-1]
-        return float(price) if price else None
-    except: return None
+        ticker_code = f"{code_str}.KS" if (category == '국내' and code_str.isdigit()) else code_str
+        stock = yf.Ticker(ticker_code)
+        curr_price = stock.fast_info.get('last_price') or 0
+    except:
+        curr_price = 0
 
-def get_safe_price(broker, code, category):
-    """시세를 2번 시도해서 안전하게 가져오는 함수"""
-    for _ in range(2):
-        price = _fetch_price_raw(broker, code, category)
-        if price is not None: return price
-        time.sleep(0.5)
-    return None
+    # 2. 국내 종목: 네이버 모바일 API 우회 (가장 강력한 방법)
+    if category == '국내':
+        try:
+            # PC 버전이 아닌 모바일 API 주소 (차단이 훨씬 적음)
+            url = f"https://m.stock.naver.com/api/stock/{code_str}/integration"
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1'
+            }
+            res = requests.get(url, headers=headers, timeout=5)
+            
+            if res.status_code == 200:
+                data = res.json()
+                # 476800 같은 종목도 totalInfo 안에는 '배당금(dividend)' 정보가 들어있습니다.
+                # 'dividend'는 원 단위의 금액입니다.
+                div_amt = data.get('totalInfo', {}).get('dividend')
+                
+                if div_amt and curr_price > 0:
+                    div_amt = float(str(div_amt).replace(',', ''))
+                    calc_yield = (div_amt / curr_price) * 100
+                    return round(calc_yield, 2), "✅ 네이버(M)"
+                
+                # 만약 금액은 없고 비율만 있다면
+                yld = data.get('totalInfo', {}).get('dividendYield')
+                if yld:
+                    return float(yld), "✅ 네이버(M-비율)"
+            
+            return 0.0, f"⚠️ 응답오류({res.status_code})"
 
+        except Exception as e:
+            return 0.0, f"❌ 접속불가({str(e)[:5]})"
+
+    # 3. 해외 종목: 야후 파이낸스 금액 기반 계산
+    else:
+        try:
+            div_rate = stock.info.get('dividendRate')
+            if div_rate and curr_price > 0:
+                return round((div_rate / curr_price) * 100, 2), "✅ 야후(금액)"
+            
+            dy = stock.info.get('dividendYield')
+            if dy: return round(dy * 100, 2), "✅ 야후(비율)"
+        except:
+            pass
+
+    return 0.0, "⚠️ 데이터 없음"
 # ==========================================
 # [2] 자산 분류 및 유틸리티
 # ==========================================
