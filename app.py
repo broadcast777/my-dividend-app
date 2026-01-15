@@ -801,6 +801,68 @@ def main():
 1. 본 결과는 주가·환율 변동과 수수료 등을 제외하고, 현재 배당률로만 계산한 결과입니다.
 2. ISA 계좌의 비과세 한도 및 세율은 세법 개정에 따라 달라질 수 있습니다.
 3. 과거의 데이터를 기반으로 한 단순 시뮬레이션이며, 실제 투자 수익을 보장하지 않습니다.""")
+                        with tab_goal:
+                            st.subheader("🎯 목표 배당금 역산기 (은퇴 시뮬레이터)")
+                            st.caption("내가 원하는 월급을 받기 위해 얼마를 더 모아야 할지 정밀하게 계산합니다.")
+                            
+                            col_g1, col_g2 = st.columns(2)
+                            with col_g1:
+                                # 선생님의 목표인 '금융종합과세 회피(연 1,999만원)'를 고려한 가이드 추가
+                                target_monthly_goal = st.number_input("목표 월 배당금 (만원, 세후)", min_value=10, value=166, step=10) * 10000
+                                st.caption(f"💡 월 166.5만원 설정 시 연간 약 1,998만원으로 절세가 가능합니다.")
+                                
+                                use_start_money = st.checkbox("위에서 설정한 초기 자산을 포함하여 계산", value=True)
+                                start_bal_goal = total_invest if use_start_money else 0
+                                
+                            with col_g2:
+                                monthly_add_goal = st.number_input("매월 추가 적립 가능 금액 (만원)", min_value=0, value=150, step=10) * 10000
+                                apply_inflation_goal = st.toggle("📈 목표치에 물가상승률 반영", value=False, help="미래의 가치가 현재의 얼마인지 고려하여 목표를 상향 조정합니다.")
+                        
+                            # 계산 로직 (수치 정밀도 유지)
+                            tax_factor = 0.846
+                            # 필요한 총 자산 = (목표 월배당 / 세후 비율) / (연배당률 / 12개월)
+                            required_asset_goal = (target_monthly_goal / tax_factor) / (avg_y / 100) * 12
+                            
+                            st.markdown("---")
+                            c_res1, c_res2 = st.columns(2)
+                            with c_res1:
+                                st.metric("목표 달성 필요 자산", f"{required_asset_goal/100000000:,.2f} 억원")
+                                st.caption(f"평균 배당률 {avg_y:.2f}% 및 배당세 15.4% 가정")
+                                
+                            with c_res2:
+                                current_bal_goal = start_bal_goal
+                                months_passed = 0
+                                max_months = 600 # 50년 제한
+                                
+                                # 
+                                # 시뮬레이션 루프
+                                while current_bal_goal < required_asset_goal and months_passed < max_months:
+                                    div_reinvest = current_bal_goal * (avg_y / 100 / 12) * tax_factor
+                                    current_bal_goal += monthly_add_goal + div_reinvest
+                                    months_passed += 1
+                                    
+                                if months_passed >= max_months:
+                                    st.error("⚠️ 현재 적립액으로는 50년 내 달성이 어렵습니다. 적립액을 높여주세요.")
+                                else:
+                                    st.metric("목표 달성까지 소요 기간", f"{months_passed // 12}년 {months_passed % 12}개월")
+                        
+                            # 결과 분석 메시지
+                            if apply_inflation_goal and months_passed < max_months:
+                                discount_factor = (1.025) ** (months_passed / 12)
+                                real_value = target_monthly_goal / discount_factor
+                                st.warning(f"⚠️ **물가 반영 시:** {months_passed // 12}년 뒤 {target_monthly_goal/10000:,.0f}만원의 실질 가치는 현재 기준 **약 {real_value/10000:,.1f}만원**입니다.")
+                            
+                            target_annual_income = target_monthly_goal * 12
+                            # 연 2,000만원 초과 여부 체크 (선생님의 핵심 관심사)
+                            if (target_annual_income / tax_factor) > 20000000:
+                                st.warning(f"🚨 **현실적 조언:** 목표 달성 시 연간 배당소득(세전)이 2,000만원을 초과하여 **금융소득종합과세** 대상이 될 수 있습니다.")
+                            elif (target_annual_income / tax_factor) > 19000000:
+                                st.success(f"✅ **절세 전략:** 현재 목표는 금융소득종합과세 기준선 이내에서 최적화되어 있습니다.")
+                        
+                            st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**
+                        1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 단순 결과입니다.
+                        2. 재투자가 매월 칼같이 이루어진다는 가정하에 계산된 복리 결과입니다.
+                        3. 실제 투자 시에는 배당 삭감이나 주가 하락의 리스크를 반드시 고려해야 합니다.""")
 
     elif menu == "📃 전체 종목 리스트":
         st.info("💡 **이동 안내:** '코드' 클릭 시 블로그 분석글로, '🔗정보' 클릭 시 네이버/야후 금융 정보로 이동합니다. (**⭐ 표시는 상장 1년 미만 종목입니다.**)")
