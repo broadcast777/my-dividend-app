@@ -348,7 +348,7 @@ def main():
         col_rec1, col_rec2 = st.columns([2, 1])
         
         with col_rec1:
-            st.info("🤔 **어떤 종목을 담아야 할지 막막하신가요?**\n\nAI가 선생님의 성향을 분석해 최적의 포트폴리오를 제안합니다.")
+            st.info("🤔 **어떤 종목을 담아야 할지 막막하신가요?**\n\nAI가 성향을 분석해 최적의 포트폴리오를 제안합니다.")
             
         with col_rec2:
             st.write("") # 줄바꿈으로 높이 맞추기
@@ -359,7 +359,7 @@ def main():
                     recommendation.show_wizard(df)
                 else:
                     # [차단] 로그인 안 됨 -> 경고 메시지
-                    st.toast("🔒 로그인이 필요한 프리미엄 기능입니다!", icon="🔒")
+                    st.toast("🔒 로그인이 필요한 기능입니다!", icon="🔒")
                     st.error("이 기능은 로그인 후 이용하실 수 있습니다.")
 
         st.markdown("---") 
