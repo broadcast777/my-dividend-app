@@ -32,31 +32,27 @@ for key in ["is_logged_in", "user_info", "code_processed"]:
 # ---------------------------------------------------------
 supabase = db.init_supabase()
 
-# ==========================================
-# [2] 인증 상태 체크 (auth.py 엔진 연동)
-# ==========================================
 def check_auth_status():
+    if not supabase: return
+    
     success, user_info, status_type = auth.check_auth_logic(supabase)
     
     if success:
         st.session_state.is_logged_in = True
         st.session_state.user_info = user_info
-        if status_type == "CALLBACK":
-            st.query_params.clear()
-            st.success("✅ 로그인되었습니다!")
+        
+        # 새로 로그인 성공했거나, 로그인 상태인데 URL에 찌꺼기가 남은 경우
+        if status_type in ["CALLBACK", "EXISTING_WITH_CODE"]:
+            if status_type == "CALLBACK":
+                st.success("✅ 로그인되었습니다!")
+            st.query_params.clear() # URL 깨끗하게 삭정
             st.rerun()
-        elif "code" in st.query_params or "old_id" in st.query_params:
-            st.query_params.clear()
-    
+            
     elif status_type == "VERIFIER_ERROR":
-        st.warning("🔄 보안 토큰 갱신 중... 잠시만 기다려주세요.")
+        st.warning("🔄 보안 토큰 갱신 중...")
         st.query_params.clear()
         time.sleep(1.0)
         st.rerun()
-    
-    elif status_type == "OTHER_ERROR":
-        st.error(f"🔴 인증 오류: {user_info}") # user_info에 에러메시지가 담겨옴
-        st.query_params.clear()
 
 # ==========================================
 # [3] 로그인 UI 함수 (사이드바용)
