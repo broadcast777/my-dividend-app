@@ -111,7 +111,7 @@ def main():
     # [청소기 가동] 앱 시작 시 24시간 지난 토큰 삭제
     db.cleanup_old_tokens()
 
-    MAINTENANCE_MODE = True
+    MAINTENANCE_MODE = False
     
     # [1] 값 초기화
     if "total_invest" not in st.session_state: st.session_state.total_invest = 30000000
