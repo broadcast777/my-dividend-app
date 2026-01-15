@@ -41,18 +41,15 @@ def render_custom_table(data_frame):
     </div>
     """, unsafe_allow_html=True)
 
-# ==========================================
-# [2] 신규 기능: 관리자 섹션 통합 (app.py 다이어트용)
-# ==========================================
 def render_admin_section(df_raw, supabase):
-    """관리자용 사이드바 도구와 로그 섹션 (기존 로직 100% 보존)"""
+    """관리자용 사이드바 도구와 로그 섹션 (신규 필터링 자동화 로직 추가)"""
     
     # 1. 사이드바 관리자 도구
     with st.sidebar:
         st.markdown("---")
         st.subheader("🛠️ 배당금 갱신 도구")
         
-        # 종목 선택 리스트 생성
+        # [A] 종목 선택 및 개별 조회 (수동 공정)
         stock_options = {}
         for _, row in df_raw.iterrows():
             name = row['종목명']
@@ -84,9 +81,54 @@ def render_admin_section(df_raw, supabase):
                 st.success("완료!"); st.code(new_hist)
 
         st.markdown("---")
+        
+        # [B] ⚡ 전체 자동 업데이트 (일괄 자동화 공정)
+        st.subheader("⚡ 일괄 업데이트")
+        with st.expander("일반 종목 자동 삭정 (신규 제외)"):
+            if st.button("자동 갱신 시작", type="primary", use_container_width=True):
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                
+                df_temp = df_raw.copy()
+                total_stocks = len(df_temp)
+                updated_count = 0
+                skipped_count = 0
+
+                for i, row in df_temp.iterrows():
+                    # 진행바 업데이트
+                    progress_bar.progress((i + 1) / total_stocks)
+                    
+                    # [핵심 안전 센서] 신규 상장 종목 필터링
+                    try: months = int(row.get('신규상장개월수', 0))
+                    except: months = 0
+                    
+                    if months > 0:
+                        status_text.caption(f"⏩ {row['종목명']} (신규 종목 패스)")
+                        skipped_count += 1
+                        continue # 신규 상장주는 업데이트를 수행하지 않고 다음 공정으로!
+
+                    # 일반 종목 데이터 갱신
+                    code, cat = str(row['종목코드']).strip(), str(row.get('분류','국내')).strip()
+                    status_text.caption(f"🔍 {row['종목명']} 조회 중...")
+                    
+                    y_val, _ = logic.fetch_dividend_yield_hybrid(code, cat)
+                    
+                    if y_val > 0:
+                        df_temp.at[i, '연배당률'] = round(y_val, 2)
+                        updated_count += 1
+                    
+                    # 서버 과부하 방지를 위한 미세한 공정 대기
+                    time.sleep(0.1)
+                
+                status_text.text("✅ 공정 완료!")
+                st.success(f"성공: {updated_count}건 / 신규 보호: {skipped_count}건")
+                # 결과물을 세션 스테이트에 저장 (나중에 깃허브 저장 시 사용)
+                st.session_state.df_dirty = df_temp
+
+        st.markdown("---")
         st.subheader("💾 데이터 저장 및 백업")
         
-        # 백업 버튼
+        # 백업 및 저장 (수정 없음)
         st.download_button(
             label="📂 현재 파일 백업하기", 
             data=df_raw.to_csv(index=False).encode('utf-8'), 
@@ -95,7 +137,6 @@ def render_admin_section(df_raw, supabase):
             use_container_width=True
         )
 
-        # 깃허브 최종 저장
         st.info("💡 수정 사항을 반영하시겠습니까?")
         if st.checkbox("네, 덮어써도 좋습니다.", key="admin_save_confirm"):
             if st.button("🚀 깃허브에 영구 저장 (Commit)", type="primary", use_container_width=True):
@@ -104,10 +145,10 @@ def render_admin_section(df_raw, supabase):
                 if success:
                     st.success(msg)
                     st.balloons()
-                    time.sleep(2) # 전역 time 라이브러리 사용
+                    time.sleep(2)
                     st.rerun()
 
-    # 2. 메인 화면 하단 관리자 로그
+    # 2. 메인 화면 하단 관리자 로그 (기존과 동일)
     if supabase:
         with st.expander("🛠️ 관리자 전용: 최근 유입 로그 (최근 5건)", expanded=False):
             try:
