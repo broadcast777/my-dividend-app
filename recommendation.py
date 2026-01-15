@@ -187,32 +187,44 @@ def show_wizard():
 
         st.button("🚀 결과 확인하기", type="primary", use_container_width=True, on_click=save_and_go)
 
-    # --- [STEP 5] 결과 및 담기 ---
-    elif step == 5:
-        with st.spinner("AI가 최적의 조합을 찾는 중..."):
-            time.sleep(0.7) 
-            title, picks = get_smart_recommendation(df, st.session_state.wiz_data)
-        
-        user_name = st.session_state.get("user_id", st.session_state.get("user_email", "회원님"))
-        if "@" in user_name: user_name = user_name.split("@")[0]
-
-        st.success(f"**{title}**")
-        st.write(f"**{user_name}** 님의 조건에 딱 맞는 종목들입니다.")
-        
+    # [recommendation.py] Step 5의 출력 부분
         st.write("📋 **추천 리스트 (상세 정보)**")
+        
         for stock in picks:
             row = df[df['pure_name'] == stock]
             if not row.empty:
                 r_data = row.iloc[0]
                 rate = r_data['연배당률']
                 
-                # 안전한 접근 (Safe Access)
+                # 1. 배당락일 (없으면 '-')
                 date = str(r_data.get('배당락일', '-'))
-                hist_raw = str(r_data.get('배당기록', ''))
-                hist_len = len(hist_raw.split('|')) if hist_raw else 0
+                if date == 'nan': date = '-'
                 
+                # 2. [수정] 직전 배당금 추출 로직
+                hist_raw = str(r_data.get('배당기록', ''))
+                last_div = "0"
+                
+                if hist_raw and hist_raw != 'nan':
+                    try:
+                        # 파이프(|)로 나누고 가장 첫 번째(최신) 값 가져오기
+                        # (데이터가 '최신|과거|...' 순서라고 가정, 반대라면 [-1]로 변경)
+                        vals = hist_raw.split('|')
+                        if vals:
+                            last_div = vals[0].strip()
+                    except:
+                        last_div = "0"
+
+                # 3. [디테일] 통화 단위 붙이기 (국내=원 / 해외=$)
+                category = str(r_data.get('분류', '국내'))
+                if '해외' in category:
+                    div_str = f"${last_div}" # 달러
+                else:
+                    div_str = f"{last_div}원" # 원화
+
+                # 출력
                 st.text(f"- {stock}")
-                st.caption(f"  └ 💰 {rate:.2f}% | 📅 {date} | 📊 지급이력 {hist_len}회")
+                # "지급이력 N회" -> "지난달 배당금 300원" 으로 변경!
+                st.caption(f"  └ 💰 연 {rate:.2f}% | 📅 {date} | 💸 지난달 {div_str}")
             else:
                 st.text(f"- {stock}")
         
