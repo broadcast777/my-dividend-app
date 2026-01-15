@@ -178,5 +178,5 @@ def show_wizard():
             st.session_state.wiz_step = 1
             # dialog 안에서 toast는 잘 안 보일 수 있으니 생략하거나 여기서 종료
 
-        if col_b.button("✅ 장바구니 담기", type="primary", on_click=finish):
+        col_b.button("✅ 장바구니 담기", type="primary", on_click=finish):
             
