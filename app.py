@@ -368,6 +368,7 @@ def main():
                     # ▼▼▼ [추가] 열 때마다 1단계로 확실히 초기화! ▼▼▼
                     st.session_state.wiz_step = 1
                     st.session_state.wiz_data = {}
+                    recommendation.show_wizard()
                     # ▲▲▲
                 else:
                     st.toast("🔒 로그인이 필요한 기능입니다!", icon="🔒")
