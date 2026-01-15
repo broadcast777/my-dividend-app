@@ -146,26 +146,23 @@ def show_wizard():
         # 버튼 로직도 on_click으로 교체
         col_a.button("🔄 다시 하기", on_click=reset_wizard)
         
+        # ▼▼▼ [피드백 반영된 최종 finish 함수] ▼▼▼
         def finish():
             # 1. 장바구니에 담기
             st.session_state.selected_stocks = picks
             
-            # 2. 다음을 위해 1단계로 초기화
+            # 2. 다음을 위해 초기화
             st.session_state.wiz_step = 1
             
-            # ▼▼▼ [핵심] 스위치를 끕니다! (이 코드가 있어야 팝업이 닫힘) ▼▼▼
+            # 3. 모달 닫기 (이것만 있으면 됩니다!)
             st.session_state.ai_modal_open = False 
-            # ▲▲▲
             
-            # 3. 완료 메시지
+            # 4. 메시지
             st.toast("장바구니에 담았습니다! 🛒", icon="✅")
+            
+            # ❌ [삭제] st.query_params[...] -> 흰 화면의 주범!
+            # ❌ [삭제] st.rerun() -> 여기서 안 해도 됩니다!
 
-        # ▼▼▼ [필살기] 메인 앱 강제 깨우기 (이게 해결책입니다!) ▼▼▼
-            # 주소창에 의미 없는 신호를 보내서 앱 전체를 새로고침시킵니다.
-            st.query_params["refresh"] = str(random.randint(0, 999999))
-            # ▲▲▲
-
-        # ▼▼▼ [수정된 부분] ▼▼▼
-        # if문과 st.rerun()을 삭제하고, 버튼만 깔끔하게 남깁니다.
-        # 콜백(finish)이 끝나면 자동으로 메인 화면이 갱신되며 팝업이 닫힙니다.
+        # 버튼 (on_click으로 finish 실행 -> 스위치 OFF -> 팝업 다시 그려짐 -> 
+        # 맨 위 if문(문지기)이 감지 -> st.rerun()으로 팝업 닫힘)
         col_b.button("✅ 장바구니 담기", type="primary", on_click=finish)
