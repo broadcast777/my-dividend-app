@@ -4,7 +4,7 @@ import random
 import pandas as pd
 
 # -----------------------------------------------------------
-# [1] 스마트 필터링 엔진 (로직)
+# [1] 스마트 필터링 엔진
 # -----------------------------------------------------------
 def get_smart_recommendation(df, user_choices):
     target_yield = user_choices.get('target_yield', 7.0)
@@ -12,7 +12,6 @@ def get_smart_recommendation(df, user_choices):
     wanted_count = user_choices.get('count', 5)
     
     pool = df[df['연배당률'] > 0].copy()
-    
     keywords = []
     
     if style == 'growth':
@@ -30,7 +29,6 @@ def get_smart_recommendation(df, user_choices):
 
     candidates['diff'] = abs(candidates['연배당률'] - target_yield)
     candidates = candidates.sort_values('diff')
-    
     top_candidates = candidates.head(15)['pure_name'].tolist()
     
     if len(top_candidates) >= wanted_count:
@@ -65,6 +63,8 @@ def reset_wizard():
 # -----------------------------------------------------------
 @st.dialog("🕵️ AI 포트폴리오 설계", width="small")
 def show_wizard():
+    # [삭제됨] 문지기 코드 (st.rerun) 삭제! -> 이게 무한루프의 주범이었습니다.
+    
     # 1. 안전하게 데이터 꺼내기
     df = st.session_state.get('shared_df')
     if df is None:
@@ -141,28 +141,18 @@ def show_wizard():
         """)
         
         col_a, col_b = st.columns(2)
-        # [recommendation.py 파일의 맨 끝부분]
-
-        # 버튼 로직도 on_click으로 교체
         col_a.button("🔄 다시 하기", on_click=reset_wizard)
         
-        # ▼▼▼ [피드백 반영된 최종 finish 함수] ▼▼▼
+        # ▼▼▼ [최종] 심플 이즈 베스트 ▼▼▼
         def finish():
-            # 1. 장바구니에 담기
+            # 1. 담기
             st.session_state.selected_stocks = picks
-            
-            # 2. 다음을 위해 초기화
+            # 2. 초기화
             st.session_state.wiz_step = 1
-            
-            # 3. 모달 닫기 (이것만 있으면 됩니다!)
+            # 3. 스위치 끄기 -> 이것만 하면 Streamlit이 알아서 App을 갱신합니다.
             st.session_state.ai_modal_open = False 
-            
-            # 4. 메시지
             st.toast("장바구니에 담았습니다! 🛒", icon="✅")
-            
-            # ❌ [삭제] st.query_params[...] -> 흰 화면의 주범!
-            # ❌ [삭제] st.rerun() -> 여기서 안 해도 됩니다!
 
-        # 버튼 (on_click으로 finish 실행 -> 스위치 OFF -> 팝업 다시 그려짐 -> 
-        # 맨 위 if문(문지기)이 감지 -> st.rerun()으로 팝업 닫힘)
+        # 🚨 중요: 여기서 st.rerun()을 호출하지 마세요!
+        # on_click이 실행되고 상태가 변하면, Streamlit이 알아서 처리합니다.
         col_b.button("✅ 장바구니 담기", type="primary", on_click=finish)
