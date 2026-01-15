@@ -111,7 +111,7 @@ def main():
     # [청소기 가동] 앱 시작 시 24시간 지난 토큰 삭제
     db.cleanup_old_tokens()
 
-    MAINTENANCE_MODE = True
+    MAINTENANCE_MODE = False
     
     # [1] 값 초기화
     if "total_invest" not in st.session_state: st.session_state.total_invest = 30000000
@@ -357,7 +357,7 @@ def main():
                 # [검문소] 로그인 여부 확인 ('is_logged_in' 변수 사용)
                 if st.session_state.get("is_logged_in") == True:
                     # [통과] 로그인 됨 -> 마법사 실행 (df 데이터 전달 필수!)
-                    recommendation.show_wizard(df)
+                    recommendation.show_wizard()
                 else:
                     # [차단] 로그인 안 됨 -> 경고 메시지
                     st.toast("🔒 로그인이 필요한 기능입니다!", icon="🔒")
