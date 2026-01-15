@@ -144,17 +144,13 @@ def show_wizard():
         col_a.button("🔄 다시 하기", on_click=reset_wizard)
         
         def finish():
-            # 1. 담기
+            # 1. 장바구니에 담기
             st.session_state.selected_stocks = picks
             
-            # 2. [수정됨] 여기서 wiz_step을 1로 초기화하지 않습니다!
-            # (app.py에서 열 때 초기화하도록 바꿨습니다)
+            # 2. 팝업을 닫도록 신호 보내기
+            st.session_state.ai_modal_open = False
             
-            # 3. 스위치 끄기
-            st.session_state.ai_modal_open = False 
+            # 3. 완료 메시지
             st.toast("장바구니에 담았습니다! 🛒", icon="✅")
-
-        # ▼▼▼ 버튼 (st.rerun() 부활) ▼▼▼
-        # on_click으로 상태를 바꾸고, rerun으로 메인 앱을 깨워 즉시 닫습니다.
-        if col_b.button("✅ 장바구니 담기", type="primary", on_click=finish):
-            st.rerun()
+            
+            # ✅ 이것으로 끝! (st.rerun() 제거, wiz_step 초기화 제거)
