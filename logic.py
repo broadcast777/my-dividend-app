@@ -12,7 +12,7 @@ import requests
 from github import Github
 
 # ==========================================
-# [1] 시세 조회 유틸리티 (Global)
+# [1] 시세 조회 및 유틸리티 (Global)
 # ==========================================
 
 def _fetch_price_raw(broker, code, category):
@@ -42,19 +42,22 @@ def get_safe_price(broker, code, category):
         time.sleep(0.5)
     return None
 
+# ==========================================
+# [2] 배당률 정밀 조회 엔진 (히스토리 합산 방식)
+# ==========================================
+
 def fetch_dividend_yield_hybrid(code, category):
     """
-    [정밀 수리 버전]
-    1. 해외: 야후 파이낸스 사용 + 소수점 단위 오류(1149% 등) 자동 보정
-    2. 국내: 네이버 모바일 배당 히스토리 API 호출 -> 최근 1년치 합산(TTM) 후 직접 계산
+    [최종 진화형]
+    1. 국내: 네이버 '배당 히스토리' API 호출 -> 최근 1년치 합산 후 실시간 시세로 연산
+    2. 해외: 야후 파이낸스 -> 소수점 단위 오류(1149%) 자동 필터링
     """
     import requests
-    import yfinance as yf
     from datetime import datetime, timedelta
 
     code_str = str(code).strip().zfill(6) if category == '국내' else str(code).strip()
     
-    # [1] 분모(현재가) 확보
+    # [분모] 한투 API 기반 실시간 시세 확보
     try:
         broker = mojito.KoreaInvestment(
             api_key=st.secrets["kis"]["app_key"], 
@@ -65,12 +68,10 @@ def fetch_dividend_yield_hybrid(code, category):
         curr_price = get_safe_price(broker, code_str, category)
     except: curr_price = 0
 
-    # ==========================================
-    # [A] 국내 종목: 네이버 배당 히스토리 정밀 합산
-    # ==========================================
+    # [A] 국내 종목: 배당 내역 1년치 합산 (TTM 방식)
     if category == '국내':
         try:
-            # 선생님이 말씀하신 '배당 분석' 데이터의 원천 API
+            # 선생님이 말씀하신 '배당분석' 탭의 실제 데이터 소스
             url = f"https://m.stock.naver.com/api/stock/{code_str}/dividend"
             headers = {'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)'}
             res = requests.get(url, headers=headers, timeout=5)
@@ -82,55 +83,45 @@ def fetch_dividend_yield_hybrid(code, category):
                 if items and curr_price > 0:
                     today = datetime.now()
                     one_year_ago = today - timedelta(days=365)
-                    
                     annual_div_sum = 0
-                    valid_items_count = 0
+                    count = 0
                     
                     for item in items:
-                        # 배당기준일(recordDate) 확인
-                        rec_date_str = item.get('recordDate') # "2024.12.31"
+                        rec_date_str = item.get('recordDate') # 예: "2024.12.31"
                         div_val = float(str(item.get('dividend', 0)).replace(',', ''))
                         
                         if rec_date_str:
                             rec_date = datetime.strptime(rec_date_str, "%Y.%m.%d")
-                            # 최근 1년 이내의 배당 내역만 합산
+                            # 최근 1년 이내 데이터만 합산
                             if rec_date >= one_year_ago:
                                 annual_div_sum += div_val
-                                valid_items_count += 1
+                                count += 1
                     
-                    # [특수 보정] 476800 같은 신규 상장 월배당 ETF 대응
-                    # 내역이 12개가 안 되는데 '프리미엄'이나 '월배당' 성격인 경우 최신값 * 12
-                    if 0 < valid_items_count < 12:
+                    # [특수 보정] 476800 같은 신규 상장주는 내역이 부족하므로 최신값 * 12로 환산
+                    if 0 < count < 10:
                         recent_val = float(str(items[0].get('dividend', 0)).replace(',', ''))
-                        # 연간 예상치로 환산
                         annual_div_sum = recent_val * 12
                     
                     if annual_div_sum > 0:
+                        # 공식: (1년 배당금 총합 / 현재가) * 100
                         calc_yield = (annual_div_sum / curr_price) * 100
-                        return round(calc_yield, 2), "네이버(히스토리)"
+                        return round(calc_yield, 2), "네이버(H)"
         except: pass
 
-    # ==========================================
-    # [B] 해외 종목: 야후 파이낸스 + 소수점 단위 보정
-    # ==========================================
+    # [B] 해외 종목: 야후 파이낸스 + 단위 필터
     else:
         try:
             stock = yf.Ticker(code_str)
             info = stock.info
-            
-            # 야후는 0.08(8%) 또는 8.0(8%)를 혼용해서 줌
             raw_yield = info.get('dividendYield') or info.get('trailingAnnualDividendYield')
             
             if raw_yield:
                 val = float(raw_yield)
-                # 1.0보다 작으면(예: 0.1149) 100을 곱해서 11.49로 만듦
-                if val < 1.0: val *= 100 
-                # 100보다 크면(예: 1149.0) 100으로 나눠서 11.49로 만듦 (1149% 오류 방어)
-                elif val > 100: val /= 100
-                
+                if val < 1.0: val *= 100 # 0.11 -> 11.0
+                elif val > 100: val /= 100 # 1149 -> 11.49
                 return round(val, 2), "야후"
             
-            # 배당률이 비어있으면 배당금액(dividendRate)으로 직접 계산
+            # 금액 데이터로 직접 계산 시도
             div_rate = info.get('dividendRate')
             if div_rate and curr_price > 0:
                 calc_val = (float(div_rate) / curr_price) * 100
@@ -141,7 +132,7 @@ def fetch_dividend_yield_hybrid(code, category):
     return 0.0, "조회실패"
 
 # ==========================================
-# [3] 기타 유틸리티 함수 (중략 없이 포함)
+# [3] 데이터 로드 및 렌더링 로직 (기존 유지)
 # ==========================================
 
 def load_stock_data_from_csv():
@@ -194,15 +185,6 @@ def calculate_google_calendar_url(ticker_name, pay_date_str):
         return f"https://www.google.com/calendar/render?action=TEMPLATE&text={title}&dates={safe_buy_date.strftime('%Y%m%d')}/{(safe_buy_date + datetime.timedelta(days=1)).strftime('%Y%m%d')}&details={details}"
     except: return None
 
-def generate_portfolio_ics(selected_stocks_data):
-    cal_content = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//DividendPange//Portfolio//KO", "METHOD:PUBLISH"]
-    for item in selected_stocks_data:
-        name = item.get('종목', '종목명')
-        event = ["BEGIN:VEVENT", f"SUMMARY:💰 [{name}] 매수 준비 (D-3)", "END:VEVENT"]
-        cal_content.extend(event)
-    cal_content.append("END:VCALENDAR")
-    return "\n".join(cal_content)
-
 @st.cache_data(ttl=600, show_spinner=False)
 def load_and_process_data(df_raw, is_admin=False):
     if df_raw.empty: return pd.DataFrame()
@@ -240,6 +222,10 @@ def load_and_process_data(df_raw, is_admin=False):
             results[idx] = res
     final = [r for r in results if r is not None]
     return pd.DataFrame(final).sort_values('연배당률', ascending=False)
+
+# ==========================================
+# [4] 배당 히스토리 업데이트 및 시뮬레이션
+# ==========================================
 
 def update_dividend_rolling(current_history_str, new_dividend_amount):
     if pd.isna(current_history_str) or str(current_history_str).strip() == "": history = []
