@@ -239,28 +239,30 @@ def main():
                         try: months = int(row.get('신규상장개월수', 0))
                         except: months = 0
                         
-                        # 신규이거나 배당률 조회 실패 시 스킵
-                        if months > 0:
+                        # [보호 장치] 신규 상장 종목(12개월 미만)은 크롤링 패스
+                        if 0 < months < 12:
                             skipped_count += 1
                             continue
                         
+                        # [핵심 변경] %가 아니라 '금액'을 긁어옵니다!
                         code = str(row['종목코드']).strip()
                         cat = str(row.get('분류', '국내')).strip()
-                        y_val, _ = logic.fetch_dividend_yield_hybrid(code, cat)
                         
-                        if y_val < 2.0:
-                            skipped_count += 1
-                            continue
-
-                        # ▼ 이 한 줄을 추가해야 '연배당률' 열에 데이터가 기록됩니다.
-                        df_temp.at[i, '연배당률'] = round(y_val, 2) 
+                        # logic.py에 새로 만든 함수 호출 (금액 긁어오기)
+                        amt, src = logic.fetch_dividend_amount_hybrid(code, cat)
                         
-                        updated_count += 1
+                        if amt > 0:
+                            # 긁어온 금액을 '연배당금_크롤링' 열에 저장 (새로운 저장소)
+                            df_temp.at[i, '연배당금_크롤링'] = amt
+                            updated_count += 1
+                        else:
+                            # 실패하면 건너뜀 (기존 데이터 유지)
+                            pass
                             
-                        
-                        
                     status_text.text("완료!")
-                    st.success(f"✅ {updated_count}개 업데이트 대기 / 🛡️ {skipped_count}개 보호됨")
+                    st.success(f"✅ {updated_count}개 금액 갱신 완료 / 🛡️ {skipped_count}개 신규주 보호됨")
+                    
+                    # 변경된 데이터 임시 저장
                     st.session_state.df_dirty = df_temp
 
             st.markdown("---")
