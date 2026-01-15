@@ -74,7 +74,7 @@ def get_smart_recommendation(df, user_choices):
 # [2] UI 위자드 (3단계 질문 + 슬라이더)
 # -----------------------------------------------------------
 @st.dialog("🕵️ AI 포트폴리오 설계", width="small")
-def show_wizard(df):
+def show_wizard():
     # 세션 상태 초기화
     if "wiz_step" not in st.session_state:
         st.session_state.wiz_step = 1
