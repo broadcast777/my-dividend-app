@@ -227,24 +227,30 @@ def load_and_process_data(df_raw, is_admin=False):
 
             # 2. 분자(연배당금) 확정 ("어떤 돈을 믿을 것인가?")
             
-            # (A) 신규 상장 종목 (12개월 미만) -> 수동 데이터 신뢰
+            # -----------------------------------------------------------
+            # [핵심 로직] 분자(배당금) 확정
+            # -----------------------------------------------------------
             if 0 < months < 12:
-                # 491620 오차 원인 제거: 불필요한 나눗셈 삭제
-                # 만약 수동 입력값이 500원 미만(1회분)이면 12를 곱하고, 아니면(합계면) 그대로 씀
-                if manual_div < 500 and category == '국내':
-                    target_div = manual_div * 12
+                # [수정] 신규 상장주는 '지금까지 받은 총액'을 '개월수'로 나눠야 함
+                # 예: SOL 금커버드콜 (363원, 9개월) -> (363 / 9) * 12 = 484원 (약 3.2%)
+                
+                # 수동 데이터가 합계라고 가정하고 월평균을 구함
+                if manual_div > 0:
+                    monthly_avg = manual_div / months
+                    target_div = monthly_avg * 12
                 else:
-                    target_div = manual_div
+                    # 수동 데이터도 없으면 크롤링 값 시도
+                    target_div = crawled_div if crawled_div > 0 else 0
+                
                 display_name = f"{name} ⭐"
 
             # (B) 일반 종목 -> 크롤링 데이터 신뢰 (없으면 수동)
             else:
                 if crawled_div > 0:
-                    target_div = crawled_div # 어제 만든 크롤러가 가져온 값
+                    target_div = crawled_div # 야후/네이버가 가져온 값
                 else:
                     target_div = manual_div  # 기존 수동 값
                 
-                # 기존 로직 방어 (연배당률 열이 이미 계산되어 있어도 무시하고 재계산)
                 display_name = name
 
             # 3. 최종 실시간 배당률 계산
