@@ -187,46 +187,61 @@ def show_wizard():
 
         st.button("🚀 결과 확인하기", type="primary", use_container_width=True, on_click=save_and_go)
 
-    # [recommendation.py] Step 5의 출력 부분
+    # --- [STEP 5] 결과 및 담기 ---
+    elif step == 5:
+        # [핵심 수정] 결과를 세션에 저장해서 'NameError' 방지 & 재계산 방지
+        if "ai_result_cache" not in st.session_state:
+            with st.spinner("AI가 최적의 조합을 찾는 중..."):
+                time.sleep(0.7) 
+                # 여기서 계산 실행
+                title_res, picks_res = get_smart_recommendation(df, st.session_state.wiz_data)
+                # 결과 저장
+                st.session_state.ai_result_cache = {"title": title_res, "picks": picks_res}
+        
+        # 저장된 결과 불러오기 (이제 변수가 사라지지 않습니다!)
+        cached_data = st.session_state.ai_result_cache
+        title = cached_data["title"]
+        picks = cached_data["picks"]
+        
+        user_name = st.session_state.get("user_id", st.session_state.get("user_email", "회원님"))
+        if "@" in user_name: user_name = user_name.split("@")[0]
+
+        st.success(f"**{title}**")
+        st.write(f"**{user_name}** 님의 조건에 딱 맞는 종목들입니다.")
+        
         st.write("📋 **추천 리스트 (상세 정보)**")
         
-        for stock in picks:
-            row = df[df['pure_name'] == stock]
-            if not row.empty:
-                r_data = row.iloc[0]
-                rate = r_data['연배당률']
-                
-                # 1. 배당락일 (없으면 '-')
-                date = str(r_data.get('배당락일', '-'))
-                if date == 'nan': date = '-'
-                
-                # 2. [수정] 직전 배당금 추출 로직
-                hist_raw = str(r_data.get('배당기록', ''))
-                last_div = "0"
-                
-                if hist_raw and hist_raw != 'nan':
-                    try:
-                        # 파이프(|)로 나누고 가장 첫 번째(최신) 값 가져오기
-                        # (데이터가 '최신|과거|...' 순서라고 가정, 반대라면 [-1]로 변경)
-                        vals = hist_raw.split('|')
-                        if vals:
-                            last_div = vals[0].strip()
-                    except:
-                        last_div = "0"
+        # [수정] picks가 비어있을 경우를 대비한 방어 코드
+        if not picks:
+            st.warning("조건에 맞는 종목을 찾지 못했습니다. 다시 시도해주세요.")
+        else:
+            for stock in picks:
+                row = df[df['pure_name'] == stock]
+                if not row.empty:
+                    r_data = row.iloc[0]
+                    rate = r_data['연배당률']
+                    
+                    # 안전한 접근 (Safe Access)
+                    date = str(r_data.get('배당락일', '-'))
+                    if date == 'nan': date = '-'
+                    
+                    # 직전 배당금 추출
+                    hist_raw = str(r_data.get('배당기록', ''))
+                    last_div = "0"
+                    if hist_raw and hist_raw != 'nan':
+                        try:
+                            vals = hist_raw.split('|')
+                            if vals: last_div = vals[0].strip()
+                        except: last_div = "0"
 
-                # 3. [디테일] 통화 단위 붙이기 (국내=원 / 해외=$)
-                category = str(r_data.get('분류', '국내'))
-                if '해외' in category:
-                    div_str = f"${last_div}" # 달러
+                    # 통화 단위
+                    category = str(r_data.get('분류', '국내'))
+                    div_str = f"${last_div}" if '해외' in category else f"{last_div}원"
+
+                    st.text(f"- {stock}")
+                    st.caption(f"  └ 💰 연 {rate:.2f}% | 📅 {date} | 💸 지난달 {div_str}")
                 else:
-                    div_str = f"{last_div}원" # 원화
-
-                # 출력
-                st.text(f"- {stock}")
-                # "지급이력 N회" -> "지난달 배당금 300원" 으로 변경!
-                st.caption(f"  └ 💰 연 {rate:.2f}% | 📅 {date} | 💸 지난달 {div_str}")
-            else:
-                st.text(f"- {stock}")
+                    st.text(f"- {stock}")
         
         st.markdown("---")
         st.warning("""
@@ -244,6 +259,10 @@ def show_wizard():
             st.session_state.wiz_step = 1
             st.session_state.ai_modal_open = False
             
+            # 초기화 (다음을 위해 결과 캐시 삭제)
+            if "ai_result_cache" in st.session_state:
+                del st.session_state.ai_result_cache
+
             u_bk = st.session_state.get("user_info")
             l_bk = st.session_state.get("is_logged_in")
             
