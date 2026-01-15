@@ -688,39 +688,11 @@ def main():
                         if is_isa_mode and monthly_add > 1666666:
                             st.warning("⚠️ **ISA 연간 한도 제한:** 월 납입금이 **약 166만원(연 2,000만원)**으로 자동 조정되어 계산됩니다.")
                             monthly_add = 1666666 
-                        
-                        months_sim = years_sim * 12
-                        monthly_yld = avg_y / 100 / 12
-                        current_bal = start_money
-                        total_principal = start_money
-                        ISA_YEARLY_CAP = 20000000
-                        ISA_TOTAL_CAP = 100000000
-                        sim_data = [{"년차": 0, "자산총액": current_bal/10000, "총원금": total_principal/10000, "실제월배당": 0}]
-                        yearly_contribution = 0
-                        year_tracker = 0
-                        total_tax_paid_general = 0
-
-                        for m in range(1, months_sim + 1):
-                            if m // 12 > year_tracker:
-                                yearly_contribution = 0
-                                year_tracker = m // 12
-                            actual_add = monthly_add
-                            if is_isa_mode:
-                                remaining_yearly = max(0, ISA_YEARLY_CAP - yearly_contribution)
-                                remaining_total = max(0, ISA_TOTAL_CAP - total_principal)
-                                actual_add = min(monthly_add, remaining_yearly, remaining_total)
-                            current_bal += actual_add
-                            total_principal += actual_add
-                            yearly_contribution += actual_add
-                            div_earned = current_bal * monthly_yld
-                            if is_isa_mode: reinvest = div_earned
-                            else:
-                                this_tax = div_earned * 0.154
-                                total_tax_paid_general += this_tax
-                                after_tax = div_earned - this_tax
-                                reinvest = after_tax * (reinvest_ratio / 100)
-                            current_bal += reinvest
-                            sim_data.append({"년차": m / 12, "자산총액": current_bal / 10000, "총원금": total_principal / 10000, "실제월배당": div_earned})
+                            
+                        # [모듈화] 복잡한 시뮬레이션 계산 엔진 호출
+                        sim_data, total_tax_paid_general = logic.run_asset_simulation(
+                            start_money, monthly_add, avg_y, years_sim, is_isa_mode, reinvest_ratio, isa_exempt
+                        )
                         
                         df_sim_chart = pd.DataFrame(sim_data)
                         base = alt.Chart(df_sim_chart).encode(x=alt.X('년차:Q', title='경과 기간 (년)'))
