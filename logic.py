@@ -56,7 +56,7 @@ def get_hedge_status(name, category):
     if category == '해외': return "💲달러(직투)"
     if "환노출" in name_str or "UNHEDGED" in name_str: return "⚡환노출"
     if any(x in name_str for x in ["(H)", "헤지", "합성"]): return "🛡️환헤지(H)"
-    return "⚡환노출" if any(x in name_str for x in ['미국', 'GLOBAL', 'S&P500', '나스닥']) else "-"
+    return "⚡환노출" if any(x in name_str for x in ['미국', 'GLOBAL', 'S&P500', '나스닥', '국제']) else "-"
 
 
 def calculate_google_calendar_url(ticker_name, pay_date_str):
