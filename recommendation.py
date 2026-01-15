@@ -143,20 +143,25 @@ def show_wizard():
         col_a, col_b = st.columns(2)
         # [recommendation.py 맨 마지막 코드]
 
+  # [recommendation.py 맨 마지막 부분 교체]
+
         col_a.button("🔄 다시 하기", on_click=reset_wizard)
         
-        def finish():
+        # ▼▼▼ [핵심 수정] 콜백 함수(def finish)를 없애고 직관적으로 짭니다! ▼▼▼
+        # on_click을 쓰면 Streamlit 내부 렌더링과 충돌이 날 수 있습니다.
+        # 이렇게 작성하면 버튼 누르는 순간 바로 실행됩니다.
+        if col_b.button("✅ 장바구니 담기", type="primary"):
             # 1. 담기
             st.session_state.selected_stocks = picks
-            # 2. 초기화 (app.py에서 열 때 하므로 여기선 생략 가능하지만 안전하게 둬도 무방)
+            
+            # 2. 초기화 (다음을 위해)
             st.session_state.wiz_step = 1
             
             # 3. 스위치 끄기
-            st.session_state.ai_modal_open = False 
+            st.session_state.ai_modal_open = False
+            
+            # 4. 완료 메시지
             st.toast("장바구니에 담았습니다! 🛒", icon="✅")
-
-        # [버튼] 
-        # on_click으로 finish 실행 -> 스위치 OFF -> 
-        # st.rerun()으로 즉시 앱 새로고침 -> app.py가 '스위치 꺼짐' 감지 -> 팝업 닫힘
-        if col_b.button("✅ 장바구니 담기", type="primary", on_click=finish):
+            
+            # 5. [중요] 즉시 새로고침 (이제 안전합니다!)
             st.rerun()
