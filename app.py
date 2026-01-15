@@ -277,7 +277,7 @@ def main():
                         if success:
                             st.success(msg)
                             st.balloons()
-                            import time
+                         
                             time.sleep(2)
                             st.rerun()
                         else:
