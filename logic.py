@@ -59,52 +59,68 @@ def get_hedge_status(name, category):
     return "⚡환노출" if any(x in name_str for x in ['미국', 'GLOBAL', 'S&P500', '나스닥']) else "-"
 
 # ==========================================
-# [2] 배당금액 기반 정밀 연산 엔진 (어제 성공 로직)
+# [2] 배당률 정밀 조회 엔진 (야후 우선 + 직접 계산)
 # ==========================================
 
 def fetch_dividend_yield_hybrid(code, category):
-    """배당금(원/$)을 긁어와서 현재가로 직접 계산 (476800 대응)"""
-    code_str = str(code).strip().zfill(6)
+    """
+    1순위 야후, 2순위 네이버 백업.
+    배당률(%)이 없으면 배당금(원)을 가져와서 직접 계산하는 방식.
+    """
+    code_str = str(code).strip().zfill(6) if category == '국내' else str(code).strip()
     
-    # 시세 확보
+    # [A] 현재 시세 확보 (연산의 분모)
     try:
         broker = mojito.KoreaInvestment(api_key=st.secrets["kis"]["app_key"], api_secret=st.secrets["kis"]["app_secret"], acc_no=st.secrets["kis"]["acc_no"], mock=True)
         curr_price = get_safe_price(broker, code_str, category)
     except: curr_price = 0
 
+    # [B] 1순위: 야후 파이낸스 시도
+    try:
+        ticker_code = f"{code_str}.KS" if (category == '국내' and code_str.isdigit()) else code_str
+        stock = yf.Ticker(ticker_code)
+        info = stock.info
+        
+        # 1. 야후의 배당률(%) 데이터 확인
+        y_val = info.get('dividendYield') or info.get('trailingAnnualDividendYield')
+        if y_val:
+            return round(float(y_val) * 100, 2), "야후(%)"
+            
+        # 2. 야후의 배당금(Amount) 데이터로 직접 계산
+        div_rate = info.get('dividendRate')
+        if div_rate and curr_price > 0:
+            return round((float(div_rate) / curr_price) * 100, 2), "야후(금액계산)"
+    except: pass
+
+    # [C] 2순위: 네이버 모바일 API 백업 (국내 종목 전용)
     if category == '국내':
         try:
-            # 네이버 모바일 API (차단 우회)
             url = f"https://m.stock.naver.com/api/stock/{code_str}/integration"
-            headers = {'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1'}
+            headers = {'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)'}
             res = requests.get(url, headers=headers, timeout=5)
             if res.status_code == 200:
                 data = res.json()
+                # 배당금(원) 추출 후 계산
                 div_amt = data.get('totalInfo', {}).get('dividend')
                 if div_amt and curr_price > 0:
-                    div_amt = float(str(div_amt).replace(',', ''))
-                    return round((div_amt / curr_price) * 100, 2), "네이버(M)"
+                    div_amt_f = float(str(div_amt).replace(',', ''))
+                    return round((div_amt_f / curr_price) * 100, 2), "네이버(M-계산)"
+                
+                # 배당률(%) 추출
+                yld = data.get('totalInfo', {}).get('dividendYield')
+                if yld: return float(yld), "네이버(M-비율)"
         except: pass
-    else: # 해외 종목
-        try:
-            stock = yf.Ticker(code_str)
-            div_rate = stock.info.get('dividendRate')
-            if div_rate and curr_price > 0:
-                return round((div_rate / curr_price) * 100, 2), "야후(금액)"
-        except: pass
+
     return 0.0, "조회실패"
 
 # ==========================================
-# [3] 데이터 로드 및 캘린더 (중략 없음)
+# [3] 데이터 로드 및 캘린더 로직
 # ==========================================
 
 def load_stock_data_from_csv():
-    """[복구 완료] CSV 파일을 불러오는 함수"""
     url = "https://raw.githubusercontent.com/broadcast777/my-dividend-app/main/stocks.csv"
-    try:
-        return pd.read_csv(url, dtype={'종목코드': str})
-    except:
-        return pd.DataFrame()
+    try: return pd.read_csv(url, dtype={'종목코드': str})
+    except: return pd.DataFrame()
 
 def calculate_google_calendar_url(ticker_name, pay_date_str):
     try:
@@ -128,7 +144,6 @@ def calculate_google_calendar_url(ticker_name, pay_date_str):
         elif "-" in clean_str or "." in clean_str:
             clean_str = clean_str.split("(")[0].replace(".", "-")
             target_date = datetime.datetime.strptime(clean_str, "%Y-%m-%d").date()
-
         if not target_date: return None
         safe_buy_date = target_date - datetime.timedelta(days=3)
         while safe_buy_date.weekday() >= 5: safe_buy_date -= datetime.timedelta(days=1)
@@ -160,6 +175,7 @@ def load_and_process_data(df_raw, is_admin=False):
         if not price: return idx, None
         try: months = int(row.get('신규상장개월수', 0))
         except: months = 0
+        
         if 0 < months < 12:
             yield_val = ((float(row.get('연배당금', 0)) / months) * 12 / price) * 100
             display_name = f"{name} ⭐"
@@ -169,6 +185,7 @@ def load_and_process_data(df_raw, is_admin=False):
         else:
             yield_val = (float(row.get('연배당금', 0)) / price) * 100
             display_name = name
+            
         return idx, {
             '코드': code, '종목명': display_name, '현재가': f"{int(price):,}원" if category == '국내' else f"${price:.2f}",
             '연배당률': yield_val, '환구분': get_hedge_status(name, category), '배당락일': str(row.get('배당락일', '-')),
@@ -176,11 +193,13 @@ def load_and_process_data(df_raw, is_admin=False):
             '캘린더링크': calculate_google_calendar_url(display_name, str(row.get('배당락일', '-'))),
             '신규상장개월수': months
         }
+        
     with ThreadPoolExecutor(max_workers=5) as executor:
         futures = {executor.submit(process_row, idx, row): idx for idx, row in df_raw.iterrows()}
         for f in as_completed(futures):
             idx, res = f.result()
             results[idx] = res
+            
     final = [r for r in results if r is not None]
     return pd.DataFrame(final).sort_values('연배당률', ascending=False)
 
