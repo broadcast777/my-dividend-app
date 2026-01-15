@@ -11,49 +11,43 @@ import re
 import requests
 from github import Github
 
-def fetch_dividend_yield_hybrid(code, category):
-    """야후 파이낸스(yfinance)를 이용해 국내/해외 배당률 통합 조회"""
+# ==========================================
+# [1] 시세 조회 및 부품 함수 (Global Scope)
+# ==========================================
+
+def _fetch_price_raw(broker, code, category):
+    """실제 가격 정보를 1회 조회하는 하위 부품"""
     try:
         code_str = str(code).strip()
-        
-        # [1] 야후 파이낸스용 티커 형식으로 변환
         if category == '국내':
-            # 숫자로만 된 코드라면 .KS를 붙여 시도 (보통 ETF와 우량주는 .KS로 통합니다)
-            if code_str.isdigit():
-                ticker_code = f"{code_str}.KS"
-            else:
-                ticker_code = code_str
-        else:
-            ticker_code = code_str
-
-        # [2] 야후 엔진 가동
-        stock = yf.Ticker(ticker_code)
+            try:
+                resp = broker.fetch_price(code_str)
+                if resp and isinstance(resp, dict) and 'output' in resp:
+                    if resp['output'] and resp['output'].get('stck_prpr'):
+                        return int(resp['output']['stck_prpr'])
+            except: pass
         
-        # 야후는 dividendYield 값이 0.08(8%) 처럼 소수로 옵니다.
-        # info 가져오기가 가끔 먹통일 때를 대비해 두 가지 경로(trailingAnnual, dividendYield)를 다 확인합니다.
-        info = stock.info
-        y_val = info.get('dividendYield') or info.get('trailingAnnualDividendYield')
-        
-        if y_val:
-            return round(float(y_val) * 100, 2), "야후파이낸스"
-            
-        # [3] 야후에 데이터가 없을 경우 (국내 종목은 야후에 배당률이 누락된 경우가 많습니다)
-        if category == '국내':
-            # 아까 시도했던 네이버 코드를 '백업용'으로 가동합니다.
-            clean_code = code_str.zfill(6)
-            url = f"https://finance.naver.com/item/main.naver?code={clean_code}"
-            headers = {'User-Agent': 'Mozilla/5.0'}
-            res = requests.get(url, headers=headers, timeout=3)
-            match = re.search(r'<em id="_dvd_rt">([\d.]+)</em>', res.text)
-            if match:
-                return float(match.group(1)), "네이버(백업)"
+        # 한국투자증권 실패 시 야후로 백업
+        ticker_code = f"{code_str}.KS" if category == '국내' else code_str
+        ticker = yf.Ticker(ticker_code)
+        price = ticker.fast_info.get('last_price')
+        if not price:
+            hist = ticker.history(period="1d")
+            if not hist.empty:
+                price = hist['Close'].iloc[-1]
+        return float(price) if price else None
+    except: return None
 
-        return 0.0, "데이터없음"
-
-    except Exception as e:
-        return 0.0, f"조회실패({str(e)[:10]})"
+def get_safe_price(broker, code, category):
+    """[복구 포인트] 시세를 2번 시도해서 안전하게 가져오는 함수"""
+    for _ in range(2):
+        price = _fetch_price_raw(broker, code, category)
+        if price is not None: return price
+        time.sleep(0.5)
+    return None
 
 def classify_asset(row):
+    """종목명과 코드를 분석해 자산 유형 분류"""
     name, symbol = str(row.get('종목명', '')).upper(), str(row.get('종목코드', '')).upper()
     if any(k in name or k in symbol for k in ['커버드콜', 'COVERED', 'QYLD', 'JEPI', 'JEPQ', 'NVDY', 'TSLY', 'QQQI']): return '🛡️ 커버드콜'
     if '혼합' in name: return '⚖️ 혼합형'
@@ -62,6 +56,7 @@ def classify_asset(row):
     return '📈 주식형'
 
 def get_hedge_status(name, category):
+    """환헤지 여부 판별"""
     name_str = str(name).upper()
     if category == '해외': return "💲달러(직투)"
     if "환노출" in name_str or "UNHEDGED" in name_str: return "⚡환노출"
@@ -115,7 +110,7 @@ def generate_portfolio_ics(selected_stocks_data):
     return "\n".join(cal_content)
 
 # ==========================================
-# [3] 데이터 로드 및 배당률 계산 엔진
+# [3] 데이터 로드 엔진 (병렬 처리)
 # ==========================================
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -126,9 +121,10 @@ def load_and_process_data(df_raw, is_admin=False):
     except: return pd.DataFrame()
 
     results = [None] * len(df_raw)
+    
     def process_row(idx, row):
         code, name, category = str(row.get('종목코드', '')).strip(), str(row.get('종목명', '')).strip(), str(row.get('분류', '국내')).strip()
-        # [복구 확인] 여기서 get_safe_price를 호출합니다.
+        # [중요] get_safe_price가 이 줄에서 호출됩니다.
         price = get_safe_price(broker, code, category)
         if not price: return idx, None
         
@@ -167,29 +163,33 @@ def load_stock_data_from_csv():
     except: return pd.DataFrame()
 
 # ==========================================
-# [4] 관리자용 정밀 조회 모듈 (5% 버그 완전 삭정)
+# [4] 관리자용 정밀 조회 모듈 (야후 통합 버전)
 # ==========================================
 
 def fetch_dividend_yield_hybrid(code, category):
-    """국내(네이버)/해외(야후) 배당률 진짜로 긁어오기"""
+    """야후 파이낸스를 우선 사용하고 네이버를 백업으로 사용하는 하이브리드 조회"""
     try:
-        if category == '국내':
-            url = f"https://finance.naver.com/item/main.naver?code={code}"
-            headers = {'User-Agent': 'Mozilla/5.0'}
-            res = requests.get(url, headers=headers)
+        code_str = str(code).strip()
+        ticker_code = f"{code_str}.KS" if (category == '국내' and code_str.isdigit()) else code_str
+        
+        # 1. 야후 파이낸스 시도
+        stock = yf.Ticker(ticker_code)
+        info = stock.info
+        y_val = info.get('dividendYield') or info.get('trailingAnnualDividendYield')
+        
+        if y_val:
+            return round(float(y_val) * 100, 2), "야후파이낸스"
             
-            # [진짜 센서 장착] 5.0은 지우고 네이버 배당수익률 숫자만 추출
-            match = re.search(r'<em>배당수익률</em>.*?<em id="_dvd_rt">([\d.]+)</em>', res.text, re.S)
+        # 2. 야후 실패 시 국내 종목만 네이버 백업 가동
+        if category == '국내':
+            url = f"https://finance.naver.com/item/main.naver?code={code_str.zfill(6)}"
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            res = requests.get(url, headers=headers, timeout=3)
+            match = re.search(r'<em id="_dvd_rt">([\d.]+)</em>', res.text)
             if match:
-                return float(match.group(1)), "네이버금융"
-            return 0.0, "배당정보없음"
-                
-        else: # 해외 종목
-            stock = yf.Ticker(code)
-            y_val = stock.info.get('dividendYield')
-            if y_val:
-                return round(float(y_val) * 100, 2), "야후파이낸스"
-            return 0.0, "해외배당없음"
+                return float(match.group(1)), "네이버(백업)"
+
+        return 0.0, "데이터없음"
     except:
         return 0.0, "조회실패"
 
@@ -201,7 +201,7 @@ def update_dividend_rolling(current_history_str, new_dividend_amount):
     return sum(history), "|".join(map(str, history))
 
 # ==========================================
-# [5] 시뮬레이션 및 깃허브 저장
+# [5] 시뮬레이션 및 데이터 저장
 # ==========================================
 
 def run_asset_simulation(start_money, monthly_add, avg_y, years_sim, is_isa_mode, reinvest_ratio, isa_exempt):
