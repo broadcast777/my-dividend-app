@@ -12,11 +12,10 @@ import requests
 from github import Github
 
 # ==========================================
-# [1] 시세 조회 및 유틸리티 (Global Scope - 최상단 배치)
+# [1] 시세 조회 및 유틸리티 (Global Scope)
 # ==========================================
 
 def _fetch_price_raw(broker, code, category):
-    """실제 가격 정보를 1회 조회하는 하위 부품"""
     try:
         code_str = str(code).strip().zfill(6) if category == '국내' else str(code).strip()
         if category == '국내':
@@ -37,7 +36,7 @@ def _fetch_price_raw(broker, code, category):
     except: return None
 
 def get_safe_price(broker, code, category):
-    """[복구 완료] 시세를 2번 시도해서 안전하게 가져오는 함수"""
+    """시세를 2번 시도해서 안전하게 가져오는 함수"""
     for _ in range(2):
         price = _fetch_price_raw(broker, code, category)
         if price is not None: return price
@@ -60,62 +59,92 @@ def get_hedge_status(name, category):
     return "⚡환노출" if any(x in name_str for x in ['미국', 'GLOBAL', 'S&P500', '나스닥']) else "-"
 
 # ==========================================
-# [2] 배당금액 기반 정밀 연산 엔진 (직접 계산 방식)
+# [2] 배당금액 기반 정밀 연산 엔진 (어제 성공 로직)
 # ==========================================
 
 def fetch_dividend_yield_hybrid(code, category):
-    """
-    [어제 성공 로직 + 모바일 API 우회]
-    배당률(%)이 아닌 배당금(원/$)을 긁어와서 현재가로 직접 계산
-    """
+    """배당금(원/$)을 긁어와서 현재가로 직접 계산 (476800 대응)"""
     code_str = str(code).strip().zfill(6)
     
-    # 1. 시세 확보 (야후가 차단이 덜함)
+    # 시세 확보
     try:
-        ticker_code = f"{code_str}.KS" if (category == '국내' and code_str.isdigit()) else code_str
-        stock = yf.Ticker(ticker_code)
-        curr_price = stock.fast_info.get('last_price') or 0
+        broker = mojito.KoreaInvestment(api_key=st.secrets["kis"]["app_key"], api_secret=st.secrets["kis"]["app_secret"], acc_no=st.secrets["kis"]["acc_no"], mock=True)
+        curr_price = get_safe_price(broker, code_str, category)
     except: curr_price = 0
 
     if category == '국내':
         try:
-            # 네이버 모바일 API (차단 우회 신분증 장착)
+            # 네이버 모바일 API (차단 우회)
             url = f"https://m.stock.naver.com/api/stock/{code_str}/integration"
             headers = {'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1'}
             res = requests.get(url, headers=headers, timeout=5)
-            
             if res.status_code == 200:
                 data = res.json()
-                # 'dividend'는 원 단위의 금액입니다.
                 div_amt = data.get('totalInfo', {}).get('dividend')
-                
                 if div_amt and curr_price > 0:
                     div_amt = float(str(div_amt).replace(',', ''))
-                    # 직접 계산: (배당금 / 현재가) * 100
                     return round((div_amt / curr_price) * 100, 2), "네이버(M)"
-                
-                # 금액이 없으면 비율이라도 가져옴
-                yld = data.get('totalInfo', {}).get('dividendYield')
-                if yld: return float(yld), "네이버(M-비율)"
         except: pass
-        return 0.0, "조회실패"
-
     else: # 해외 종목
         try:
-            # 야후에서 dividendRate(금액) 확인
-            info = stock.info
-            div_rate = info.get('dividendRate')
+            stock = yf.Ticker(code_str)
+            div_rate = stock.info.get('dividendRate')
             if div_rate and curr_price > 0:
                 return round((div_rate / curr_price) * 100, 2), "야후(금액)"
-            
-            dy = info.get('dividendYield')
-            if dy: return round(dy * 100, 2), "야후(비율)"
         except: pass
-        return 0.0, "조회실패"
+    return 0.0, "조회실패"
 
 # ==========================================
-# [3] 데이터 로드 및 캘린더 (Global Scope)
+# [3] 데이터 로드 및 캘린더 (중략 없음)
 # ==========================================
+
+def load_stock_data_from_csv():
+    """[복구 완료] CSV 파일을 불러오는 함수"""
+    url = "https://raw.githubusercontent.com/broadcast777/my-dividend-app/main/stocks.csv"
+    try:
+        return pd.read_csv(url, dtype={'종목코드': str})
+    except:
+        return pd.DataFrame()
+
+def calculate_google_calendar_url(ticker_name, pay_date_str):
+    try:
+        today = datetime.date.today()
+        target_date = None
+        clean_str = str(pay_date_str).replace(" ", "").strip()
+        if "매월" in clean_str:
+            if "마지막" in clean_str or "말일" in clean_str:
+                last_day = calendar.monthrange(today.year, today.month)[1]
+                target_date = datetime.date(today.year, today.month, last_day)
+            else:
+                nums = re.findall(r'\d+', clean_str)
+                if nums:
+                    day = int(nums[0])
+                    try: target_date = datetime.date(today.year, today.month, day)
+                    except: target_date = datetime.date(today.year, today.month, 1)
+            if target_date and target_date < today:
+                next_m = today.month + 1 if today.month < 12 else 1
+                next_y = today.year if today.month < 12 else today.year + 1
+                target_date = datetime.date(next_y, next_m, target_date.day)
+        elif "-" in clean_str or "." in clean_str:
+            clean_str = clean_str.split("(")[0].replace(".", "-")
+            target_date = datetime.datetime.strptime(clean_str, "%Y-%m-%d").date()
+
+        if not target_date: return None
+        safe_buy_date = target_date - datetime.timedelta(days=3)
+        while safe_buy_date.weekday() >= 5: safe_buy_date -= datetime.timedelta(days=1)
+        title = quote(f"💰 [{ticker_name}] 매수 준비 (D-3)")
+        details = quote(f"배당 기준일(예상): {target_date}\n✅ 안전 매수 추천일: {safe_buy_date}")
+        return f"https://www.google.com/calendar/render?action=TEMPLATE&text={title}&dates={safe_buy_date.strftime('%Y%m%d')}/{(safe_buy_date + datetime.timedelta(days=1)).strftime('%Y%m%d')}&details={details}"
+    except: return None
+
+def generate_portfolio_ics(selected_stocks_data):
+    cal_content = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//DividendPange//Portfolio//KO", "METHOD:PUBLISH"]
+    for item in selected_stocks_data:
+        name = item.get('종목', '종목명')
+        event = ["BEGIN:VEVENT", f"SUMMARY:💰 [{name}] 매수 준비 (D-3)", "END:VEVENT"]
+        cal_content.extend(event)
+    cal_content.append("END:VCALENDAR")
+    return "\n".join(cal_content)
 
 @st.cache_data(ttl=600, show_spinner=False)
 def load_and_process_data(df_raw, is_admin=False):
@@ -127,13 +156,10 @@ def load_and_process_data(df_raw, is_admin=False):
     results = [None] * len(df_raw)
     def process_row(idx, row):
         code, name, category = str(row.get('종목코드', '')).strip(), str(row.get('종목명', '')).strip(), str(row.get('분류', '국내')).strip()
-        # [복구 확인] 이제 Global Scope에 있는 get_safe_price를 호출합니다.
         price = get_safe_price(broker, code, category)
         if not price: return idx, None
-        
         try: months = int(row.get('신규상장개월수', 0))
         except: months = 0
-
         if 0 < months < 12:
             yield_val = ((float(row.get('연배당금', 0)) / months) * 12 / price) * 100
             display_name = f"{name} ⭐"
@@ -143,22 +169,65 @@ def load_and_process_data(df_raw, is_admin=False):
         else:
             yield_val = (float(row.get('연배당금', 0)) / price) * 100
             display_name = name
-
         return idx, {
             '코드': code, '종목명': display_name, '현재가': f"{int(price):,}원" if category == '국내' else f"${price:.2f}",
             '연배당률': yield_val, '환구분': get_hedge_status(name, category), '배당락일': str(row.get('배당락일', '-')),
             '분류': category, '자산유형': classify_asset(row), 'pure_name': name,
-            '캘린더링크': calculate_google_calendar_url(display_name, str(row.get('배당락일', '-')))
+            '캘린더링크': calculate_google_calendar_url(display_name, str(row.get('배당락일', '-'))),
+            '신규상장개월수': months
         }
-
     with ThreadPoolExecutor(max_workers=5) as executor:
         futures = {executor.submit(process_row, idx, row): idx for idx, row in df_raw.iterrows()}
         for f in as_completed(futures):
             idx, res = f.result()
             results[idx] = res
-
     final = [r for r in results if r is not None]
     return pd.DataFrame(final).sort_values('연배당률', ascending=False)
 
-# ... (나머지 calculate_google_calendar_url, load_stock_data_from_csv, 
-#      update_dividend_rolling, generate_portfolio_ics, save_to_github 등은 동일하게 유지)
+def update_dividend_rolling(current_history_str, new_dividend_amount):
+    if pd.isna(current_history_str) or str(current_history_str).strip() == "": history = []
+    else: history = [int(float(x)) for x in str(current_history_str).split('|')]
+    if len(history) >= 12: history.pop(0)
+    history.append(int(new_dividend_amount))
+    return sum(history), "|".join(map(str, history))
+
+# ==========================================
+# [4] 시뮬레이션 및 데이터 저장
+# ==========================================
+
+def run_asset_simulation(start_money, monthly_add, avg_y, years_sim, is_isa_mode, reinvest_ratio, isa_exempt):
+    months_sim = years_sim * 12
+    monthly_yld = avg_y / 100 / 12
+    current_bal, total_principal = start_money, start_money
+    sim_data = [{"년차": 0, "자산총액": current_bal/10000, "총원금": total_principal/10000, "실제월배당": 0}]
+    total_tax = 0
+    for m in range(1, months_sim + 1):
+        current_bal += monthly_add
+        total_principal += monthly_add
+        div = current_bal * monthly_yld
+        if is_isa_mode: reinvest = div
+        else:
+            tax = div * 0.154
+            total_tax += tax
+            reinvest = (div - tax) * (reinvest_ratio / 100)
+        current_bal += reinvest
+        sim_data.append({"년차": m/12, "자산총액": current_bal/10000, "총원금": total_principal/10000, "실제월배당": div})
+    return sim_data, total_tax
+
+def calculate_goal_duration(target_monthly_goal, start_bal_goal, monthly_add_goal, avg_y, tax_factor):
+    required_asset_goal = (target_monthly_goal / tax_factor) / (avg_y / 100) * 12
+    current_bal_goal, months_passed = start_bal_goal, 0
+    while current_bal_goal < required_asset_goal and months_passed < 600:
+        div_reinvest = current_bal_goal * (avg_y / 100 / 12) * tax_factor
+        current_bal_goal += monthly_add_goal + div_reinvest
+        months_passed += 1
+    return required_asset_goal, months_passed
+
+def save_to_github(df):
+    try:
+        g = Github(st.secrets["github"]["token"])
+        repo = g.get_repo(st.secrets["github"]["repo_name"])
+        contents = repo.get_contents(st.secrets["github"]["file_path"])
+        repo.update_file(contents.path, "🤖 데이터 자동 갱신", df.to_csv(index=False).encode("utf-8"), contents.sha)
+        return True, "✅ 저장 성공!"
+    except Exception as e: return False, f"❌ 실패: {e}"
