@@ -774,12 +774,61 @@ def main():
 2. ISA 계좌의 비과세 한도 및 세율은 세법 개정에 따라 달라질 수 있습니다.
 3. 과거의 데이터를 기반으로 한 단순 시뮬레이션이며, 실제 투자 수익을 보장하지 않습니다.""")
 
+                        with tab_goal:
+                        st.subheader("🎯 목표 배당금 역산기 (은퇴 시뮬레이터)")
+                        col_g1, col_g2 = st.columns(2)
+                        with col_g1:
+                            target_monthly_goal = st.number_input("목표 월 배당금 (만원, 세후)", min_value=10, value=300, step=10) * 10000
+                            use_start_money = st.checkbox("위에서 설정한 초기 자산을 포함하여 계산", value=True)
+                            start_bal_goal = total_invest if use_start_money else 0
+                        with col_g2:
+                            monthly_add_goal = st.number_input("매월 추가 적립 가능 금액 (만원)", min_value=0, value=150, step=10) * 10000
+                            apply_inflation_goal = st.toggle("📈 목표치에 물가상승률 반영", value=False, help="미래의 300만원이 현재의 얼마 가치인지 고려하여 목표를 상향 조정합니다.")
+
+                        tax_factor = 0.846
+                        
+                        if avg_y > 0:
+                            # [모듈화] logic 엔진에서 기간 및 필요자산 계산
+                            required_asset_goal, months_passed = logic.calculate_goal_duration(
+                                target_monthly_goal, start_bal_goal, monthly_add_goal, avg_y, tax_factor
+                            )
+                            
+                            st.markdown("---")
+                            c_res1, c_res2 = st.columns(2)
+                            with c_res1:
+                                st.metric("목표 달성 필요 자산", f"{required_asset_goal/100000000:,.2f} 억원")
+                                st.caption(f"평균 배당률 {avg_y:.2f}% 및 세금 15.4% 적용 시")
+                            with c_res2:
+                                if months_passed >= 600: 
+                                    st.error("⚠️ 현재 적립액으로는 50년 내 달성이 어렵습니다.")
+                                else: 
+                                    st.metric("목표 달성까지 소요 기간", f"{months_passed // 12}년 {months_passed % 12}개월")
+
+                            if apply_inflation_goal:
+                                discount_factor = (1.025) ** (months_passed / 12)
+                                real_value = target_monthly_goal / discount_factor
+                                st.warning(f"⚠️ **물가 반영 시:** {months_passed // 12}년 뒤 {target_monthly_goal/10000:,.0f}만원의 실질 가치는 현재 기준 **약 {real_value/10000:,.1f}만원**입니다.")
+                            
+                            target_annual_income = target_monthly_goal * 12
+                            if target_annual_income > 20000000: 
+                                st.warning(f"🚨 **현실적 조언:** 설정하신 목표(월 {target_monthly_goal/10000:,.0f}만원) 달성 시, 연 배당소득이 2,000만원을 넘어 **금융종합과세 대상**이 됩니다.")
+                        else:
+                            st.error("📊 위에서 종목을 먼저 선택해 주세요.")
+
+                        st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**
+1. 본 결과는 주가·환율 변동과 수수료 등을 제외하고, 현재 배당률로만 계산한 결과입니다.
+2. 실제 배당금은 운용사의 공시 및 환율 상황에 따라 매월 달라질 수 있습니다.
+3. 과거의 데이터를 기반으로 한 단순 시뮬레이션이며, 실제 투자 수익을 보장하지 않습니다.""")
+                        
+
     elif menu == "📃 전체 종목 리스트":
         st.info("💡 **이동 안내:** '코드' 클릭 시 블로그 분석글로, '🔗정보' 클릭 시 네이버/야후 금융 정보로 이동합니다. (**⭐ 표시는 상장 1년 미만 종목입니다.**)")
         tab_all, tab_kor, tab_usa = st.tabs(["🌎 전체", "🇰🇷 국내", "🇺🇸 해외"])
         with tab_all: ui.render_custom_table(df)
         with tab_kor: ui.render_custom_table(df[df['분류'] == '국내'])
         with tab_usa: ui.render_custom_table(df[df['분류'] == '해외'])
+
+    
 
     st.divider()
     st.caption("© 2025 **배당팽이** | 실시간 데이터 기반 배당 대시보드")
