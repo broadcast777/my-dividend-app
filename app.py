@@ -291,6 +291,7 @@ def main():
     # 'if is_admin:' 과 머리(시작점)를 똑같이 맞추세요!
     with st.spinner('⚙️ 배당 데이터베이스 엔진 가동 중...'):
         df = logic.load_and_process_data(df_raw, is_admin=is_admin)
+        st.session_state['shared_df'] = df
 
 
     # ---------------------------------------------------------
