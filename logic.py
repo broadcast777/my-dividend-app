@@ -11,38 +11,47 @@ import re
 import requests
 from github import Github
 
-# ==========================================
-# [1] 시세 조회 센서 (Safety Sensor)
-# ==========================================
-
-def _fetch_price_raw(broker, code, category):
+def fetch_dividend_yield_hybrid(code, category):
+    """야후 파이낸스(yfinance)를 이용해 국내/해외 배당률 통합 조회"""
     try:
         code_str = str(code).strip()
-        if category == '국내':
-            try:
-                resp = broker.fetch_price(code_str)
-                if resp and isinstance(resp, dict) and 'output' in resp:
-                    if resp['output'] and resp['output'].get('stck_prpr'):
-                        return int(resp['output']['stck_prpr'])
-            except: pass
         
-        ticker_code = f"{code_str}.KS" if category == '국내' else code_str
-        ticker = yf.Ticker(ticker_code)
-        price = ticker.fast_info.get('last_price')
-        if not price:
-            hist = ticker.history(period="1d")
-            if not hist.empty:
-                price = hist['Close'].iloc[-1]
-        return float(price) if price else None
-    except: return None
+        # [1] 야후 파이낸스용 티커 형식으로 변환
+        if category == '국내':
+            # 숫자로만 된 코드라면 .KS를 붙여 시도 (보통 ETF와 우량주는 .KS로 통합니다)
+            if code_str.isdigit():
+                ticker_code = f"{code_str}.KS"
+            else:
+                ticker_code = code_str
+        else:
+            ticker_code = code_str
 
-def get_safe_price(broker, code, category):
-    """시세를 2번 시도해서 안전하게 가져오는 함수"""
-    for _ in range(2):
-        price = _fetch_price_raw(broker, code, category)
-        if price is not None: return price
-        time.sleep(0.5)
-    return None
+        # [2] 야후 엔진 가동
+        stock = yf.Ticker(ticker_code)
+        
+        # 야후는 dividendYield 값이 0.08(8%) 처럼 소수로 옵니다.
+        # info 가져오기가 가끔 먹통일 때를 대비해 두 가지 경로(trailingAnnual, dividendYield)를 다 확인합니다.
+        info = stock.info
+        y_val = info.get('dividendYield') or info.get('trailingAnnualDividendYield')
+        
+        if y_val:
+            return round(float(y_val) * 100, 2), "야후파이낸스"
+            
+        # [3] 야후에 데이터가 없을 경우 (국내 종목은 야후에 배당률이 누락된 경우가 많습니다)
+        if category == '국내':
+            # 아까 시도했던 네이버 코드를 '백업용'으로 가동합니다.
+            clean_code = code_str.zfill(6)
+            url = f"https://finance.naver.com/item/main.naver?code={clean_code}"
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            res = requests.get(url, headers=headers, timeout=3)
+            match = re.search(r'<em id="_dvd_rt">([\d.]+)</em>', res.text)
+            if match:
+                return float(match.group(1)), "네이버(백업)"
+
+        return 0.0, "데이터없음"
+
+    except Exception as e:
+        return 0.0, f"조회실패({str(e)[:10]})"
 
 def classify_asset(row):
     name, symbol = str(row.get('종목명', '')).upper(), str(row.get('종목코드', '')).upper()
