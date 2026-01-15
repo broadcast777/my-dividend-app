@@ -75,6 +75,16 @@ def get_smart_recommendation(df, user_choices):
 # -----------------------------------------------------------
 @st.dialog("🕵️ AI 포트폴리오 설계", width="small")
 def show_wizard():
+
+    # ▼▼▼ [수정 2] 여기서 데이터를 꺼냅니다 (추가된 코드) ▼▼▼
+    df = st.session_state.get('shared_df')
+    
+    # 혹시라도 데이터가 없으면 에러 방지
+    if df is None:
+        st.error("데이터를 불러오지 못했습니다. 새로고침 해주세요.")
+        return
+    # ▲▲▲ [끝] ▲▲▲
+    
     # 세션 상태 초기화
     if "wiz_step" not in st.session_state:
         st.session_state.wiz_step = 1
