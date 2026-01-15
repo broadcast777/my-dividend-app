@@ -628,3 +628,19 @@ def run_asset_simulation(start_money, monthly_add, avg_y, years_sim, is_isa_mode
         })
         
     return sim_data, total_tax_paid_general
+
+# logic.py 맨 아래 추가
+
+def calculate_goal_duration(target_monthly_goal, start_bal_goal, monthly_add_goal, avg_y, tax_factor):
+    """목표 배당금 달성까지의 기간을 계산하는 엔진"""
+    required_asset_goal = (target_monthly_goal / tax_factor) / (avg_y / 100) * 12
+    current_bal_goal = start_bal_goal
+    months_passed = 0
+    max_months = 600  # 50년 제한
+    
+    while current_bal_goal < required_asset_goal and months_passed < max_months:
+        div_reinvest = current_bal_goal * (avg_y / 100 / 12) * tax_factor
+        current_bal_goal += monthly_add_goal + div_reinvest
+        months_passed += 1
+        
+    return required_asset_goal, months_passed
