@@ -47,7 +47,7 @@ def classify_asset(row):
     name, symbol = str(row.get('종목명', '')).upper(), str(row.get('종목코드', '')).upper()
     if any(k in name or k in symbol for k in ['커버드콜', 'COVERED', 'QYLD', 'JEPI', 'JEPQ', 'NVDY', 'TSLY', 'QQQI']): return '🛡️ 커버드콜'
     if '혼합' in name: return '⚖️ 혼합형'
-    if any(k in name or k in symbol for k in ['채권', '국채', 'BOND', 'TLT', '하이일드']): return '🏦 채권형'
+    if any(k in name or k in symbol for k in ['채권', '국채', 'BOND', 'TLT', '하이일드','SPHY', 'BIL', 'SHV', 'T-Bill']): return '🏦 채권형'
     if '리츠' in name or 'REITS' in name: return '🏢 리츠형'
     return '📈 주식형'
 
