@@ -13,7 +13,6 @@ import urllib.parse
 import logic 
 import ui
 import db
-import auth  # 보안실 부품 추가
 
 # ==========================================
 # [1] 기본 설정
@@ -32,27 +31,53 @@ for key in ["is_logged_in", "user_info", "code_processed"]:
 # ---------------------------------------------------------
 supabase = db.init_supabase()
 
+# ==========================================
+# [2] 인증 상태 체크 (자동 복구 로직 포함)
+# ==========================================
 def check_auth_status():
     if not supabase: return
-    
-    success, user_info, status_type = auth.check_auth_logic(supabase)
-    
-    if success:
-        st.session_state.is_logged_in = True
-        st.session_state.user_info = user_info
+
+    # 1. 이미 로그인된 상태인지 확인
+    try:
+        session = supabase.auth.get_session()
+        if session and session.user:
+            st.session_state.is_logged_in = True
+            st.session_state.user_info = session.user
+            if "code" in st.query_params or "old_id" in st.query_params:
+                st.query_params.clear()
+            return 
+    except Exception:
+        pass
+
+    # 2. 로그인 콜백 처리
+    query_params = st.query_params
+    if "code" in query_params and not st.session_state.get("code_processed", False):
+        st.session_state.code_processed = True
         
-        # 새로 로그인 성공했거나, 로그인 상태인데 URL에 찌꺼기가 남은 경우
-        if status_type in ["CALLBACK", "EXISTING_WITH_CODE"]:
-            if status_type == "CALLBACK":
-                st.success("✅ 로그인되었습니다!")
-            st.query_params.clear() # URL 깨끗하게 삭정
+        try:
+            auth_code = query_params["code"]
+            auth_response = supabase.auth.exchange_code_for_session({"auth_code": auth_code})
+            session = auth_response.session
+            
+            if session and session.user:
+                st.session_state.is_logged_in = True
+                st.session_state.user_info = session.user
+            
+            st.query_params.clear()
+            st.success("✅ 로그인되었습니다!")
             st.rerun()
             
-    elif status_type == "VERIFIER_ERROR":
-        st.warning("🔄 보안 토큰 갱신 중...")
-        st.query_params.clear()
-        time.sleep(1.0)
-        st.rerun()
+        except Exception as e:
+            # 오류 자동 복구 (verifier 오류 시 리셋)
+            err_msg = str(e).lower()
+            if "verifier" in err_msg or "non-empty" in err_msg:
+                st.warning("🔄 보안 토큰 갱신 중... 잠시만 기다려주세요.")
+                st.query_params.clear()
+                time.sleep(1.0)
+                st.rerun()
+            else:
+                st.error(f"🔴 인증 오류: {e}")
+                st.query_params.clear()
 
 check_auth_status()
 
@@ -86,7 +111,7 @@ def main():
     # [청소기 가동] 앱 시작 시 24시간 지난 토큰 삭제
     db.cleanup_old_tokens()
 
-    MAINTENANCE_MODE = True
+    MAINTENANCE_MODE = False
     
     # [1] 값 초기화
     if "total_invest" not in st.session_state: st.session_state.total_invest = 30000000
@@ -99,7 +124,7 @@ def main():
         with st.expander("🔐 관리자 접속 (Admin)", expanded=False):
             password_input = st.text_input("비밀번호 입력", type="password")
             if password_input:
-                if auth.verify_admin(password_input):
+                if hashlib.sha256(password_input.encode()).hexdigest() == ADMIN_HASH:
                     is_admin = True
                     st.success("관리자 모드 ON 🚀")
                 else:
@@ -127,8 +152,138 @@ def main():
 
     # [관리자] 갱신 도구
     if is_admin:
-       ui.render_admin_section(df_raw, supabase)
-        
+        with st.sidebar:
+            st.markdown("---")
+            st.subheader("🛠️ 배당금 갱신 도구")
+            
+            # 1. 신규 종목 식별 로직 (⭐ 라벨링)
+            stock_options = {}
+            for idx, row in df_raw.iterrows():
+                name = row['종목명']
+                try:
+                    months = int(row.get('신규상장개월수', 0))
+                except: months = 0
+                
+                if months > 0:
+                    label = f"⭐ [신규 {months}개월] {name}"
+                else:
+                    label = name
+                stock_options[label] = name
+
+            selected_label = st.selectbox("갱신할 종목 선택", list(stock_options.keys()))
+            target_stock = stock_options[selected_label]
+            
+            if target_stock:
+                row = df_raw[df_raw['종목명'] == target_stock].iloc[0]
+                cur_hist = row.get('배당기록', "")
+                code = str(row.get('종목코드', '')).strip()
+                category = str(row.get('분류', '국내')).strip()
+                
+                # 2. 배당률 자동 조회 버튼
+                st.write("") 
+                col_info, col_btn = st.columns([1, 1.5])
+                with col_info:
+                    st.caption(f"코드: {code}")
+                    st.caption(f"분류: {category}")
+                with col_btn:
+                    if st.button("🔍 배당률 조회", key="btn_auto_check", use_container_width=True):
+                        with st.spinner("탐색 중..."):
+                            y_val, src = logic.fetch_dividend_yield_hybrid(code, category)
+                            if y_val > 0:
+                                st.success(f"📈 {y_val}%")
+                                st.caption(f"출처: {src}")
+                            else:
+                                st.error("실패")
+                                st.caption(f"원인: {src}")
+                                
+                st.divider()
+
+                # 3. 수동 입력 및 계산
+                new_div = st.number_input("이번 달 확정 배당금", value=0, step=10)
+                if st.button("계산 실행", use_container_width=True):
+                    new_total, new_hist = logic.update_dividend_rolling(cur_hist, new_div)
+                    st.success("완료!")
+                    st.code(new_hist, language="text")
+
+            # 4. [New] 안전 저장 시스템 (백업 + 저장)
+            st.markdown("---")
+            st.subheader("💾 데이터 저장 및 백업")
+
+            # [안전 장치 1] 백업 다운로드
+            csv_data = df_raw.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📂 (혹시 모르니) 현재 파일 백업하기",
+                data=csv_data,
+                file_name=f"stocks_backup_{pd.Timestamp.now().strftime('%Y%m%d')}.csv",
+                mime='text/csv',
+                use_container_width=True
+            )
+
+            st.write("") 
+
+            # [안전 장치 2] 신규 제외 자동 갱신
+            with st.expander("⚡ 전체 종목 자동 업데이트 (신규 제외)"):
+                st.caption("신규 상장 종목(⭐)과 배당률 2% 미만은 건너뜁니다.")
+                if st.button("전체 자동 갱신 시작"):
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    updated_count = 0
+                    skipped_count = 0
+                    total_stocks = len(df_raw)
+                    df_temp = df_raw.copy()
+                    
+                    for i, row in df_temp.iterrows():
+                        progress_bar.progress((i + 1) / total_stocks)
+                        status_text.text(f"검사 중: {row['종목명']}...")
+                        
+                        try: months = int(row.get('신규상장개월수', 0))
+                        except: months = 0
+                        
+                        # 신규이거나 배당률 조회 실패 시 스킵
+                        if months > 0:
+                            skipped_count += 1
+                            continue
+                        
+                        code = str(row['종목코드']).strip()
+                        cat = str(row.get('분류', '국내')).strip()
+                        y_val, _ = logic.fetch_dividend_yield_hybrid(code, cat)
+                        
+                        if y_val < 2.0:
+                            skipped_count += 1
+                            continue
+
+                        # ▼ 이 한 줄을 추가해야 '연배당률' 열에 데이터가 기록됩니다.
+                        df_temp.at[i, '연배당률'] = round(y_val, 2) 
+                        
+                        updated_count += 1
+                            
+                        
+                        
+                    status_text.text("완료!")
+                    st.success(f"✅ {updated_count}개 업데이트 대기 / 🛡️ {skipped_count}개 보호됨")
+                    st.session_state.df_dirty = df_temp
+
+            st.markdown("---")
+
+            # [안전 장치 3] 최종 저장 (체크박스 확인)
+            st.info("💡 위에서 내용을 충분히 검토하셨나요?")
+            confirm_save = st.checkbox("네, 덮어써도 좋습니다.")
+
+            if confirm_save:
+                if st.button("🚀 깃허브에 영구 저장 (Commit)", type="primary", use_container_width=True):
+                    with st.spinner("서버에 업로드 중..."):
+                        target_df = st.session_state.get('df_dirty', df_raw)
+                        success, msg = logic.save_to_github(target_df)
+                        if success:
+                            st.success(msg)
+                            st.balloons()
+                            import time
+                            time.sleep(2)
+                            st.rerun()
+                        else:
+                            st.error(msg)
+            else:
+                st.button("🚀 깃허브에 영구 저장", disabled=True, use_container_width=True)
     # ▼▼▼ [중요] 여기입니다! ▼▼▼
     # 'if is_admin:' 과 머리(시작점)를 똑같이 맞추세요!
     with st.spinner('⚙️ 배당 데이터베이스 엔진 가동 중...'):
@@ -148,7 +303,7 @@ def main():
             else:
                 try:
                     uid = st.session_state.user_info.id
-                    resp = db.get_user_portfolios(supabase, uid)
+                    resp = supabase.table("portfolios").select("*").eq("user_id", uid).order("created_at", desc=True).execute()
                     if resp.data:
                         opts = {}
                         for p in resp.data:
@@ -162,7 +317,7 @@ def main():
                         if is_delete_mode:
                             if st.button("🚨 영구 삭제", type="primary", use_container_width=True):
                                 target_id = opts[sel_name]['id']
-                                db.delete_portfolio(supabase, target_id)
+                                supabase.table("portfolios").delete().eq("id", target_id).execute()
                                 st.toast("삭제되었습니다.", icon="🗑️")
                                 st.rerun()
                         else:
@@ -436,7 +591,7 @@ def main():
                                     if c_up2.button("덮어쓰기", type="primary", use_container_width=True):
                                         supabase.table("portfolios").update({
                                             "ticker_data": save_data,
-                                            
+                                            "created_at": "now()"
                                         }).eq("id", target_id).execute()
                                         st.success("수정 완료! 내용이 업데이트되었습니다.")
                                         st.balloons()
@@ -495,12 +650,9 @@ def main():
                         st.write("📋 **상세 포트폴리오**")
                         ui.render_custom_table(df_ana)
                         st.error("""**⚠️ 포트폴리오 분석 시 유의사항**
-                        
 1. 과거의 데이터를 기반으로 한 단순 결과값이며, 실제 투자 수익을 보장하지 않습니다.
 2. '달러 자산' 비율 실제 환노출 여부와 다를 수 있습니다 투자 전 확인이 필요합니다.
-3. 실제 배당금 지급일과 금액은 운용사의 사정에 따라 변경될 수 있습니다.
-
-""")
+3. 실제 배당금 지급일과 금액은 운용사의 사정에 따라 변경될 수 있습니다.""")
 
                     with tab_simulation:
                         start_money = total_invest
@@ -536,11 +688,39 @@ def main():
                         if is_isa_mode and monthly_add > 1666666:
                             st.warning("⚠️ **ISA 연간 한도 제한:** 월 납입금이 **약 166만원(연 2,000만원)**으로 자동 조정되어 계산됩니다.")
                             monthly_add = 1666666 
-                            
-                        # [모듈화] 복잡한 시뮬레이션 계산 엔진 호출
-                        sim_data, total_tax_paid_general = logic.run_asset_simulation(
-                            start_money, monthly_add, avg_y, years_sim, is_isa_mode, reinvest_ratio, isa_exempt
-                        )
+                        
+                        months_sim = years_sim * 12
+                        monthly_yld = avg_y / 100 / 12
+                        current_bal = start_money
+                        total_principal = start_money
+                        ISA_YEARLY_CAP = 20000000
+                        ISA_TOTAL_CAP = 100000000
+                        sim_data = [{"년차": 0, "자산총액": current_bal/10000, "총원금": total_principal/10000, "실제월배당": 0}]
+                        yearly_contribution = 0
+                        year_tracker = 0
+                        total_tax_paid_general = 0
+
+                        for m in range(1, months_sim + 1):
+                            if m // 12 > year_tracker:
+                                yearly_contribution = 0
+                                year_tracker = m // 12
+                            actual_add = monthly_add
+                            if is_isa_mode:
+                                remaining_yearly = max(0, ISA_YEARLY_CAP - yearly_contribution)
+                                remaining_total = max(0, ISA_TOTAL_CAP - total_principal)
+                                actual_add = min(monthly_add, remaining_yearly, remaining_total)
+                            current_bal += actual_add
+                            total_principal += actual_add
+                            yearly_contribution += actual_add
+                            div_earned = current_bal * monthly_yld
+                            if is_isa_mode: reinvest = div_earned
+                            else:
+                                this_tax = div_earned * 0.154
+                                total_tax_paid_general += this_tax
+                                after_tax = div_earned - this_tax
+                                reinvest = after_tax * (reinvest_ratio / 100)
+                            current_bal += reinvest
+                            sim_data.append({"년차": m / 12, "자산총액": current_bal / 10000, "총원금": total_principal / 10000, "실제월배당": div_earned})
                         
                         df_sim_chart = pd.DataFrame(sim_data)
                         base = alt.Chart(df_sim_chart).encode(x=alt.X('년차:Q', title='경과 기간 (년)'))
@@ -618,60 +798,9 @@ def main():
                         annual_div_income = monthly_div_final * 12
                         if annual_div_income > 20000000: st.warning(f"🚨 **주의:** {years_sim}년 뒤 연간 배당금이 2,000만원을 초과하여 금융소득종합과세 대상이 될 수 있습니다.")
                         st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**
-                        
 1. 본 결과는 주가·환율 변동과 수수료 등을 제외하고, 현재 배당률로만 계산한 결과입니다.
 2. ISA 계좌의 비과세 한도 및 세율은 세법 개정에 따라 달라질 수 있습니다.
-3. 과거의 데이터를 기반으로 한 단순 시뮬레이션이며, 실제 투자 수익을 보장하지 않습니다.
-""")
-                        with tab_goal:
-                            st.subheader("🎯 목표 배당금 역산기 (은퇴 시뮬레이터)")
-                            col_g1, col_g2 = st.columns(2)
-                            with col_g1:
-                                target_monthly_goal = st.number_input("목표 월 배당금 (만원, 세후)", min_value=10, value=300, step=10) * 10000
-                                use_start_money = st.checkbox("위에서 설정한 초기 자산을 포함하여 계산", value=True)
-                                start_bal_goal = total_invest if use_start_money else 0
-                            with col_g2:
-                                monthly_add_goal = st.number_input("매월 추가 적립 가능 금액 (만원)", min_value=0, value=150, step=10) * 10000
-                                apply_inflation_goal = st.toggle("📈 목표치에 물가상승률 반영", value=False, help="미래의 300만원이 현재의 얼마 가치인지 고려하여 목표를 상향 조정합니다.")
-    
-                            tax_factor = 0.846
-                            
-                            if avg_y > 0:
-                                # [모듈화] logic 엔진에서 기간 및 필요자산 계산
-                                required_asset_goal, months_passed = logic.calculate_goal_duration(
-                                    target_monthly_goal, start_bal_goal, monthly_add_goal, avg_y, tax_factor
-                                )
-                                
-                                st.markdown("---")
-                                c_res1, c_res2 = st.columns(2)
-                                with c_res1:
-                                    st.metric("목표 달성 필요 자산", f"{required_asset_goal/100000000:,.2f} 억원")
-                                    st.caption(f"평균 배당률 {avg_y:.2f}% 및 세금 15.4% 적용 시")
-                                with c_res2:
-                                    if months_passed >= 600: 
-                                        st.error("⚠️ 현재 적립액으로는 50년 내 달성이 어렵습니다.")
-                                    else: 
-                                        st.metric("목표 달성까지 소요 기간", f"{months_passed // 12}년 {months_passed % 12}개월")
-    
-                                if apply_inflation_goal:
-                                    discount_factor = (1.025) ** (months_passed / 12)
-                                    real_value = target_monthly_goal / discount_factor
-                                    st.warning(f"⚠️ **물가 반영 시:** {months_passed // 12}년 뒤 {target_monthly_goal/10000:,.0f}만원의 실질 가치는 현재 기준 **약 {real_value/10000:,.1f}만원**입니다.")
-                                
-                                target_annual_income = target_monthly_goal * 12
-                                if target_annual_income > 20000000: 
-                                    st.warning(f"🚨 **현실적 조언:** 설정하신 목표(월 {target_monthly_goal/10000:,.0f}만원) 달성 시, 연 배당소득이 2,000만원을 넘어 **금융종합과세 대상**이 됩니다.")
-                            else:
-                                st.error("📊 위에서 종목을 먼저 선택해 주세요.")
-    
-                            # [보존] 원래 코드의 유의사항 3가지 문구 그대로 유지
-                            st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**
-                            
-    1. 본 결과는 주가·환율 변동과 수수료 등을 제외하고, 현재 배당률로만 계산한 결과입니다.
-    2. 실제 배당금은 운용사의 공시 및 환율 상황에 따라 매월 달라질 수 있습니다.
-    3. 과거의 데이터를 기반으로 한 단순 시뮬레이션이며, 실제 투자 수익을 보장하지 않습니다.
-    """)
-                      
+3. 과거의 데이터를 기반으로 한 단순 시뮬레이션이며, 실제 투자 수익을 보장하지 않습니다.""")
 
     elif menu == "📃 전체 종목 리스트":
         st.info("💡 **이동 안내:** '코드' 클릭 시 블로그 분석글로, '🔗정보' 클릭 시 네이버/야후 금융 정보로 이동합니다. (**⭐ 표시는 상장 1년 미만 종목입니다.**)")
@@ -679,8 +808,6 @@ def main():
         with tab_all: ui.render_custom_table(df)
         with tab_kor: ui.render_custom_table(df[df['분류'] == '국내'])
         with tab_usa: ui.render_custom_table(df[df['분류'] == '해외'])
-
-    
 
     st.divider()
     st.caption("© 2025 **배당팽이** | 실시간 데이터 기반 배당 대시보드")
@@ -720,7 +847,16 @@ def main():
 
     track_visitors()
     
-
+    if is_admin and supabase:
+        with st.expander("🛠️ 관리자 전용: 최근 유입 로그 (최근 5건)", expanded=False):
+            try:
+                recent_logs = supabase.table("visit_logs").select("referer, created_at").order("created_at", desc=True).limit(5).execute()
+                if recent_logs.data:
+                    log_df = pd.DataFrame(recent_logs.data)
+                    log_df['created_at'] = pd.to_datetime(log_df['created_at']).dt.tz_convert('Asia/Seoul').dt.strftime('%Y-%m-%d %H:%M:%S')
+                    st.table(log_df)
+                else: st.write("아직 기록된 유입이 없습니다.")
+            except Exception as e: st.error(f"로그 로드 실패: {e}")
 
 if __name__ == "__main__":
     main()
