@@ -160,6 +160,7 @@ def show_wizard():
             # 3. 완료 메시지
             st.toast("장바구니에 담았습니다! 🛒", icon="✅")
 
-        # 버튼을 누르면 finish()가 실행되어 스위치가 꺼지고 -> st.rerun()으로 화면이 새로고침되면서 팝업이 사라짐
-        if col_b.button("✅ 장바구니 담기", type="primary", on_click=finish):
-            st.rerun()
+        # ▼▼▼ [수정된 부분] ▼▼▼
+        # if문과 st.rerun()을 삭제하고, 버튼만 깔끔하게 남깁니다.
+        # 콜백(finish)이 끝나면 자동으로 메인 화면이 갱신되며 팝업이 닫힙니다.
+        col_b.button("✅ 장바구니 담기", type="primary", on_click=finish)
