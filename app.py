@@ -566,7 +566,7 @@ def main():
                                     if c_up2.button("덮어쓰기", type="primary", use_container_width=True):
                                         supabase.table("portfolios").update({
                                             "ticker_data": save_data,
-                                            "created_at": "now()"
+                                            
                                         }).eq("id", target_id).execute()
                                         st.success("수정 완료! 내용이 업데이트되었습니다.")
                                         st.balloons()
