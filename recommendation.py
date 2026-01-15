@@ -150,25 +150,25 @@ def show_wizard():
 
       
     # ✅ 수정된 장바구니 담기 버튼
-    if col_b.button("✅ 장바구니 담기", type="primary"):
-        # 1. 장바구니에 담기
-        st.session_state.selected_stocks = picks
-
-        # 2. 세션 상태 초기화
-        st.session_state.wiz_step = 1
-        st.session_state.ai_modal_open = False
-
-        # 3. 인증 정보 백업
-        user_info_backup = st.session_state.get("user_info")
-        is_logged_in_backup = st.session_state.get("is_logged_in")
-
-        # 4. 완료 메시지
-        st.toast("장바구니에 담았습니다! 🛒", icon="✅")
-
-        # 5. 백업 복구
-        st.session_state.user_info = user_info_backup
-        st.session_state.is_logged_in = is_logged_in_backup
-
-        # 6. 안전하게 새로고침
-        st.rerun()
+        if col_b.button("✅ 장바구니 담기", type="primary"):
+            # 1. 장바구니에 담기
+            st.session_state.selected_stocks = picks
+    
+            # 2. 세션 상태 초기화
+            st.session_state.wiz_step = 1
+            st.session_state.ai_modal_open = False
+    
+            # 3. 인증 정보 백업
+            user_info_backup = st.session_state.get("user_info")
+            is_logged_in_backup = st.session_state.get("is_logged_in")
+    
+            # 4. 완료 메시지
+            st.toast("장바구니에 담았습니다! 🛒", icon="✅")
+    
+            # 5. 백업 복구
+            st.session_state.user_info = user_info_backup
+            st.session_state.is_logged_in = is_logged_in_backup
+    
+            # 6. 안전하게 새로고침
+            st.rerun()
 
