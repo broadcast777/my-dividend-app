@@ -571,3 +571,60 @@ def save_to_github(df):
 
     except Exception as e:
         return False, f"❌ 저장 실패: {str(e)}"
+
+# logic.py
+
+def run_asset_simulation(start_money, monthly_add, avg_y, years_sim, is_isa_mode, reinvest_ratio, isa_exempt):
+    """
+    [계산 엔진] 투자 기간에 따른 자산 형성 시뮬레이션을 수행합니다.
+    (UI 요소인 st.xxx 코드가 일절 포함되지 않아 안전합니다)
+    """
+    months_sim = years_sim * 12
+    monthly_yld = avg_y / 100 / 12
+    current_bal = start_money
+    total_principal = start_money
+    
+    ISA_YEARLY_CAP = 20000000
+    ISA_TOTAL_CAP = 100000000
+    
+    # 결과 데이터를 담을 리스트
+    sim_data = [{"년차": 0, "자산총액": current_bal/10000, "총원금": total_principal/10000, "실제월배당": 0}]
+    
+    yearly_contribution = 0
+    year_tracker = 0
+    total_tax_paid_general = 0
+
+    for m in range(1, months_sim + 1):
+        if m // 12 > year_tracker:
+            yearly_contribution = 0
+            year_tracker = m // 12
+            
+        actual_add = monthly_add
+        if is_isa_mode:
+            remaining_yearly = max(0, ISA_YEARLY_CAP - yearly_contribution)
+            remaining_total = max(0, ISA_TOTAL_CAP - total_principal)
+            actual_add = min(monthly_add, remaining_yearly, remaining_total)
+            
+        current_bal += actual_add
+        total_principal += actual_add
+        yearly_contribution += actual_add
+        
+        div_earned = current_bal * monthly_yld
+        
+        if is_isa_mode: 
+            reinvest = div_earned
+        else:
+            this_tax = div_earned * 0.154
+            total_tax_paid_general += this_tax
+            after_tax = div_earned - this_tax
+            reinvest = after_tax * (reinvest_ratio / 100)
+            
+        current_bal += reinvest
+        sim_data.append({
+            "년차": m / 12, 
+            "자산총액": current_bal / 10000, 
+            "총원금": total_principal / 10000, 
+            "실제월배당": div_earned
+        })
+        
+    return sim_data, total_tax_paid_general
