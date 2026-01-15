@@ -595,80 +595,96 @@ def save_to_github(df):
 
 # ▼▼▼ [1단계] 여기에 새 함수 추가 (save_to_github 바로 위에 붙여넣으세요) ▼▼▼
 
-# [logic.py] 맨 아래 fetch_dividend_amount_hybrid 함수를 이걸로 통째로 교체하세요!
+# [logic.py] fetch_dividend_amount_hybrid 함수 (최종 수정버전)
 
 def fetch_dividend_amount_hybrid(code, category):
     """
-    [디버깅 강화 버전] 에러 발생 시 원인을 구체적으로 리턴함
+    [최종 수정] 
+    1. 국내: 네이버 최신 API 주소(api.stock.naver.com) 적용 -> 404 해결
+    2. 해외: Timezone 문제 해결 (tz_localize(None)) -> 날짜 에러 해결
     """
-    # 1. 라이브러리 긴급 호출 (함수 안에서 불러와서 에러 방지)
     import requests
     import yfinance as yf
+    import pandas as pd # 날짜 비교용 필수
     
     code = str(code).strip()
     
-    # ------------------------------------------------
-    # 1. 국내 (네이버 금융)
-    # ------------------------------------------------
+    # =======================================================
+    # 1. 국내 (네이버 최신 API)
+    # =======================================================
     if category == '국내':
         try:
-            # [자릿수 보정] 6자리 미만이면 앞에 0 채우기
+            # 자릿수 보정 (6자리)
             code = code.zfill(6)
             
-            url = f"https://m.stock.naver.com/api/stock/{code}/dividend"
-            # [헤더 보강] 봇 차단 방지용 신분증
+            # [수정 포인트] m.stock -> api.stock 으로 주소 변경!
+            url = f"https://api.stock.naver.com/stock/{code}/dividend"
+            
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Referer': 'https://m.stock.naver.com/'
+                'Referer': 'https://finance.naver.com/'
             }
             
-            # 타임아웃 5초 설정
             res = requests.get(url, headers=headers, timeout=5)
             
             if res.status_code != 200:
-                return 0.0, f"❌ 네이버 접속불가(Code:{res.status_code})"
+                return 0.0, f"❌ 접속실패({res.status_code})"
 
+            # 응답 데이터 파싱 (구조가 약간 다를 수 있어 안전하게 처리)
             data = res.json()
-            items = data.get('items', [])
             
+            # dividendHistory 또는 그냥 리스트 형태일 수 있음
+            items = data.get('dividendHistory', []) 
+            if not items and isinstance(data, list): # 가끔 리스트로 바로 옴
+                items = data
+            elif not items and 'items' in data: # 구조가 다를 경우 대비
+                items = data['items']
+
             if items:
-                # 가장 최신 배당금 1회분 추출
-                # (예: '141' 문자열을 숫자로 변환)
-                latest_div_str = str(items[0].get('dividend', 0)).replace(',', '')
-                latest_div = float(latest_div_str)
+                # 가장 최신 배당금 1회분
+                latest_entry = items[0]
+                # API마다 키값이 다를 수 있어 여러 후보군 확인
+                raw_div = latest_entry.get('dividendPerShare') or latest_entry.get('dividend') or 0
+                
+                latest_div = float(str(raw_div).replace(',', ''))
                 
                 if latest_div > 0:
-                    # 월배당 가정 연환산
                     return latest_div * 12, "✅ 네이버(성공)"
             
-            return 0.0, "⚠️ 데이터없음(배당이력없음)"
+            return 0.0, "⚠️ 배당내역없음"
             
         except Exception as e:
-            # 에러 메시지를 그대로 리턴해서 화면에 보여줌
-            return 0.0, f"❌ 국내에러: {str(e)}"
+            return 0.0, f"❌ 국내오류: {str(e)}"
             
-    # ------------------------------------------------
+    # =======================================================
     # 2. 해외 (야후 파이낸스)
-    # ------------------------------------------------
+    # =======================================================
     else:
         try:
             stock = yf.Ticker(code)
-            # 야후 데이터 조회 (info)
-            rate = stock.info.get('dividendRate')
             
+            # 1순위: info에서 가져오기
+            rate = stock.info.get('dividendRate')
             if rate and rate > 0:
                 return float(rate), "✅ 야후(Rate)"
-            else:
-                # 데이터가 없으면 배당 내역으로 재시도
-                hist = stock.dividends
-                if not hist.empty:
-                    # 최근 1년치 합계
-                    one_year = pd.Timestamp.now() - pd.Timedelta(days=365)
-                    total = hist[hist.index >= one_year].sum()
-                    if total > 0:
-                        return float(total), "✅ 야후(Sum)"
+            
+            # 2순위: 내역 합산 (여기서 에러 났었음!)
+            hist = stock.dividends
+            if not hist.empty:
+                # [수정 포인트] 뉴욕 시간을 단순 시간으로 변환 (에러 원인 제거)
+                if hist.index.tz is not None:
+                    hist.index = hist.index.tz_localize(None)
                 
-                return 0.0, "⚠️ 야후(데이터없음)"
+                one_year_ago = pd.Timestamp.now() - pd.Timedelta(days=365)
+                
+                # 1년치 합계 계산
+                recent_hist = hist[hist.index >= one_year_ago]
+                total = recent_hist.sum()
+                
+                if total > 0:
+                    return float(total), "✅ 야후(합계)"
+                
+            return 0.0, "⚠️ 해외데이터없음"
                 
         except Exception as e:
-            return 0.0, f"❌ 해외에러: {str(e)}"
+            return 0.0, f"❌ 해외오류: {str(e)}"
