@@ -141,18 +141,22 @@ def show_wizard():
         """)
         
         col_a, col_b = st.columns(2)
+        # [recommendation.py 맨 마지막 코드]
+
         col_a.button("🔄 다시 하기", on_click=reset_wizard)
         
         def finish():
-            # 1. 장바구니에 담기
+            # 1. 담기
             st.session_state.selected_stocks = picks
+            # 2. 초기화 (app.py에서 열 때 하므로 여기선 생략 가능하지만 안전하게 둬도 무방)
+            st.session_state.wiz_step = 1
             
-            # 2. 팝업을 닫도록 신호 보내기
-            st.session_state.ai_modal_open = False
-            
-            # 3. 완료 메시지
+            # 3. 스위치 끄기
+            st.session_state.ai_modal_open = False 
             st.toast("장바구니에 담았습니다! 🛒", icon="✅")
-                
-        col_b.button("✅ 장바구니 담기", 
-                     type="primary", 
-                     on_click=finish)
+
+        # [버튼] 
+        # on_click으로 finish 실행 -> 스위치 OFF -> 
+        # st.rerun()으로 즉시 앱 새로고침 -> app.py가 '스위치 꺼짐' 감지 -> 팝업 닫힘
+        if col_b.button("✅ 장바구니 담기", type="primary", on_click=finish):
+            st.rerun()
