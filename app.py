@@ -356,26 +356,29 @@ def main():
         with col_rec1:
             st.info("🤔 **어떤 종목을 담아야 할지 막막하신가요?**\n\nAI가 성향을 분석해 최적의 포트폴리오를 제안합니다.")
             
+        # [app.py] 수정된 버튼 로직
         with col_rec2:
-            st.write("") # 줄바꿈으로 높이 맞추기
-            # [수정] 콜백 함수 안에서 '로그인 체크'와 '스위치 ON'을 한방에 처리
-            # [app.py] 버튼 클릭 함수 수정
+            st.write("") 
+            
+            # [수정] 콜백 함수는 오직 '상태(변수)'만 변경해야 합니다!
             def try_open_modal():
                 if st.session_state.get("is_logged_in"):
-                    # 1. 문을 엽니다.
-                 
+                    # 1. 스위치만 켭니다. (여기서 show_wizard()를 호출하면 절대 안 됩니다!)
+                    st.session_state.ai_modal_open = True
                     
-                    # ▼▼▼ [추가] 열 때마다 1단계로 확실히 초기화! ▼▼▼
+                    # 2. 1단계로 초기화
                     st.session_state.wiz_step = 1
                     st.session_state.wiz_data = {}
-                    recommendation.show_wizard()
-                    # ▲▲▲
                 else:
                     st.toast("🔒 로그인이 필요한 기능입니다!", icon="🔒")
-                    
+                    st.session_state.ai_modal_open = False
             
+            # 버튼 클릭 시 함수 실행
             st.button("🕵️ AI 로보어드바이저 실행", use_container_width=True, type="primary", on_click=try_open_modal)
-                        # ✅ 이 부분도 다시 추가하세요!
+
+            # [중요] 팝업은 오직 여기서만 엽니다!
+            if st.session_state.get("ai_modal_open", False):
+                recommendation.show_wizard()
             
 
         
