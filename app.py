@@ -720,16 +720,7 @@ def main():
 
     track_visitors()
     
-    if is_admin and supabase:
-        with st.expander("🛠️ 관리자 전용: 최근 유입 로그 (최근 5건)", expanded=False):
-            try:
-                recent_logs = supabase.table("visit_logs").select("referer, created_at").order("created_at", desc=True).limit(5).execute()
-                if recent_logs.data:
-                    log_df = pd.DataFrame(recent_logs.data)
-                    log_df['created_at'] = pd.to_datetime(log_df['created_at']).dt.tz_convert('Asia/Seoul').dt.strftime('%Y-%m-%d %H:%M:%S')
-                    st.table(log_df)
-                else: st.write("아직 기록된 유입이 없습니다.")
-            except Exception as e: st.error(f"로그 로드 실패: {e}")
+
 
 if __name__ == "__main__":
     main()
