@@ -280,7 +280,7 @@ def main():
             else:
                 try:
                     uid = st.session_state.user_info.id
-                    resp = supabase.table("portfolios").select("*").eq("user_id", uid).order("created_at", desc=True).execute()
+                    resp = db.get_user_portfolios(supabase, uid)
                     if resp.data:
                         opts = {}
                         for p in resp.data:
@@ -294,7 +294,7 @@ def main():
                         if is_delete_mode:
                             if st.button("🚨 영구 삭제", type="primary", use_container_width=True):
                                 target_id = opts[sel_name]['id']
-                                supabase.table("portfolios").delete().eq("id", target_id).execute()
+                                db.delete_portfolio(supabase, target_id)
                                 st.toast("삭제되었습니다.", icon="🗑️")
                                 st.rerun()
                         else:
