@@ -4,50 +4,46 @@ import random
 import pandas as pd
 
 # -----------------------------------------------------------
-# [1] 스마트 필터링 엔진 (무적 방어 로직 적용)
+# [1] 스마트 필터링 엔진 (최종 완성판 V4.0)
 # -----------------------------------------------------------
 def get_smart_recommendation(df, user_choices):
     # 1. 사용자 입력
     target_yield = user_choices.get('target_yield', 7.0)
-    style = user_choices.get('style', 'balance')
-    age = user_choices.get('age', '4050')
-    timing = user_choices.get('timing', 'mix')
-    wanted_count = user_choices.get('count', 5)
+    style = user_choices.get('style', 'balance')   # growth / flow / safe
+    age = user_choices.get('age', '4050')          # 2030 / 4050 / 60plus
+    timing = user_choices.get('timing', 'mix')     # mid / end / mix
+    wanted_count = user_choices.get('count', 3)    # 3~5개
     
-    # 2. 데이터 복사 (안전하게)
+    # 2. 데이터 복사 (배당률 있는 것만)
     pool = df[df['연배당률'] > 0].copy()
     
-    # [기본 점수] 목표 배당률 근접도
+    # [기본 점수] 목표 배당률 근접도 (거리가 멀수록 감점)
     pool['score'] = -abs(pool['연배당률'] - target_yield) * 2
 
     # -------------------------------------------------------
-    # [전략 0] 배당 시기 (Timing) -> '배당락일' 사용
+    # [전략 0] 배당 시기 (Timing) - 안전 처리
     # -------------------------------------------------------
-    # 컬럼이 있는지 확인하고("if") 안전하게 처리
     if '배당락일' in pool.columns:
         pool['배당락일'] = pool['배당락일'].fillna('').astype(str)
-        
         if timing == 'mid': # 15일/중순
             mask = pool['배당락일'].str.contains('15일|14일|16일|중순')
             pool.loc[mask, 'score'] += 10
         elif timing == 'end': # 월말/월초
             mask = pool['배당락일'].str.contains('마지막|말일|30일|31일|28일|29일|초|하순')
             pool.loc[mask, 'score'] += 10
+        # mix는 점수 반영 없음 (자연스럽게 섞임)
 
     # -------------------------------------------------------
-    # [전략 1] 안정성 (배당 역사) -> '배당기록' 사용
+    # [전략 1] 안정성 (배당 역사) - 안전 처리
     # -------------------------------------------------------
-    # 여기가 아까 에러났던 부분! 안전 장치 추가 완료.
     if '배당기록' in pool.columns:
         def check_history(record):
             if not isinstance(record, str): return 0
-            # 파이프(|) 개수로 배당 횟수 추정
             return len(record.split('|'))
         
         pool['history_cnt'] = pool['배당기록'].apply(check_history)
-        pool['score'] += pool['history_cnt'] * 0.1
+        pool['score'] += pool['history_cnt'] * 0.1 # 오래될수록 가산점
     else:
-        # 없으면 그냥 0으로 채움 (에러 방지)
         pool['history_cnt'] = 0
 
     # -------------------------------------------------------
@@ -58,9 +54,8 @@ def get_smart_recommendation(df, user_choices):
         return any(k.lower() in text for k in keywords)
 
     # -------------------------------------------------------
-    # [전략 3] 연령대 & 투자 성향 (점수 로직)
+    # [전략 3] 연령대별 가중치
     # -------------------------------------------------------
-    # (A) 연령대
     if age == '2030':
         pool['score'] += pool['연배당률'] * 0.3
         mask = pool.apply(lambda x: has_keyword(x, ['테크', '나스닥', 'nasdaq', 'S&P', '성장', 'AI', '반도체']), axis=1)
@@ -72,12 +67,13 @@ def get_smart_recommendation(df, user_choices):
     elif age == '60plus':
         mask_kor = pool['분류'] == '국내'
         pool.loc[mask_kor, 'score'] += 3
-        # 신규 상장 감점 (컬럼 있을 때만)
         if '신규상장개월수' in pool.columns:
             try: pool.loc[pool['신규상장개월수'].astype(int) < 12, 'score'] -= 3
             except: pass
 
-    # (B) 투자 성향
+    # -------------------------------------------------------
+    # [전략 4] 투자 성향별 가중치
+    # -------------------------------------------------------
     if style == 'growth':
         mask = pool.apply(lambda x: has_keyword(x, ['나스닥', 'nasdaq', 'S&P', '미국', '테크', '성장', '다우존스']), axis=1)
         pool.loc[mask, 'score'] += 6
@@ -91,28 +87,66 @@ def get_smart_recommendation(df, user_choices):
         safe_keys = ['채권', '국채', '금', 'gold', '달러', 'CD', 'KOFR', '단기', 'treasury', 't-bill', 'bond', 'shv', 'bil', 'sgov']
         mask_safe = pool.apply(lambda x: has_keyword(x, safe_keys), axis=1)
         pool.loc[mask_safe, 'score'] += 10
+        
         mask_risk = pool.apply(lambda x: has_keyword(x, ['레버리지', '2X', '인버스', 'high yield']), axis=1)
         pool.loc[mask_risk, 'score'] -= 20
         pool.loc[pool['연배당률'] > 12, 'score'] -= 10
 
     # -------------------------------------------------------
-    # [최종] 다양성 확보 (Shuffle)
+    # [최종] 5. 스타일별 쿼터제 & 다양성 (밸런스 패치)
     # -------------------------------------------------------
     # 1. 점수 순 정렬
     pool = pool.sort_values('score', ascending=False)
     
-    # 2. 상위 2배수 후보군
-    candidate_pool = pool.head(wanted_count * 2)
+    # 2. 커버드콜(CC) 식별
+    cc_keys = ['커버드콜', 'covered', '타겟', 'premium', '200위클리', 'top10', 'monthly', 'jepi', 'qyld', 'nvid', 'tsly']
+    pool['is_cc'] = pool.apply(lambda x: has_keyword(x, cc_keys), axis=1)
     
-    # 3. 랜덤 샘플링
-    if len(candidate_pool) >= wanted_count:
-        final_picks_df = candidate_pool.sample(wanted_count)
+    pool_cc = pool[pool['is_cc'] == True]      # 커버드콜 그룹
+    pool_normal = pool[pool['is_cc'] == False] # 일반 그룹
+    
+    # 3. 스타일별 커버드콜 한도 설정 (선생님 피드백 반영!)
+    if style == 'growth':
+        limit_cc = 1  # 성장형: 배당 보너스로 최대 1개
+    elif style == 'safe':
+        limit_cc = 1  # 안정형: 수익률 보정을 위해 최대 1개 허용 (0개 아님!)
     else:
-        final_picks_df = candidate_pool
-        
-    final_picks = final_picks_df['pure_name'].tolist()
+        limit_cc = int(wanted_count * 0.4) # 현금흐름형: 40% (2개 정도)
+        if limit_cc < 1: limit_cc = 1
+
+    # 4. 종목 추출 (상위권에서 후보군 뽑아서 랜덤)
+    picks_cc = []
+    picks_normal = []
+
+    # (A) 커버드콜 뽑기
+    if limit_cc > 0 and not pool_cc.empty:
+        cand_cc = pool_cc.head(limit_cc * 3) # 후보군 3배수
+        k_cc = min(len(cand_cc), limit_cc)
+        if k_cc > 0:
+            picks_cc = random.sample(cand_cc['pure_name'].tolist(), k_cc)
+            
+    # (B) 일반 종목 뽑기
+    rem_count = wanted_count - len(picks_cc)
+    if not pool_normal.empty:
+        cand_norm = pool_normal.head(rem_count * 2) # 후보군 2배수
+        k_norm = min(len(cand_norm), rem_count)
+        if k_norm > 0:
+            picks_normal = random.sample(cand_norm['pure_name'].tolist(), k_norm)
+            
+    # 5. 합치기 & 부족분 채우기
+    final_picks = picks_cc + picks_normal
     
-    # 타이틀
+    if len(final_picks) < wanted_count:
+        needed = wanted_count - len(final_picks)
+        pool_remain = pool[~pool['pure_name'].isin(final_picks)]
+        if not pool_remain.empty:
+            more = pool_remain.head(needed)['pure_name'].tolist()
+            final_picks.extend(more)
+            
+    # 6. 순서 섞기
+    random.shuffle(final_picks)
+    
+    # 타이틀 생성
     timing_badge = {"mid": "15일 월중배당", "end": "월말/월초배당", "mix": "날짜 혼합"}
     theme_title = f"{timing_badge.get(timing)} 맞춤 포트폴리오"
         
@@ -129,9 +163,12 @@ def go_next_step(next_step_num, key=None, value=None):
 def reset_wizard():
     st.session_state.wiz_step = 1
     st.session_state.wiz_data = {}
+    # 캐시 초기화 (NameError 방지)
+    if "ai_result_cache" in st.session_state:
+        del st.session_state.ai_result_cache
 
 # -----------------------------------------------------------
-# [3] UI 위자드
+# [3] UI 위자드 (Step 1 ~ 5)
 # -----------------------------------------------------------
 @st.dialog("🕵️ AI 포트폴리오 설계", width="small")
 def show_wizard():
@@ -172,12 +209,16 @@ def show_wizard():
         st.button("🔚 월말/월초 (월급날 전후)", use_container_width=True, on_click=go_next_step, args=(4, 'timing', 'end'))
         st.button("🔄 상관없음 (섞어서 2주마다 받기)", use_container_width=True, on_click=go_next_step, args=(4, 'timing', 'mix'))
 
-    # --- [STEP 4] 목표 설정 ---
+    # --- [STEP 4] 목표 설정 (현실화) ---
     elif step == 4:
         st.subheader("Q4. 구체적인 목표를 정해주세요")
         st.write("")
+        
+        # [수정] 최소 3% (성장주/안정형 포함)
         target = st.slider("💰 목표 연배당률 (%)", 3.0, 20.0, 7.0, 0.5, format="%f%%")
-        count = st.slider("📊 포트폴리오 종목 개수", 3, 7, 5)
+        
+        # [수정] 종목 3~5개 (집중 투자)
+        count = st.slider("📊 포트폴리오 종목 개수", 3, 5, 3)
         st.write("")
         
         def save_and_go():
@@ -189,19 +230,17 @@ def show_wizard():
 
     # --- [STEP 5] 결과 및 담기 ---
     elif step == 5:
-        # [핵심 수정] 결과를 세션에 저장해서 'NameError' 방지 & 재계산 방지
+        # 1. 계산 결과 캐싱 (NameError 방지)
         if "ai_result_cache" not in st.session_state:
             with st.spinner("AI가 최적의 조합을 찾는 중..."):
                 time.sleep(0.7) 
-                # 여기서 계산 실행
-                title_res, picks_res = get_smart_recommendation(df, st.session_state.wiz_data)
-                # 결과 저장
-                st.session_state.ai_result_cache = {"title": title_res, "picks": picks_res}
+                t_res, p_res = get_smart_recommendation(df, st.session_state.wiz_data)
+                st.session_state.ai_result_cache = {"title": t_res, "picks": p_res}
         
-        # 저장된 결과 불러오기 (이제 변수가 사라지지 않습니다!)
-        cached_data = st.session_state.ai_result_cache
-        title = cached_data["title"]
-        picks = cached_data["picks"]
+        # 2. 캐시에서 불러오기
+        cached = st.session_state.ai_result_cache
+        title = cached["title"]
+        picks = cached["picks"]
         
         user_name = st.session_state.get("user_id", st.session_state.get("user_email", "회원님"))
         if "@" in user_name: user_name = user_name.split("@")[0]
@@ -211,9 +250,8 @@ def show_wizard():
         
         st.write("📋 **추천 리스트 (상세 정보)**")
         
-        # [수정] picks가 비어있을 경우를 대비한 방어 코드
         if not picks:
-            st.warning("조건에 맞는 종목을 찾지 못했습니다. 다시 시도해주세요.")
+            st.warning("조건에 맞는 종목을 찾지 못했습니다. 설정을 조금 변경해보세요.")
         else:
             for stock in picks:
                 row = df[df['pure_name'] == stock]
@@ -221,19 +259,19 @@ def show_wizard():
                     r_data = row.iloc[0]
                     rate = r_data['연배당률']
                     
-                    # 안전한 접근 (Safe Access)
+                    # [안전] 배당락일 확인
                     date = str(r_data.get('배당락일', '-'))
                     if date == 'nan': date = '-'
                     
-                    # 직전 배당금 추출
+                    # [안전] 직전 배당금 추출 (0원 방지)
                     hist_raw = str(r_data.get('배당기록', ''))
                     last_div = "0"
-                    if hist_raw and hist_raw != 'nan':
+                    if hist_raw and hist_raw != 'nan' and hist_raw.strip():
                         try:
                             vals = hist_raw.split('|')
                             if vals: last_div = vals[0].strip()
                         except: last_div = "0"
-
+                        
                     # 통화 단위
                     category = str(r_data.get('분류', '국내'))
                     div_str = f"${last_div}" if '해외' in category else f"{last_div}원"
@@ -254,20 +292,23 @@ def show_wizard():
         col_a, col_b = st.columns(2)
         col_a.button("🔄 다시 하기", on_click=reset_wizard)
         
+        # [안전] 장바구니 담기 (로그아웃 방지)
         if col_b.button("✅ 장바구니 담기", type="primary"):
             st.session_state.selected_stocks = picks
             st.session_state.wiz_step = 1
             st.session_state.ai_modal_open = False
             
-            # 초기화 (다음을 위해 결과 캐시 삭제)
+            # 캐시 삭제
             if "ai_result_cache" in st.session_state:
                 del st.session_state.ai_result_cache
-
+            
+            # 인증 정보 백업
             u_bk = st.session_state.get("user_info")
             l_bk = st.session_state.get("is_logged_in")
             
             st.toast("장바구니에 담았습니다! 🛒", icon="✅")
             
+            # 복구 & 새로고침
             st.session_state.user_info = u_bk
             st.session_state.is_logged_in = l_bk
             
