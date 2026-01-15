@@ -1,5 +1,12 @@
 import streamlit as st
+import pandas as pd
+import time  # <--- [확인] 섀도잉 에러 방지를 위해 전역에 배치
+import logic
+import datetime
 
+# ==========================================
+# [1] 기존 기능: 커스텀 테이블 렌더링
+# ==========================================
 def render_custom_table(data_frame):
     """데이터프레임을 HTML 테이블로 예쁘게 렌더링 (모바일 스크롤 적용)"""
     html_rows = []
@@ -20,19 +27,12 @@ def render_custom_table(data_frame):
 
     st.markdown(f"""
     <style>
-        .table-container {{
-            overflow-x: auto; 
-            white-space: nowrap;
-            margin-bottom: 20px;
-            border: 1px solid #eee;
-            border-radius: 8px;
-        }}
+        .table-container {{ overflow-x: auto; white-space: nowrap; margin-bottom: 20px; border: 1px solid #eee; border-radius: 8px; }}
         table {{ width: 100%; border-collapse: collapse; font-size: 14px; min-width: 600px; }}
         th {{ background: #f0f2f6; padding: 12px 8px; border-bottom: 2px solid #ddd; text-align: center; }}
         td {{ padding: 10px 8px; border-bottom: 1px solid #eee; text-align: center; }}
         .name-cell {{ text-align: left !important; min-width: 120px; position: sticky; left: 0; background: white; z-index: 1; border-right: 1px solid #eee; }}
     </style>
-    
     <div class="table-container">
         <table>
             <thead><tr><th>코드</th><th style='text-align:left; padding-left:10px;'>종목명</th><th>현재가</th><th>연배당률</th><th>환구분</th><th>배당락일</th><th>정보</th></tr></thead>
@@ -40,3 +40,81 @@ def render_custom_table(data_frame):
         </table>
     </div>
     """, unsafe_allow_html=True)
+
+# ==========================================
+# [2] 신규 기능: 관리자 섹션 통합 (app.py 다이어트용)
+# ==========================================
+def render_admin_section(df_raw, supabase):
+    """관리자용 사이드바 도구와 로그 섹션 (기존 로직 100% 보존)"""
+    
+    # 1. 사이드바 관리자 도구
+    with st.sidebar:
+        st.markdown("---")
+        st.subheader("🛠️ 배당금 갱신 도구")
+        
+        # 종목 선택 리스트 생성
+        stock_options = {}
+        for _, row in df_raw.iterrows():
+            name = row['종목명']
+            try: months = int(row.get('신규상장개월수', 0))
+            except: months = 0
+            label = f"⭐ [신규 {months}개월] {name}" if months > 0 else name
+            stock_options[label] = name
+
+        selected_label = st.selectbox("갱신할 종목 선택", list(stock_options.keys()))
+        target_stock = stock_options[selected_label]
+        
+        if target_stock:
+            row = df_raw[df_raw['종목명'] == target_stock].iloc[0]
+            code, cat = str(row['종목코드']).strip(), str(row.get('분류','국내')).strip()
+            
+            col_info, col_btn = st.columns([1, 1.5])
+            with col_info:
+                st.caption(f"코드: {code}\n분류: {cat}")
+            with col_btn:
+                if st.button("🔍 배당률 조회", key="btn_admin_check"):
+                    y_val, src = logic.fetch_dividend_yield_hybrid(code, cat)
+                    if y_val > 0: st.success(f"📈 {y_val}%"); st.caption(f"출처: {src}")
+                    else: st.error("조회 실패")
+            
+            st.divider()
+            new_div = st.number_input("이번 달 확정 배당금", value=0, step=10, key="admin_div_input")
+            if st.button("계산 실행", use_container_width=True, key="admin_calc_btn"):
+                _, new_hist = logic.update_dividend_rolling(row.get('배당기록',""), new_div)
+                st.success("완료!"); st.code(new_hist)
+
+        st.markdown("---")
+        st.subheader("💾 데이터 저장 및 백업")
+        
+        # 백업 버튼
+        st.download_button(
+            label="📂 현재 파일 백업하기", 
+            data=df_raw.to_csv(index=False).encode('utf-8'), 
+            file_name=f"stocks_backup_{datetime.datetime.now().strftime('%Y%m%d')}.csv", 
+            mime='text/csv', 
+            use_container_width=True
+        )
+
+        # 깃허브 최종 저장
+        st.info("💡 수정 사항을 반영하시겠습니까?")
+        if st.checkbox("네, 덮어써도 좋습니다.", key="admin_save_confirm"):
+            if st.button("🚀 깃허브에 영구 저장 (Commit)", type="primary", use_container_width=True):
+                target_df = st.session_state.get('df_dirty', df_raw)
+                success, msg = logic.save_to_github(target_df)
+                if success:
+                    st.success(msg)
+                    st.balloons()
+                    time.sleep(2) # 전역 time 라이브러리 사용
+                    st.rerun()
+
+    # 2. 메인 화면 하단 관리자 로그
+    if supabase:
+        with st.expander("🛠️ 관리자 전용: 최근 유입 로그 (최근 5건)", expanded=False):
+            try:
+                resp = supabase.table("visit_logs").select("referer, created_at").order("created_at", desc=True).limit(5).execute()
+                if resp.data:
+                    log_df = pd.DataFrame(resp.data)
+                    log_df['created_at'] = pd.to_datetime(log_df['created_at']).dt.tz_convert('Asia/Seoul').dt.strftime('%Y-%m-%d %H:%M:%S')
+                    st.table(log_df)
+                else: st.write("기록된 로그가 없습니다.")
+            except: st.write("로그 로드 중 오류 발생")
