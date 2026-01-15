@@ -12,40 +12,37 @@ import requests
 from github import Github
 
 # ==========================================
-# [1] 시세 조회 및 자산 분류 유틸리티
+# [1] 시세 조회 센서 (Safety Sensor)
 # ==========================================
 
-def fetch_dividend_yield_hybrid(code, category):
-    """국내(네이버)/해외(야후) 배당률 진짜로 긁어오기"""
+def _fetch_price_raw(broker, code, category):
     try:
+        code_str = str(code).strip()
         if category == '국내':
-            url = f"https://finance.naver.com/item/main.naver?code={code}"
-            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'}
-            res = requests.get(url, headers=headers)
-            
-            # 정규표현식으로 '배당수익률' 뒤의 숫자만 쏙 뽑아냅니다.
-            # (BeautifulSoup보다 이 방식이 네이버 금융에선 더 빠르고 정확할 때가 많습니다)
-            match = re.search(r'<em>배당수익률</em>.*?<em id="_dvd_rt">([\d.]+)</em>', res.text, re.S)
-            
-            if match:
-                val = float(match.group(1))
-                return val, "네이버금융"
-            else:
-                return 0.0, "배당정보없음"
-                
-        else: # 해외 종목
-            stock = yf.Ticker(code)
-            # yfinance에서 dividendYield는 0.08 형식으로 오므로 100을 곱해줍니다.
-            y_val = stock.info.get('dividendYield')
-            if y_val:
-                return round(y_val * 100, 2), "야후파이낸스"
-            return 0.0, "해외배당없음"
+            try:
+                resp = broker.fetch_price(code_str)
+                if resp and isinstance(resp, dict) and 'output' in resp:
+                    if resp['output'] and resp['output'].get('stck_prpr'):
+                        return int(resp['output']['stck_prpr'])
+            except: pass
+        
+        ticker_code = f"{code_str}.KS" if category == '국내' else code_str
+        ticker = yf.Ticker(ticker_code)
+        price = ticker.fast_info.get('last_price')
+        if not price:
+            hist = ticker.history(period="1d")
+            if not hist.empty:
+                price = hist['Close'].iloc[-1]
+        return float(price) if price else None
+    except: return None
 
-    except Exception as e:
-        return 0.0, f"오류: {str(e)}"
-
-
-
+def get_safe_price(broker, code, category):
+    """시세를 2번 시도해서 안전하게 가져오는 함수"""
+    for _ in range(2):
+        price = _fetch_price_raw(broker, code, category)
+        if price is not None: return price
+        time.sleep(0.5)
+    return None
 
 def classify_asset(row):
     name, symbol = str(row.get('종목명', '')).upper(), str(row.get('종목코드', '')).upper()
@@ -63,7 +60,7 @@ def get_hedge_status(name, category):
     return "⚡환노출" if any(x in name_str for x in ['미국', 'GLOBAL', 'S&P500', '나스닥']) else "-"
 
 # ==========================================
-# [2] 캘린더 생성 로직 (D-3 알림 반영)
+# [2] 캘린더 생성 로직
 # ==========================================
 
 def calculate_google_calendar_url(ticker_name, pay_date_str):
@@ -91,33 +88,20 @@ def calculate_google_calendar_url(ticker_name, pay_date_str):
             target_date = datetime.datetime.strptime(clean_str, "%Y-%m-%d").date()
 
         if not target_date: return None
-
         safe_buy_date = target_date - datetime.timedelta(days=3)
         while safe_buy_date.weekday() >= 5: safe_buy_date -= datetime.timedelta(days=1)
         
         title = quote(f"💰 [{ticker_name}] 매수 준비 (D-3)")
-        details = quote(f"배당 기준일(예상): {target_date}\n✅ 안전 매수 추천일: {safe_buy_date}\n\n매수 전 확정 일자를 재확인하세요!")
+        details = quote(f"배당 기준일(예상): {target_date}\n✅ 안전 매수 추천일: {safe_buy_date}")
         return f"https://www.google.com/calendar/render?action=TEMPLATE&text={title}&dates={safe_buy_date.strftime('%Y%m%d')}/{(safe_buy_date + datetime.timedelta(days=1)).strftime('%Y%m%d')}&details={details}"
     except: return None
 
 def generate_portfolio_ics(selected_stocks_data):
     cal_content = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//DividendPange//Portfolio//KO", "METHOD:PUBLISH"]
-    today = datetime.date.today()
     for item in selected_stocks_data:
         name = item.get('종목', '종목명')
-        pay_date_str = item.get('배당락일', '-')
-        # (날짜 파싱 로직 요약 적용)
-        try:
-            safe_buy_date = today # 임시
-            # 실제 파일에는 위 google calendar와 동일한 날짜 계산 로직이 들어갑니다.
-            # 중복 방지를 위해 간단히 처리함
-            event = [
-                "BEGIN:VEVENT",
-                f"SUMMARY:💰 [{name}] 매수 준비 (D-3)",
-                "END:VEVENT"
-            ]
-            cal_content.extend(event)
-        except: pass
+        event = ["BEGIN:VEVENT", f"SUMMARY:💰 [{name}] 매수 준비 (D-3)", "END:VEVENT"]
+        cal_content.extend(event)
     cal_content.append("END:VCALENDAR")
     return "\n".join(cal_content)
 
@@ -135,6 +119,7 @@ def load_and_process_data(df_raw, is_admin=False):
     results = [None] * len(df_raw)
     def process_row(idx, row):
         code, name, category = str(row.get('종목코드', '')).strip(), str(row.get('종목명', '')).strip(), str(row.get('분류', '국내')).strip()
+        # [복구 확인] 여기서 get_safe_price를 호출합니다.
         price = get_safe_price(broker, code, category)
         if not price: return idx, None
         
@@ -172,17 +157,32 @@ def load_stock_data_from_csv():
     try: return pd.read_csv(url, dtype={'종목코드': str})
     except: return pd.DataFrame()
 
+# ==========================================
+# [4] 관리자용 정밀 조회 모듈 (5% 버그 완전 삭정)
+# ==========================================
+
 def fetch_dividend_yield_hybrid(code, category):
-    # 국내/해외 하이브리드 배당률 조회 (네이버/야후)
+    """국내(네이버)/해외(야후) 배당률 진짜로 긁어오기"""
     try:
         if category == '국내':
             url = f"https://finance.naver.com/item/main.naver?code={code}"
-            # ... 네이버 파싱 로직 ...
-            return 5.0, "네이버" # 예시
-        else:
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            res = requests.get(url, headers=headers)
+            
+            # [진짜 센서 장착] 5.0은 지우고 네이버 배당수익률 숫자만 추출
+            match = re.search(r'<em>배당수익률</em>.*?<em id="_dvd_rt">([\d.]+)</em>', res.text, re.S)
+            if match:
+                return float(match.group(1)), "네이버금융"
+            return 0.0, "배당정보없음"
+                
+        else: # 해외 종목
             stock = yf.Ticker(code)
-            return round(stock.info.get('dividendYield', 0) * 100, 2), "야후"
-    except: return 0.0, "오류"
+            y_val = stock.info.get('dividendYield')
+            if y_val:
+                return round(float(y_val) * 100, 2), "야후파이낸스"
+            return 0.0, "해외배당없음"
+    except:
+        return 0.0, "조회실패"
 
 def update_dividend_rolling(current_history_str, new_dividend_amount):
     if pd.isna(current_history_str) or str(current_history_str).strip() == "": history = []
@@ -192,14 +192,13 @@ def update_dividend_rolling(current_history_str, new_dividend_amount):
     return sum(history), "|".join(map(str, history))
 
 # ==========================================
-# [4] 시뮬레이션 및 역산기 엔진 (핵심)
+# [5] 시뮬레이션 및 깃허브 저장
 # ==========================================
 
 def run_asset_simulation(start_money, monthly_add, avg_y, years_sim, is_isa_mode, reinvest_ratio, isa_exempt):
     months_sim = years_sim * 12
     monthly_yld = avg_y / 100 / 12
-    current_bal = start_money
-    total_principal = start_money
+    current_bal, total_principal = start_money, start_money
     sim_data = [{"년차": 0, "자산총액": current_bal/10000, "총원금": total_principal/10000, "실제월배당": 0}]
     total_tax = 0
     for m in range(1, months_sim + 1):
@@ -216,17 +215,12 @@ def run_asset_simulation(start_money, monthly_add, avg_y, years_sim, is_isa_mode
     return sim_data, total_tax
 
 def calculate_goal_duration(target_monthly_goal, start_bal_goal, monthly_add_goal, avg_y, tax_factor):
-    """목표 배당금 달성까지의 기간을 계산하는 엔진 (역산기)"""
     required_asset_goal = (target_monthly_goal / tax_factor) / (avg_y / 100) * 12
-    current_bal_goal = start_bal_goal
-    months_passed = 0
-    max_months = 600  # 50년 제한
-    
-    while current_bal_goal < required_asset_goal and months_passed < max_months:
+    current_bal_goal, months_passed = start_bal_goal, 0
+    while current_bal_goal < required_asset_goal and months_passed < 600:
         div_reinvest = current_bal_goal * (avg_y / 100 / 12) * tax_factor
         current_bal_goal += monthly_add_goal + div_reinvest
         months_passed += 1
-        
     return required_asset_goal, months_passed
 
 def save_to_github(df):
