@@ -43,6 +43,3 @@ def render_custom_table(data_frame):
 
 
 
-# 4. 메인 화면의 버튼
-if st.button("코치님, 저 뭐 살까요? (클릭)"):
-    open_toss_modal()
