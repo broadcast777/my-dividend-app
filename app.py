@@ -12,6 +12,7 @@ import time
 import random
 from streamlit.runtime.scriptrunner import get_script_run_ctx
 from logger import logger  # [추가] 블랙박스 배선 연결
+from analytics import inject_ga
 
 # [필수] 날짜 및 URL 라이브러리
 from datetime import datetime, timedelta
@@ -735,6 +736,7 @@ def render_stocklist_page(df):
 # [SECTION 5] 메인 애플리케이션 실행 엔진 (관제실)
 # ==========================================
 def main():
+    inject_ga()
     """앱의 메인 실행 흐름을 제어합니다."""
     
     # 1. 안전 장치 및 로깅
