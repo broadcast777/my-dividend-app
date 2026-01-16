@@ -4,7 +4,7 @@ import random
 import pandas as pd
 
 # -----------------------------------------------------------
-# [1] 스마트 필터링 & 비중 최적화 엔진 (V5.0)
+# [1] 스마트 필터링 & 비중 최적화 엔진 (최종 정밀 교정판)
 # -----------------------------------------------------------
 def get_smart_recommendation(df, user_choices):
     # 1. 사용자 입력 추출
@@ -18,66 +18,64 @@ def get_smart_recommendation(df, user_choices):
     pool = df[df['연배당률'] > 0].copy()
 
     # -------------------------------------------------------
-    # [수정/추가] ★ 배당 시기 엄격 필터링 (Hard Filter) ★
+    # [교정 1] ★ 스타일별 제한 및 배당 시기 엄격 필터 (Hard Filter) ★
     # -------------------------------------------------------
+    # (A) 안정형 6% 상한선 적용
+    if style == 'safe':
+        pool = pool[pool['연배당률'] <= 6.0]
+        target_yield = min(target_yield, 6.0)
+
+    # (B) 배당 시기 필터링 (해당하지 않으면 풀에서 즉시 제거)
     if '배당락일' in pool.columns:
         pool['배당락일'] = pool['배당락일'].fillna('').astype(str)
-        
         if timing == 'mid': 
-            # 중순(15일 전후)이 포함되지 않은 종목은 풀에서 즉시 제거
             pool = pool[pool['배당락일'].str.contains('15일|14일|16일|중순')]
-            
         elif timing == 'end': 
-            # 월말/월초가 포함되지 않은 종목은 풀에서 즉시 제거
             pool = pool[pool['배당락일'].str.contains('마지막|말일|30일|31일|28일|29일|초|하순')]
-            
-        # 'mix'는 필터 없이 그대로 진행
 
-    # [중요] 필터링 후 종목이 하나도 없으면 에러 방지를 위해 빈 결과 리턴
+    # 필터링 후 종목이 하나도 없으면 에러 방지
     if pool.empty:
         return "조건에 맞는 종목 없음", [], {}
+
     # -------------------------------------------------------
-
-    # [수익률 우선순위 점수] - 여기서부터는 기존 로직 그대로...
+    # [교정 2] 점수 산정 (목표 배당률 근접도 우선)
+    # -------------------------------------------------------
     if target_yield >= 10.0:
-        pool['score'] = pool['연배당률'] * 5.0 
-    else:
-        pool['score'] = -abs(pool['연배당률'] - target_yield) * 3.0
-    
-    # [수익률 우선순위 점수]
-    if target_yield >= 10.0:
-        pool['score'] = pool['연배당률'] * 5.0 
+        pool['score'] = pool['연배당률'] * 5.0  # 고배당 목표 시 수익률 몰빵
     else:
         pool['score'] = -abs(pool['연배당률'] - target_yield) * 3.0
 
-    # 키워드 매칭 함수 정의
+    # 키워드 매칭 함수
     def has_keyword(row, keywords):
         text = (str(row['종목명']) + " " + str(row.get('pure_name', ''))).lower()
         return any(k.lower() in text for k in keywords)
 
-    # 스타일별 가중치 (V4.0 로직 유지)
+    # 스타일 가중치 반영
     if style == 'growth':
-        mask = pool.apply(lambda x: has_keyword(x, ['나스닥', 'nasdaq', 'S&P', '미국', '테크', '성장', '다우존스']), axis=1)
-        pool.loc[mask, 'score'] += 6
+        mask = pool.apply(lambda x: has_keyword(x, ['나스닥', 'nasdaq', 'S&P', '미국', '테크', '성장']), axis=1)
+        pool.loc[mask, 'score'] += 5
     elif style == 'flow':
         pool['score'] += pool['연배당률'] * 0.8
-        flow_keys = ['커버드콜', 'covered', '타겟', 'premium', '월지급', '리츠', 'reit', '고배당', '우선주', 'pff', 'jepi']
-        mask = pool.apply(lambda x: has_keyword(x, flow_keys), axis=1)
-        pool.loc[mask, 'score'] += 6
+        mask = pool.apply(lambda x: has_keyword(x, ['커버드콜', 'covered', 'premium', '리츠', '고배당']), axis=1)
+        pool.loc[mask, 'score'] += 5
     elif style == 'safe':
-        safe_keys = ['채권', '국채', '금', 'gold', '달러', 'CD', 'KOFR', '단기', 'treasury', 'bond']
-        mask_safe = pool.apply(lambda x: has_keyword(x, safe_keys), axis=1)
-        pool.loc[mask_safe, 'score'] += 10
+        mask = pool.apply(lambda x: has_keyword(x, ['채권', '국채', '금', 'gold', '달러', 'CD', 'KOFR', '단기']), axis=1)
+        pool.loc[mask, 'score'] += 10
 
     # 점수 순 정렬 후 추출
     pool = pool.sort_values('score', ascending=False)
     selected_pool = pool.head(wanted_count).copy()
     final_picks = selected_pool['pure_name'].tolist()
 
-    # [비중 최적화 로직]
+    # -------------------------------------------------------
+    # [교정 3] 비중 최적화 로직 (목표 기여도 비례 배분)
+    # -------------------------------------------------------
     yields = selected_pool['연배당률'].values
+    # 목표값에 가까울수록 가중치 상승 (역거리 가중치)
     inv_dist = 1 / (abs(yields - target_yield) + 0.1) 
     weights = (inv_dist / inv_dist.sum()) * 100
+    
+    # 정수화 및 합계 100 보정
     weights = weights.round().astype(int)
     weights[-1] = 100 - weights[:-1].sum() 
     
@@ -103,7 +101,7 @@ def reset_wizard():
         del st.session_state.ai_result_cache
 
 # -----------------------------------------------------------
-# [3] UI 위자드 (최종 완성본)
+# [3] UI 위자드 (Step 1 ~ 5)
 # -----------------------------------------------------------
 @st.dialog("🕵️ AI 포트폴리오 설계", width="small")
 def show_wizard():
@@ -143,8 +141,12 @@ def show_wizard():
         target = st.slider("💰 목표 연배당률 (%)", 3.0, 20.0, 7.0, 0.5)
         
         # [주의 멘트 로직]
-        if target >= 10.0:
-            st.error(f"⚠️ **고배당 투자 유의사항 ({target}%)**\n\n원금 손실 위험이 큰 '커버드콜' 종목 위주로 구성될 수 있습니다.")
+        if st.session_state.wiz_data.get('style') == 'safe':
+            st.info("🛡️ **안정형 모드:** 자산 보호를 위해 배당률이 **6% 이하**인 종목으로 제한됩니다.")
+            if target > 6.0:
+                st.warning("설정값이 6%보다 높지만, 결과는 6% 이하 종목에서 선정됩니다.")
+        elif target >= 10.0:
+            st.error(f"⚠️ **고배당 투자 유의사항 ({target}%)**\n\n원금 손실 위험이 큰 종목이 포함될 수 있습니다.")
         elif target >= 8.0:
             st.warning("💡 8% 이상은 중위험 종목이 포함될 수 있습니다.")
             
@@ -158,19 +160,37 @@ def show_wizard():
 
     elif step == 5:
         if "ai_result_cache" not in st.session_state:
-            with st.spinner("최적 비중 계산 중..."):
+            with st.spinner("최적 조합 계산 중..."):
                 t_res, p_res, w_res = get_smart_recommendation(df, st.session_state.wiz_data)
                 st.session_state.ai_result_cache = {"title": t_res, "picks": p_res, "weights": w_res}
         
         cached = st.session_state.ai_result_cache
         title, picks, weights = cached["title"], cached["picks"], cached["weights"]
 
+        if not picks or title == "조건에 맞는 종목 없음":
+            st.error("❌ 조건에 맞는 종목을 찾지 못했습니다. 설정을 변경해 보세요.")
+            if st.button("처음으로 돌아가기", use_container_width=True):
+                reset_wizard()
+                st.rerun()
+            return
+
         st.success(f"**{title}**")
         for stock in picks:
-            row = df[df['pure_name'] == stock].iloc[0]
-            w = weights.get(stock, 0)
-            st.markdown(f"✅ **{stock}** (비중 **{w}%**)")
-            st.caption(f"   └ 💰 연 {row['연배당률']:.2f}% | 📅 {row.get('배당락일', '-')}")
+            row_match = df[df['pure_name'] == stock]
+            if not row_match.empty:
+                row = row_match.iloc[0]
+                w = weights.get(stock, 0)
+                st.markdown(f"✅ **{stock}** (비중 **{w}%**)")
+                st.caption(f"   └ 💰 연 {row['연배당률']:.2f}% | 📅 {row.get('배당락일', '-')}")
+
+        # --- [수정] 면책 문구 위치 조정 ---
+        st.write("") 
+        st.warning("""
+        ⚠️ **투자 유의사항**
+        * 본 결과는 과거 데이터를 기반으로 한 단순 시뮬레이션이며, 종목의 매수/매도 추천이 아닙니다.
+        * 모든 투자의 책임은 투자자 본인에게 있습니다.
+        * '안정성'을 추구하는 포트폴리오라 할지라도 시장 변동에 따라 원금 손실이 발생할 수 있습니다.
+        """)
 
         st.divider()
         c_a, c_b = st.columns(2)
@@ -179,4 +199,11 @@ def show_wizard():
             st.session_state.selected_stocks = picks
             st.session_state.ai_suggested_weights = weights
             st.session_state.ai_modal_open = False
+            
+            # 인증 상태 유지
+            u_bk = st.session_state.get("user_info")
+            l_bk = st.session_state.get("is_logged_in")
+            st.toast("장바구니에 담았습니다! 🛒", icon="✅")
+            st.session_state.user_info = u_bk
+            st.session_state.is_logged_in = l_bk
             st.rerun()
