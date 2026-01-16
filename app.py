@@ -144,49 +144,50 @@ def main():
     if is_admin: st.title("💰 배당팽이 대시보드 (관리자 모드)")
     else: st.title("💰 배당팽이 월배당 계산기")
 
+
     # ---------------------------------------------------------
-    # [수정] 최상단 통합 로그인 센터 배치 (모바일 동선 개선)
+    # [3] ★ UI 개선: 최상단 통합 로그인 센터 (선생님 검증 방식 복구) ★
     # ---------------------------------------------------------
     with st.container(border=True):
         if not st.session_state.get("is_logged_in", False):
-            st.markdown("🔒 로그인하기 ")
+            st.markdown("🔒 **로그인하시면 [AI 포트폴리오 진단]과 [저장 기능]이 활성화됩니다.**")
             
-            # 현재 세션 ID 가져오기 (OAuth 리다이렉트용)
-            try:
-                ctx = get_script_run_ctx()
-                current_session_id = ctx.session_id
-            except:
-                current_session_id = "unknown"
+            # [중요] 리다이렉트 주소를 파라미터 없는 '순정' 주소로 고정합니다.
+            # 카카오 개발자 센터에 등록된 주소와 토씨 하나 틀리지 않아야 합니다.
+            clean_redirect_url = "https://dividend-pange.streamlit.app"
 
             col_l, col_r = st.columns(2)
+            
             with col_l:
-                # 1. 카카오 로그인 (3초 브랜딩 적용)
+                # 1. 카카오 로그인 (새 창 _blank 방식 복구)
                 try:
                     res_kakao = supabase.auth.sign_in_with_oauth({
                         "provider": "kakao",
                         "options": {
-                            "redirect_to": "https://dividend-pange.streamlit.app",
+                            "redirect_to": clean_redirect_url,
                             "skip_browser_redirect": True
                         }
                     })
                     if res_kakao.url:
+                        # target="_blank"를 사용하여 카카오 보안 액자를 깨고 새 창으로 띄웁니다.
                         kakao_btn_html = f'''
-                        <a href="{res_kakao.url}" target="_self" style="text-decoration:none;">
+                        <a href="{res_kakao.url}" target="_blank" style="text-decoration:none;">
                             <div style="background-color:#FEE500; color:#3C1E1E; padding:10px; border-radius:8px; text-align:center; font-weight:bold; font-size:1.1em; box-shadow: 0 1px 2px rgba(0,0,0,0.1);">
                                 💬 Kakao로 3초 만에 시작하기
                             </div>
                         </a>'''
                         st.markdown(kakao_btn_html, unsafe_allow_html=True)
-                except: pass
+                except:
+                    st.error("카카오 엔진 호출 실패")
 
             with col_r:
-                # 2. 구글 로그인
+                # 2. 구글 로그인 (기존 잘 되던 방식 유지)
                 if st.button("🔵 Google로 로그인", use_container_width=True):
                     try:
                         res = supabase.auth.sign_in_with_oauth({
                             "provider": "google",
                             "options": {
-                                "redirect_to": f"https://dividend-pange.streamlit.app?old_id={current_session_id}",
+                                "redirect_to": clean_redirect_url,
                                 "queryParams": {"access_type": "offline", "prompt": "consent"},
                                 "skip_browser_redirect": False
                             }
@@ -194,19 +195,20 @@ def main():
                         if res.url:
                             st.markdown(f'<meta http-equiv="refresh" content="0;url={res.url}">', unsafe_allow_html=True)
                             st.stop()
-                    except: pass
+                    except:
+                        st.error("구글 엔진 호출 실패")
         else:
-            # 로그인 된 유저 상태 바
+            # 로그인 된 유저 상태 바 (로그아웃 버튼 포함)
             user = st.session_state.user_info
             nickname = user.email.split("@")[0] if user.email else "User"
             c1, c2 = st.columns([3, 1])
-            c1.success(f"👋 **{nickname}**님, 환영합니다! 모든 기능이 활성화되었습니다.")
+            c1.success(f"👋 **{nickname}**님, 환영합니다! 모든 고급 기능이 잠금 해제되었습니다.")
             if c2.button("🚪 로그아웃", use_container_width=True, key="top_logout"):
                 supabase.auth.sign_out()
                 st.session_state.is_logged_in = False
                 st.session_state.user_info = None
                 st.rerun()
-
+                
     # 데이터 로드
     df_raw = logic.load_stock_data_from_csv()
     if df_raw.empty: st.stop()
