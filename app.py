@@ -146,78 +146,80 @@ def main():
 
 
     # ---------------------------------------------------------
-    # [수정] 최상단 통합 로그인 센터 (작동했던 로직 100% 복구 및 위치 이동)
+    # [디자인 완성] 최상단 통합 로그인 센터 (카카오 & 구글 디자인 통일)
     # ---------------------------------------------------------
     with st.container(border=True):
         if not st.session_state.get("is_logged_in", False):
-            # 로그인 안내 멘트
             if "code" in st.query_params:
                  st.info("🔄 로그인 확인 중입니다... 잠시만 기다려주세요.")
             else:
                 st.info("🔒 로그인이 필요합니다. (AI 진단 및 저장 기능 활성화)")
                 
-                # 현재 세션 ID 가져오기 (old_id 전달용 - 원본 로직)
                 try:
                     ctx = get_script_run_ctx()
                     current_session_id = ctx.session_id
                 except:
                     current_session_id = "unknown"
 
+                redirect_url = f"https://dividend-pange.streamlit.app?old_id={current_session_id}"
+
                 col_l, col_r = st.columns(2)
                 
                 with col_l:
-                    # 1. 카카오 로그인 (선생님의 "무조건 되는" 원본 코드)
+                    # --- 🟡 카카오 로그인 (기존 디자인 유지) ---
                     try:
                         res_kakao = supabase.auth.sign_in_with_oauth({
                             "provider": "kakao",
-                            "options": {
-                                "redirect_to": f"https://dividend-pange.streamlit.app?old_id={current_session_id}",
-                                "skip_browser_redirect": True
-                            }
+                            "options": {"redirect_to": redirect_url, "skip_browser_redirect": True}
                         })
                         if res_kakao.url:
-                            # target="_blank"와 스타일까지 완벽 복구
                             btn_kakao = f'''
-                            <a href="{res_kakao.url}" target="_blank" style="
-                                display: inline-flex; justify-content: center; align-items: center; width: 100%;
-                                background-color: #FEE500; color: #000000; border: 1px solid rgba(0,0,0,0.05);
-                                padding: 0.8rem; border-radius: 0.5rem; text-decoration: none; font-weight: bold; font-size: 1.1em;
-                                box-shadow: 0 1px 2px rgba(0,0,0,0.1); margin-bottom: 10px;">
-                                💬 Kakao로 3초 만에 시작하기
+                            <a href="{res_kakao.url}" target="_blank" style="text-decoration: none;">
+                                <div style="display: inline-flex; justify-content: center; align-items: center; width: 100%;
+                                    background-color: #FEE500; color: #000000; border: 1px solid rgba(0,0,0,0.05);
+                                    padding: 0.8rem; border-radius: 0.5rem; font-weight: bold; font-size: 1.05em;
+                                    box-shadow: 0 1px 2px rgba(0,0,0,0.1);">
+                                    💬 Kakao로 3초 만에 시작하기
+                                </div>
                             </a>'''
                             st.markdown(btn_kakao, unsafe_allow_html=True)
-                    except Exception as e:
-                        st.error(f"Kakao 오류: {e}")
+                    except: pass
 
                 with col_r:
-                    # 2. 구글 로그인 (선생님의 "무조건 되는" 원본 코드)
-                    if st.button("🔵 Google 로그인 (PC/크롬 추천)", use_container_width=True, key="top_google_login"):
-                        try:
-                            res = supabase.auth.sign_in_with_oauth({
-                                "provider": "google",
-                                "options": {
-                                    "redirect_to": f"https://dividend-pange.streamlit.app?old_id={current_session_id}",
-                                    "queryParams": {"access_type": "offline", "prompt": "consent"},
-                                    "skip_browser_redirect": False
-                                }
-                            })
-                            if res.url:
-                                # meta refresh 방식 완벽 복구
-                                st.markdown(f'<meta http-equiv="refresh" content="0;url={res.url}">', unsafe_allow_html=True)
-                                st.stop()
-                        except Exception as e:
-                            st.error(f"Google 오류: {e}")
+                    # --- ⚪ 구글 로그인 (새로운 디자인 적용) ---
+                    try:
+                        res_google = supabase.auth.sign_in_with_oauth({
+                            "provider": "google",
+                            "options": {
+                                "redirect_to": redirect_url,
+                                "queryParams": {"access_type": "offline", "prompt": "consent"},
+                                "skip_browser_redirect": True  # URL만 가져오기 위해 True로 설정
+                            }
+                        })
+                        if res_google.url:
+                            # 카카오와 규격(Padding, Shadow, Radius)을 완벽히 맞춘 구글 버튼
+                            btn_google = f'''
+                            <a href="{res_google.url}" target="_blank" style="text-decoration: none;">
+                                <div style="display: inline-flex; justify-content: center; align-items: center; width: 100%;
+                                    background-color: #ffffff; color: #000000; border: 1px solid #ddd;
+                                    padding: 0.8rem; border-radius: 0.5rem; font-weight: bold; font-size: 1.05em;
+                                    box-shadow: 0 1px 2px rgba(0,0,0,0.1);">
+                                    <img src="https://www.gstatic.com/images/branding/product/1x/gsa_512dp.png" width="18" style="margin-right:10px;">
+                                    Google로 3초 만에 시작하기
+                                </div>
+                            </a>'''
+                            st.markdown(btn_google, unsafe_allow_html=True)
+                    except: pass
         else:
-            # 로그인 된 유저 상태 바 (로그아웃 버튼 포함)
+            # 로그인 된 유저 상단 바 (기존 유지)
             user = st.session_state.user_info
             nickname = user.email.split("@")[0] if user.email else "User"
             c1, c2 = st.columns([3, 1])
-            c1.success(f"👋 **{nickname}**님, 환영합니다! 모든 기능이 활성화되었습니다.")
+            c1.success(f"👋 **{nickname}**님, 환영합니다! 모든 고급 기능이 잠금 해제되었습니다.")
             if c2.button("🚪 로그아웃", use_container_width=True, key="top_logout_btn"):
                 supabase.auth.sign_out()
                 st.session_state.is_logged_in = False
                 st.session_state.user_info = None
-                st.session_state.code_processed = False
                 st.rerun()
 
 
