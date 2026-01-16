@@ -35,7 +35,7 @@ st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
 # ---------------------------------------------------------
 # [추가 과제] 4과제: COPPA 나이 확인 (안전 장치)
 # ---------------------------------------------------------
-def check_coppa_compliance():
+# def check_coppa_compliance():#
     """만 13세 이상 이용 확인 (법적 준수 안내판)"""
     if "age_verified" not in st.session_state:
         st.warning("📋 **서비스 이용 안내**")
@@ -283,10 +283,10 @@ def main():
             nickname = user.email.split("@")[0] if user.email else "User"
             c1, c2 = st.columns([3, 1])
             c1.success(f"👋 **{nickname}**님, 환영합니다! 모든 기능이 활성화되었습니다.")
-            if c2.button("🚪 로그아웃", use_container_width=True, key="top_logout_final"):
-                supabase.auth.sign_out()
-                st.session_state.is_logged_in = False
-                st.rerun()
+     #       if c2.button("🚪 로그아웃", use_container_width=True, key="top_logout_final"):
+     #           supabase.auth.sign_out()
+     #           st.session_state.is_logged_in = False
+     #           st.rerun()
 
                 
     # ---------------------------------------------------------
