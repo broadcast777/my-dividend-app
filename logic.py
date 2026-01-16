@@ -184,7 +184,7 @@ def calculate_google_calendar_url(ticker_name, pay_date_str):
 # [SECTION 3] 메인 데이터 로드 및 병렬 처리 엔진
 # -----------------------------------------------------------
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def load_and_process_data(df_raw, is_admin=False):
     """
     CSV 원본 데이터를 가공하여 실시간 시세와 배당률이 포함된 최종 데이터프레임을 생성합니다.
@@ -281,7 +281,7 @@ def load_and_process_data(df_raw, is_admin=False):
 # [SECTION 4] 데이터 파일 관리 (GitHub/CSV)
 # -----------------------------------------------------------
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=1800)
 def load_stock_data_from_csv():
     """GitHub 저장소에서 최신 종목 마스터 데이터를 로드합니다."""
     url = "https://raw.githubusercontent.com/broadcast777/my-dividend-app/main/stocks.csv"
