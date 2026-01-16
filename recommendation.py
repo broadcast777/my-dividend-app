@@ -258,13 +258,6 @@ def reset_wizard():
     if "ai_result_cache" in st.session_state:
         del st.session_state.ai_result_cache
 
-# -----------------------------------------------------------
-# [SECTION 4] UI 위자드 (생략 - 기존과 동일)
-# -----------------------------------------------------------
-@st.dialog("🕵️ AI 포트폴리오 설계", width="small")
-def show_wizard():
-    # ... (중략 - 기존 코드 그대로 사용)
-
 
 # -----------------------------------------------------------
 # [SECTION 4] UI 위자드
