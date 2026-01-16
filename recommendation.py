@@ -293,28 +293,31 @@ def show_wizard():
         st.button("🔚 월말/월초 (월급날 전후)", use_container_width=True, on_click=go_next_step, args=(3, 'timing', 'end'))
         st.button("🔄 상관없음 (섞어서 2주마다 받기)", use_container_width=True, on_click=go_next_step, args=(3, 'timing', 'mix'))
 
-    # --- [STEP 3] 목표 배당률 ---
+# --- [STEP 3] 목표 배당률 ---
     elif step == 3:
         st.subheader("Q3. 구체적인 목표를 정해주세요")
-        target = st.slider("💰 목표 연배당률 (%)", 3.0, 20.0, 7.0, 0.5)
+        
+        # [수정] 최대값을 20.0 -> 15.0으로 하향 조정 (안전장치 고려한 현실적 수치)
+        target = st.slider("💰 목표 연배당률 (%)", 3.0, 15.0, 7.0, 0.5)
         
         current_style = st.session_state.wiz_data.get('style')
+        
+        # [실시간 피드백 강화]
         if current_style == 'safe':
-            st.info("🛡️ **안정형 모드:** 자산 보호를 위해 배당률이 **6.5% 이하**인 종목 위주로 선정됩니다.")
-        elif target >= 10.0:
-            st.error(f"⚠️ **고배당 유의 ({target}%)**: 원금 손실 위험이 큰 커버드콜/초고배당주가 포함될 수 있습니다.")
-        elif target >= 8.0:
-            st.warning("💡 8% 이상은 중위험 종목이 포함될 수 있습니다.")
+            st.info("🛡️ **안정형 모드:** 원금 보호를 위해 **최대 6.5%** 수준으로 자동 조정됩니다.")
+        elif current_style == 'growth':
+             st.info("📈 **성장형 모드:** 미래 가치 투자를 위해 배당률이 다소 낮아질 수 있습니다.")
+             
+        if target >= 10.0:
+            st.warning(f"⚠️ **현실적 조언:** 안전 자산이 의무적으로 포함되므로, **실제 예상 배당률은 목표({target}%)보다 낮을 수 있습니다.**")
             
         count = st.slider("📊 종목 개수", 3, 5, 3)
         
-        # 클릭하면 바로 Step 4(결과)로 이동
         if st.button("🚀 결과 확인하기", type="primary", use_container_width=True):
             st.session_state.wiz_data['target_yield'] = target
             st.session_state.wiz_data['count'] = count
             st.session_state.wiz_step = 4
             st.rerun()
-
     # --- [STEP 4] 결과 ---
     elif step == 4:
         if "ai_result_cache" not in st.session_state:
