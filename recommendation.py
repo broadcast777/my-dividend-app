@@ -16,6 +16,33 @@ def get_smart_recommendation(df, user_choices):
     
     # 2. 데이터 복사 (배당률 있는 것만)
     pool = df[df['연배당률'] > 0].copy()
+
+    # -------------------------------------------------------
+    # [수정/추가] ★ 배당 시기 엄격 필터링 (Hard Filter) ★
+    # -------------------------------------------------------
+    if '배당락일' in pool.columns:
+        pool['배당락일'] = pool['배당락일'].fillna('').astype(str)
+        
+        if timing == 'mid': 
+            # 중순(15일 전후)이 포함되지 않은 종목은 풀에서 즉시 제거
+            pool = pool[pool['배당락일'].str.contains('15일|14일|16일|중순')]
+            
+        elif timing == 'end': 
+            # 월말/월초가 포함되지 않은 종목은 풀에서 즉시 제거
+            pool = pool[pool['배당락일'].str.contains('마지막|말일|30일|31일|28일|29일|초|하순')]
+            
+        # 'mix'는 필터 없이 그대로 진행
+
+    # [중요] 필터링 후 종목이 하나도 없으면 에러 방지를 위해 빈 결과 리턴
+    if pool.empty:
+        return "조건에 맞는 종목 없음", [], {}
+    # -------------------------------------------------------
+
+    # [수익률 우선순위 점수] - 여기서부터는 기존 로직 그대로...
+    if target_yield >= 10.0:
+        pool['score'] = pool['연배당률'] * 5.0 
+    else:
+        pool['score'] = -abs(pool['연배당률'] - target_yield) * 3.0
     
     # [수익률 우선순위 점수]
     if target_yield >= 10.0:
