@@ -338,41 +338,57 @@ def generate_portfolio_ics(selected_stocks_data):
         # 편의상 '배당락일' 텍스트를 파싱하는 핵심 로직만 가져옵니다.
         
         target_date = None
+        # ---------------------------------------------------------
+        # 2. 날짜 계산 및 이월 로직 (정밀 수리 부위)
+        # ---------------------------------------------------------
         clean_str = str(pay_date_str).replace(" ", "").strip()
         
-        # 날짜 파싱 (숫자 추출)
-        numbers = re.findall(r'\d+', clean_str)
-        if "마지막" in clean_str or "말일" in clean_str:
-             last_day = calendar.monthrange(today.year, today.month)[1]
-             target_date = datetime.date(today.year, today.month, last_day)
-        elif numbers:
-             day = int(numbers[0])
-             try:
-                 target_date = datetime.date(today.year, today.month, day)
-             except:
-                 target_date = datetime.date(today.year, today.month, 1) # 에러나면 1일로
-        elif "-" in clean_str or "." in clean_str:
-             try:
-                clean_str = clean_str.split("(")[0].replace(".", "-")
-                target_date = datetime.datetime.strptime(clean_str, "%Y-%m-%d").date()
-             except: pass
-             # ▼▼▼ [여기서부터 덮어쓰기 시작] ▼▼▼
-        # 날짜가 유효하면 D-3 계산 (수정됨)
-        if target_date:
-            # 과거면 내년/다음달 처리 (간소화 로직)
-            if target_date < today:
-                 if today.month == 12:
-                     target_date = datetime.date(today.year + 1, 1, target_date.day)
-                 else:
-                     try:
-                        target_date = datetime.date(today.year, today.month + 1, target_date.day)
-                     except:
-                        target_date = datetime.date(today.year, today.month + 1, 28)
+        # [내부 함수] 기준일 구하기 (함수 중복 방지를 위해 루프 안에서 정의하거나 밖으로 빼도 됩니다)
+        def get_target_date_inner(y, m, txt):
+            if "마지막" in txt or "말일" in txt or "월말" in txt:
+                return datetime.date(y, m, calendar.monthrange(y, m)[1])
+            elif "초" in txt and "매월" in txt:
+                return datetime.date(y, m, 1)
+            else:
+                nums = re.findall(r'\d+', txt)
+                if nums:
+                    d = int(nums[0])
+                    last_d = calendar.monthrange(y, m)[1]
+                    return datetime.date(y, m, min(d, last_d))
+            return None
 
-            # D-3 계산 (days=3)
-            safe_buy_date = target_date - datetime.timedelta(days=3)
-            while safe_buy_date.weekday() >= 5:
-                safe_buy_date -= datetime.timedelta(days=1)
+        # [내부 함수] 안전 매수일 구하기
+        def get_safe_buy_date_inner(base_d):
+            s_d = base_d - datetime.timedelta(days=3)
+            while s_d.weekday() >= 5: s_d -= datetime.timedelta(days=1)
+            return s_d
+
+        # [단계 1] 이번 달 기준으로 일단 계산
+        target_date = get_target_date_inner(today.year, today.month, clean_str)
+        
+        # 날짜 형식이 특이한 경우(2024.12.31 등) 예외 처리
+        if not target_date:
+            try:
+                dt_part = clean_str.split("(")[0].replace(".", "-")
+                target_date = datetime.datetime.strptime(dt_part, "%Y-%m-%d").date()
+            except: continue
+
+        # [단계 2] 안전 매수일 도출
+        safe_buy_date = get_safe_buy_date_inner(target_date)
+
+        # [단계 3] 핵심: 매수 마감일이 오늘보다 전이라면 다음 달로 이월
+        is_recurring = any(x in clean_str for x in ["매월", "월말", "월초"])
+        if is_recurring and safe_buy_date < today:
+            next_m = today.month + 1 if today.month < 12 else 1
+            next_y = today.year if today.month < 12 else today.year + 1
+            target_date = get_target_date_inner(next_y, next_m, clean_str)
+            safe_buy_date = get_safe_buy_date_inner(target_date)
+        elif not is_recurring and safe_buy_date < today:
+            continue # 확정 날짜가 지났으면 일정에서 제외
+
+        # ---------------------------------------------------------
+        # 3. ICS 포맷 생성 (여기서부터는 기존 코드와 연결)
+        # ---------------------------------------------------------
             
             # ICS 포맷 생성
             dt_start = safe_buy_date.strftime("%Y%m%d")
