@@ -1101,7 +1101,7 @@ def main():
         if not st.session_state.get("is_logged_in", False):
             st.write("")
             with st.container(border=True):
-                st.markdown("### 🔓 로그인이 필요한 진짜 '고기' 기능")
+                st.markdown("### 🔓 로그인이 필요한 기능")
                 col_lock1, col_lock2 = st.columns(2)
                 with col_lock1:
                     st.write("✅ **내 폰으로 배당 알림 받기**")
