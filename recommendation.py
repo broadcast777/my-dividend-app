@@ -261,9 +261,11 @@ def reset_wizard():
 # [SECTION 4] UI 위자드 (Step 1 ~ 5)
 # -----------------------------------------------------------
 
+# recommendation.py 의 맨 아래 show_wizard 함수 전체를 이것으로 교체
+
 @st.dialog("🕵️ AI 포트폴리오 설계", width="small")
 def show_wizard():
-    """다이얼로그 형태의 인터랙티브 설문 조사를 통해 포트폴리오를 설계합니다."""
+    """다이얼로그 형태의 인터랙티브 설문 조사를 통해 포트폴리오를 설계합니다. (연령 질문 삭제 버전)"""
     
     df = st.session_state.get('shared_df')
     if df is None:
@@ -275,31 +277,25 @@ def show_wizard():
 
     step = st.session_state.wiz_step
 
-    # --- [STEP 1] 연령대 ---
+    # --- [STEP 1] 투자 스타일 (바로 본론으로!) ---
     if step == 1:
-        st.subheader("Q1. 연령대가 어떻게 되시나요?")
-        c1, c2, c3 = st.columns(3)
-        c1.button("🐣 2030", use_container_width=True, on_click=go_next_step, args=(2, 'age', '2030'))
-        c2.button("🦁 4050", use_container_width=True, on_click=go_next_step, args=(2, 'age', '4050'))
-        c3.button("🐢 60+", use_container_width=True, on_click=go_next_step, args=(2, 'age', '60plus'))
+        st.subheader("Q1. 어떤 투자를 원하세요?")
+        # 클릭하면 바로 Step 2(시기)로 이동
+        st.button("📈 성장 추구 (주가 상승 + 배당)", use_container_width=True, on_click=go_next_step, args=(2, 'style', 'growth'))
+        st.button("💰 현금 흐름 (월 배당금 극대화)", use_container_width=True, on_click=go_next_step, args=(2, 'style', 'flow'))
+        st.button("🛡️ 안정성 (원금 방어 최우선)", use_container_width=True, on_click=go_next_step, args=(2, 'style', 'safe'))
 
-    # --- [STEP 2] 투자 스타일 ---
+    # --- [STEP 2] 배당 시기 ---
     elif step == 2:
-        st.subheader("Q2. 어떤 투자를 원하세요?")
-        st.button("📈 성장 추구 (주가 상승 + 배당)", use_container_width=True, on_click=go_next_step, args=(3, 'style', 'growth'))
-        st.button("💰 현금 흐름 (월 배당금 극대화)", use_container_width=True, on_click=go_next_step, args=(3, 'style', 'flow'))
-        st.button("🛡️ 안정성 (원금 방어 최우선)", use_container_width=True, on_click=go_next_step, args=(3, 'style', 'safe'))
+        st.subheader("Q2. 선호하는 배당 날짜는요?")
+        # 클릭하면 바로 Step 3(목표)로 이동
+        st.button("🗓️ 월중 (매월 15일 경)", use_container_width=True, on_click=go_next_step, args=(3, 'timing', 'mid'))
+        st.button("🔚 월말/월초 (월급날 전후)", use_container_width=True, on_click=go_next_step, args=(3, 'timing', 'end'))
+        st.button("🔄 상관없음 (섞어서 2주마다 받기)", use_container_width=True, on_click=go_next_step, args=(3, 'timing', 'mix'))
 
-    # --- [STEP 3] 배당 시기 ---
+    # --- [STEP 3] 목표 배당률 ---
     elif step == 3:
-        st.subheader("Q3. 선호하는 배당 날짜는요?")
-        st.button("🗓️ 월중 (매월 15일 경)", use_container_width=True, on_click=go_next_step, args=(4, 'timing', 'mid'))
-        st.button("🔚 월말/월초 (월급날 전후)", use_container_width=True, on_click=go_next_step, args=(4, 'timing', 'end'))
-        st.button("🔄 상관없음 (섞어서 2주마다 받기)", use_container_width=True, on_click=go_next_step, args=(4, 'timing', 'mix'))
-
-    # --- [STEP 4] 목표 배당률 ---
-    elif step == 4:
-        st.subheader("Q4. 구체적인 목표를 정해주세요")
+        st.subheader("Q3. 구체적인 목표를 정해주세요")
         target = st.slider("💰 목표 연배당률 (%)", 3.0, 20.0, 7.0, 0.5)
         
         current_style = st.session_state.wiz_data.get('style')
@@ -312,14 +308,15 @@ def show_wizard():
             
         count = st.slider("📊 종목 개수", 3, 5, 3)
         
+        # 클릭하면 바로 Step 4(결과)로 이동
         if st.button("🚀 결과 확인하기", type="primary", use_container_width=True):
             st.session_state.wiz_data['target_yield'] = target
             st.session_state.wiz_data['count'] = count
-            st.session_state.wiz_step = 5
+            st.session_state.wiz_step = 4
             st.rerun()
 
-    # --- [STEP 5] 결과 ---
-    elif step == 5:
+    # --- [STEP 4] 결과 ---
+    elif step == 4:
         if "ai_result_cache" not in st.session_state:
             with st.spinner("최적 조합 계산 중..."):
                 t_res, p_res, w_res = get_smart_recommendation(df, st.session_state.wiz_data)
@@ -366,7 +363,7 @@ def show_wizard():
             st.session_state.ai_modal_open = False
             if "ai_result_cache" in st.session_state: del st.session_state.ai_result_cache
             
-            # 세션 백업/복구 (Rerun 시 데이터 증발 방지)
+            # 세션 백업/복구
             u_bk = st.session_state.get("user_info")
             l_bk = st.session_state.get("is_logged_in")
             st.toast("장바구니에 담았습니다! 🛒", icon="✅")
