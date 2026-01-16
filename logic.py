@@ -291,10 +291,9 @@ def load_and_process_data(df_raw, is_admin=False):
 
 @st.cache_data(ttl=1800)
 def load_stock_data_from_csv():
-    """GitHub 저장소에서 최신 종목 마스터 데이터를 로드합니다."""
-    url = "https://raw.githubusercontent.com/broadcast777/my-dividend-app/main/stocks.csv"
+
     try:
-        df = pd.read_csv(url, dtype={'종목코드': str})
+        df = pd.read_csv("stocks.csv", dtype={'종목코드': str})
         if '연배당금_크롤링' not in df.columns:
             df['연배당금_크롤링'] = 0.0
         return df
