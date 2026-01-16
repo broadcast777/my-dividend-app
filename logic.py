@@ -64,28 +64,26 @@ def calculate_google_calendar_url(ticker_name, pay_date_str):
     [최종 완벽 버전] 
     1. "매월 15일" -> 15일 인식
     2. "매월 마지막 영업일" / "말일" -> 자동으로 그 달의 마지막 날짜(28~31) 계산
-    3. 주말/공휴일 피해서 D-2 계산
+    3. 주말/공휴일 피해서 D-3 안전 매수일 계산
     """
     try:
+        import datetime, calendar, re
+        from urllib.parse import quote
+
         today = datetime.date.today()
         target_date = None
-        
+
         if not isinstance(pay_date_str, str):
             pay_date_str = str(pay_date_str)
         clean_str = pay_date_str.replace(" ", "").strip()
 
-        # =========================================================
-        # [수정] "마지막" / "말일" 처리 로직 추가
-        # =========================================================
-        
+        # -------------------------------
+        # 날짜 파싱 로직
+        # -------------------------------
         if "매월" in clean_str:
-            # Case 1: "마지막" 또는 "말일"이라는 글자가 있는 경우
-            if "마지막" in clean_str or "말일" in clean_str:
-                # 1. 이번 달의 마지막 날짜 구하기
+            if "마지막" in clean_str or "말일" in clean_str or "월말" in clean_str:
                 last_day_current = calendar.monthrange(today.year, today.month)[1]
                 candidate_date = datetime.date(today.year, today.month, last_day_current)
-                
-                # 2. 이미 지났으면 다음 달의 마지막 날짜로 설정
                 if candidate_date < today:
                     next_month = today.month + 1 if today.month < 12 else 1
                     next_year = today.year if today.month < 12 else today.year + 1
@@ -93,18 +91,15 @@ def calculate_google_calendar_url(ticker_name, pay_date_str):
                     target_date = datetime.date(next_year, next_month, last_day_next)
                 else:
                     target_date = candidate_date
-
-            # Case 2: 숫자가 있는 경우 ("15일", "초" 등)
             else:
                 numbers = re.findall(r'\d+', clean_str)
                 if numbers:
-                    day = int(numbers[0]) # 첫 번째 숫자 채택
+                    day = int(numbers[0])
                     try:
                         candidate_date = datetime.date(today.year, today.month, day)
                     except ValueError:
                         last_day = calendar.monthrange(today.year, today.month)[1]
                         candidate_date = datetime.date(today.year, today.month, last_day)
-
                     if candidate_date < today:
                         next_month = today.month + 1 if today.month < 12 else 1
                         next_year = today.year if today.month < 12 else today.year + 1
@@ -115,53 +110,42 @@ def calculate_google_calendar_url(ticker_name, pay_date_str):
                             target_date = datetime.date(next_year, next_month, last_day)
                     else:
                         target_date = candidate_date
-                else:
-                    # "매월"은 있는데 숫자도 없고 말일도 아니면 (예: "매월 초")
-                    # 보통 '초'는 1일로 간주
-                    if "초" in clean_str:
-                        # (위와 동일한 로직으로 1일 처리)
-                        day = 1
-                        # ... (1일 기준 로직 중복 생략, 위 로직 탄다고 가정)
-                        # 코드가 길어지니 간단히 처리:
-                        candidate_date = datetime.date(today.year, today.month, 1)
-                        if candidate_date < today:
-                            next_month = today.month + 1 if today.month < 12 else 1
-                            next_year = today.year if today.month < 12 else today.year + 1
-                            target_date = datetime.date(next_year, next_month, 1)
-                        else:
-                            target_date = candidate_date
+                elif "초" in clean_str:
+                    candidate_date = datetime.date(today.year, today.month, 1)
+                    if candidate_date < today:
+                        next_month = today.month + 1 if today.month < 12 else 1
+                        next_year = today.year if today.month < 12 else today.year + 1
+                        target_date = datetime.date(next_year, next_month, 1)
                     else:
-                        return None
-
-        # Case 3: 하이픈/점 날짜 ("2025-01-15")
+                        target_date = candidate_date
+                else:
+                    return None
         elif "-" in clean_str or "." in clean_str:
-            clean_str = clean_str.split("(")[0] # 괄호 제거
-            clean_str = clean_str.replace(".", "-") # 점을 하이픈으로 통일
+            clean_str = clean_str.split("(")[0].replace(".", "-")
             try:
                 target_date = datetime.datetime.strptime(clean_str, "%Y-%m-%d").date()
             except:
                 return None
-        
         else:
-            return None 
+            return None
 
-        if target_date is None: return None
+        if target_date is None:
+            return None
 
-    # ▼▼▼ [여기서부터 덮어쓰기 시작] ▼▼▼
-        
-        # 2. D-3 (3일 전) 안전 매수일 계산 (수정됨: days=2 -> days=3)
+        # -------------------------------
+        # D-3 안전 매수일 계산 (주말 보정)
+        # -------------------------------
         safe_buy_date = target_date - datetime.timedelta(days=3)
-        
-        # 주말 보정 (토/일이면 금요일로)
-        while safe_buy_date.weekday() >= 5:
+        while safe_buy_date.weekday() >= 5:  # 토(5), 일(6)
             safe_buy_date -= datetime.timedelta(days=1)
 
         start_str = safe_buy_date.strftime("%Y%m%d")
         end_str = (safe_buy_date + datetime.timedelta(days=1)).strftime("%Y%m%d")
-        
-        # 3. 문구 수정 (매수 마감 -> 매수 준비 / 경고 문구 추가)
+
+        # -------------------------------
+        # 구글 캘린더 URL 조립
+        # -------------------------------
         title = quote(f"💰 [{ticker_name}] 매수 준비 (D-3)")
-        
         details = quote(
             f"배당 기준일(예상): {target_date}\n"
             f"✅ 안전 매수 추천일: {safe_buy_date} (오늘)\n\n"
@@ -169,7 +153,7 @@ def calculate_google_calendar_url(ticker_name, pay_date_str):
             f"실제 배당락일은 운용사 사정이나 휴장에 따라 변동될 수 있으니, "
             f"매수 전 반드시 증권사 앱에서 확정 일자를 재확인해주세요!"
         )
-        
+
         google_url = (
             f"https://www.google.com/calendar/render?action=TEMPLATE"
             f"&text={title}"
@@ -177,11 +161,11 @@ def calculate_google_calendar_url(ticker_name, pay_date_str):
             f"&details={details}"
         )
         return google_url
-        # ▲▲▲ [여기까지 덮어쓰기 끝] ▲▲▲
 
     except Exception as e:
-        print(f"Calendar Error: {e}") 
+        print(f"Calendar Error: {e}")
         return None
+
 
 # --- [2] 메인 데이터 로직 (스마트 계산 복구) ---
 @st.cache_data(ttl=600, show_spinner=False)
