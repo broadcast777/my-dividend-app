@@ -33,6 +33,20 @@ import timeline
 st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
 
 # ---------------------------------------------------------
+# [추가 과제] 4과제: COPPA 나이 확인 (안전 장치)
+# ---------------------------------------------------------
+def check_coppa_compliance():
+    """만 13세 이상 이용 확인 (법적 준수 안내판)"""
+    if "age_verified" not in st.session_state:
+        st.warning("📋 **서비스 이용 안내**")
+        st.write("본 서비스는 개인정보보호법 및 COPPA 규정에 따라 만 13세 이상 사용자만 이용 가능합니다.")
+        if st.checkbox("나는 만 13세 이상이며, 이용 약관 및 개인정보 처리방침에 동의합니다."):
+            st.session_state.age_verified = True
+            logger.info("✅ 사용자가 나이 확인 및 약관에 동의함")
+            st.rerun()
+        else:
+            st.stop() # 동의 안 하면 기계 가동 중단
+
 # 세션 상태(Session State) 변수 초기화 로직
 # 앱이 실행되는 동안 유지되어야 하는 상태값들을 설정합니다.
 # ---------------------------------------------------------
@@ -89,6 +103,7 @@ def check_auth_status():
             if session and session.user:
                 st.session_state.is_logged_in = True
                 st.session_state.user_info = session.user
+                logger.info(f"👤 사용자 로그인 성공: {session.user.email}") # [3과제] 로깅 추가
             
             # 인증 성공 후 깨끗한 URL로 새로고침
             st.query_params.clear()
@@ -98,6 +113,7 @@ def check_auth_status():
         except Exception as e:
             # [자동 복구 로직] verifier 오류(새로고침 시 발생 등) 시 파라미터 리셋 후 재시도
             err_msg = str(e).lower()
+            logger.error(f"🔴 인증 과정 중 오류 발생: {err_msg}") # [3과제] 로깅 추가
             if "verifier" in err_msg or "non-empty" in err_msg:
                 st.warning("🔄 보안 토큰 갱신 중... 잠시만 기다려주세요.")
                 st.query_params.clear()
@@ -132,11 +148,13 @@ def render_login_ui():
             
             # 로그아웃 버튼 클릭 시 세션 초기화 및 새로고침
             if st.button("🚪 로그아웃", key="logout_btn_sidebar", use_container_width=True):
+                logger.info(f"🚪 사용자 로그아웃: {email}") # [3과제] 로깅 추가
                 supabase.auth.sign_out()
                 st.session_state.is_logged_in = False
                 st.session_state.user_info = None
                 st.session_state.code_processed = False
                 st.rerun()
+
 # ==========================================
 # [SECTION 4] 메인 애플리케이션 실행 엔진
 # ==========================================
@@ -145,7 +163,12 @@ def main():
     앱의 메인 실행 흐름을 제어합니다.
     순서: 초기화 -> 관리자 체크 -> 로그인 UI -> 관리자 도구 -> 데이터 엔진 가동
     """
-    
+    # [4과제] 나이 확인 필수 실행 (법적 준수)
+    check_coppa_compliance()
+
+    # [3과제] 앱 기계 가동 로깅
+    logger.info("🚀 배당팽이 메인 엔진 가동")
+
     # [시스템 관리] 앱 시작 시 24시간이 경과한 임시 세션 토큰 파일들을 자동 삭제
     db.cleanup_old_tokens()
 
@@ -173,6 +196,7 @@ def main():
             if password_input:
                 if hashlib.sha256(password_input.encode()).hexdigest() == ADMIN_HASH:
                     is_admin = True
+                    logger.info("🔑 관리자 모드 접속 성공") # [3과제] 로깅 추가
                     st.success("관리자 모드 ON 🚀")
                 else:
                     st.error("비밀번호 불일치")
@@ -269,7 +293,9 @@ def main():
     # 4. 데이터 로드 (GitHub CSV 소스)
     # ---------------------------------------------------------
     df_raw = logic.load_stock_data_from_csv()
-    if df_raw.empty: st.stop()
+    if df_raw.empty: 
+        logger.error("❌ 데이터 로드 실패: CSV 파일이 비어있음") # [3과제] 로깅 추가
+        st.stop()
 
 
     # ---------------------------------------------------------
@@ -373,7 +399,7 @@ def main():
                         amt, src = logic.fetch_dividend_amount_hybrid(code, cat)
                         
                         if amt > 0:
-                            df_temp.at[i, '연배당금_크롤링'] = amt
+                            df_temp.at[i, '연배당률_크롤링'] = amt
                             updated_count += 1
                         else:
                             # 디버그: 실패 원인 출력
@@ -396,6 +422,7 @@ def main():
                         success, msg = logic.save_to_github(target_df)
                         if success:
                             st.success(msg)
+                            logger.info("💾 관리자가 깃허브 데이터 업데이트 완료") # [3과제] 로깅 추가
                             st.balloons()
                             time.sleep(2)
                             st.rerun()
@@ -424,6 +451,19 @@ def main():
         
         # 메인 메뉴 선택 (라디오 버튼)
         menu = st.radio("📂 **메뉴 이동**", ["💰 배당금 계산기", "📅 월별 로드맵", "📃 전체 종목 리스트"], label_visibility="visible")
+        
+        # [5과제] 개인정보 처리방침 안내판 (사업자 필수 규격)
+        st.markdown("---")
+        with st.expander("📄 법적 고지 및 정책"):
+            st.caption("본 서비스는 사용자의 안전한 이용을 위해 아래 정책을 준수합니다.")
+            if st.button("🛡️ 개인정보 처리방침 확인", use_container_width=True):
+                # 별도 파일(privacy.md)을 읽어와서 팝업처럼 보여줌
+                try:
+                    with open("privacy.md", "r", encoding="utf-8") as f:
+                        st.markdown(f.read())
+                except:
+                    st.error("정책 파일을 찾을 수 없습니다.")
+        
         st.markdown("---")
         
         # [포트폴리오 불러오기] Supabase DB와 연동하여 저장된 기록을 로드
@@ -455,6 +495,7 @@ def main():
                             if st.button("🚨 영구 삭제", type="primary", use_container_width=True):
                                 target_id = opts[sel_name]['id']
                                 supabase.table("portfolios").delete().eq("id", target_id).execute()
+                                logger.info(f"🗑️ 포트폴리오 삭제: {target_id}") # [3과제] 로깅 추가
                                 st.toast("삭제되었습니다.", icon="🗑️")
                                 st.rerun()
                         else:
@@ -463,6 +504,7 @@ def main():
                                 data = opts[sel_name]['ticker_data']
                                 st.session_state.total_invest = int(data.get('total_money', 30000000))
                                 st.session_state.selected_stocks = list(data.get('composition', {}).keys())
+                                logger.info(f"📂 포트폴리오 로드: {sel_name}") # [3과제] 로깅 추가
                                 st.toast("성공적으로 불러왔습니다!", icon="✅")
                                 st.rerun()
                     else:
@@ -490,6 +532,7 @@ def main():
             # 버튼 클릭 시 로그인 상태에 따른 분기 처리
             if st.button("🕵️ AI 로보어드바이저 실행", use_container_width=True, type="primary"):
                 if st.session_state.get("is_logged_in"):
+                    logger.info("🤖 AI 로보어드바이저 세션 시작") # [3과제] 로깅 추가
                     st.session_state.ai_modal_open = True
                     st.session_state.wiz_step = 1 # 마법사 단계 초기화
                     st.session_state.wiz_data = {}
@@ -540,7 +583,7 @@ def main():
                 weights = {}
                 remaining = 100 # 남은 비중 계산용
                 cols_w = st.columns(2)
-                \
+                
                 
                 for i, stock in enumerate(selected):
                     with cols_w[i % 2]:
@@ -719,6 +762,7 @@ def main():
                                         "user_id": user.id, "user_email": user.email, "name": final_name, "ticker_data": save_data
                                     }).execute()
                                     
+                                    logger.info(f"💾 새 포트폴리오 저장: {final_name}") # [3과제] 로깅 추가
                                     st.success(f"[{final_name}] 저장 완료!")
                                     st.balloons()
                                     time.sleep(1.0)
@@ -740,6 +784,7 @@ def main():
                                             "ticker_data": save_data,
                                             "created_at": "now()" # 수정 시간 갱신
                                         }).eq("id", target_id).execute()
+                                        logger.info(f"🔄 기존 포트폴리오 업데이트: {target_id}") # [3과제] 로깅 추가
                                         st.success("수정 완료! 내용이 업데이트되었습니다.")
                                         st.balloons()
                                         time.sleep(1.0)
@@ -1168,6 +1213,7 @@ def main():
                             new_count = response.data[0]['count'] + 1
                             supabase.table("visit_counts").update({"count": new_count}).eq("id", 1).execute()
                             st.session_state.display_count = new_count
+                            logger.info(f"📈 새 방문자 유입 (누적: {new_count})") # [3과제] 로깅 추가
                         else: 
                             st.session_state.display_count = "Local"
                 
