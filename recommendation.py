@@ -56,10 +56,12 @@ def _check_timing_match(row_date, user_timing):
 # [SECTION 2] 스마트 필터링 & 비중 최적화 엔진
 # -----------------------------------------------------------
 
+# recommendation.py 의 get_smart_recommendation 함수를 이걸로 교체하세요
+
 def get_smart_recommendation(df, user_choices):
     """
     사용자 입력(목표 배당률, 스타일, 시기 등)을 분석하여 최적의 종목 조합과 비중을 산출합니다.
-    (개선: Empty Pool 방지 로직 및 정규식 날짜 필터 적용)
+    (개선: Empty Pool 방지 + 정규식 날짜 필터 + ★커버드콜 쿼터제 적용★)
     """
     
     # 1. 사용자 입력 추출
@@ -69,100 +71,110 @@ def get_smart_recommendation(df, user_choices):
     timing = user_choices.get('timing', 'mix')
     
     # 2. 데이터 기초 준비
-    # 배당률 정보가 있고, 거래 정지(NaN)가 아닌 종목만
     pool = df[df['연배당률'] > 0].copy()
     pool['temp_date_str'] = pool['배당락일'].fillna('').astype(str)
     
-    # [전략] 1차 시도: 엄격한 필터 적용
-    # [전략] 2차 시도: 종목이 없으면 '날짜' 조건 완화
-    
     filtered_pool = pd.DataFrame()
-    filter_stage = "strict" # strict, relaxed
+    filter_stage = "strict" 
     
-    # --- (A) 스타일 필터 (안정형은 타협 불가) ---
+    # --- (A) 스타일 필터 ---
     if style == 'safe':
-        # 안정형은 6% 이하, 채권/달러 등 키워드 우선
-        pool = pool[pool['연배당률'] <= 6.5] # 약간의 여유(0.5%) 둠
+        pool = pool[pool['연배당률'] <= 6.5]
         target_yield = min(target_yield, 6.0)
     
-    # --- (B) 시기 필터 (1차 시도) ---
+    # --- (B) 시기 필터 (1, 2차 시도) ---
     mask_timing = pool['temp_date_str'].apply(lambda x: _check_timing_match(x, timing))
     first_try = pool[mask_timing].copy()
     
     if not first_try.empty and len(first_try) >= wanted_count:
         filtered_pool = first_try
     else:
-        # 1차 실패 시: 날짜 조건 해제 (2차 시도)
         filtered_pool = pool.copy()
         filter_stage = "relaxed"
         
-    # 만약 그래도 종목이 너무 적으면? (극단적 상황)
-    if filtered_pool.empty:
-         return "조건에 맞는 종목 없음", [], {}
+    if filtered_pool.empty: return "조건에 맞는 종목 없음", [], {}
 
     # -------------------------------------------------------
-    # [교정 2] 점수 산정 엔진 (Unified Scoring)
+    # [교정 2] 점수 산정 엔진
     # -------------------------------------------------------
-    
-    # 기본 점수: 목표 수익률과의 근접성 (가까울수록 점수 높음)
-    # 1% 차이날 때마다 10점 감점
     filtered_pool['yield_diff'] = abs(filtered_pool['연배당률'] - target_yield)
     filtered_pool['score'] = 100 - (filtered_pool['yield_diff'] * 10)
     
-    # 키워드 매칭 함수
     def has_keyword(row, keywords):
         text = (str(row['종목명']) + " " + str(row.get('pure_name', ''))).lower()
         return any(k.lower() in text for k in keywords)
 
-    # 스타일별 가산점 (Bonus)
+    # 스타일별 가산점
     if style == 'growth':
-        # 성장형: 나스닥, 테크, 미국 + 배당률이 목표보다 낮아도 허용
         mask = filtered_pool.apply(lambda x: has_keyword(x, ['나스닥', 'nasdaq', 'S&P', '미국', '테크', '성장', 'schd']), axis=1)
         filtered_pool.loc[mask, 'score'] += 20
-    
     elif style == 'flow':
-        # 현금흐름형: 커버드콜, 리츠, 고배당 + 배당률 높을수록 가산
-        filtered_pool['score'] += filtered_pool['연배당률'] * 2 # 수익률 자체가 깡패
+        filtered_pool['score'] += filtered_pool['연배당률'] * 2 
         mask = filtered_pool.apply(lambda x: has_keyword(x, ['커버드콜', 'covered', 'jepi', 'qyld', '리츠', '고배당']), axis=1)
         filtered_pool.loc[mask, 'score'] += 15
-        
     elif style == 'safe':
-        # 안정형: 채권, 달러, 금
         mask = filtered_pool.apply(lambda x: has_keyword(x, ['채권', '국채', 'treasury', '금', 'gold', '달러', '파킹']), axis=1)
-        filtered_pool.loc[mask, 'score'] += 30 # 강력한 가산점
+        filtered_pool.loc[mask, 'score'] += 30 
 
-    # 최종 선정
+    # 점수순 정렬
     filtered_pool = filtered_pool.sort_values('score', ascending=False)
-    selected_pool = filtered_pool.head(wanted_count).copy()
-    final_picks = selected_pool['pure_name'].tolist()
 
     # -------------------------------------------------------
-    # [교정 3] 비중 최적화 (Inverse Distance Weighting)
+    # [교정 4] ★ 쿼터제 적용 (포트폴리오 다양성 확보) ★
     # -------------------------------------------------------
-    if selected_pool.empty:
-        return "종목 선정 실패", [], {}
+    final_picks = []
+    cc_count = 0  # 커버드콜 카운터
+    MAX_CC = 2    # 최대 허용 개수
+    
+    # 커버드콜 식별 키워드
+    cc_keywords = ['커버드', 'covered', 'call', 'jepi', 'qyld', 'tsly', 'play', 'high']
+
+    # 상위권부터 하나씩 검사하며 담기
+    for idx, row in filtered_pool.iterrows():
+        if len(final_picks) >= wanted_count:
+            break
+            
+        is_cc = has_keyword(row, cc_keywords)
+        
+        # 쿼터 초과 검사
+        if is_cc and cc_count >= MAX_CC:
+            continue  # 이미 2개 찼으면 얘는 건너뛰고 다음 종목 봄
+            
+        final_picks.append(row['pure_name'])
+        if is_cc: cc_count += 1
+        
+    # 만약 쿼터제 때문에 종목이 부족해졌다면? (나머지 채우기)
+    if len(final_picks) < wanted_count:
+        remain_needed = wanted_count - len(final_picks)
+        # 이미 뽑힌거 제외하고 다시 가져오기
+        remain_pool = filtered_pool[~filtered_pool['pure_name'].isin(final_picks)]
+        final_picks.extend(remain_pool.head(remain_needed)['pure_name'].tolist())
+
+    selected_pool = filtered_pool[filtered_pool['pure_name'].isin(final_picks)].copy()
+
+    # -------------------------------------------------------
+    # [교정 3] 비중 최적화
+    # -------------------------------------------------------
+    if selected_pool.empty: return "종목 선정 실패", [], {}
+
+    # 선택된 순서(점수순)대로 다시 정렬 (중요)
+    selected_pool['sort_cat'] = pd.Categorical(selected_pool['pure_name'], categories=final_picks, ordered=True)
+    selected_pool = selected_pool.sort_values('sort_cat')
 
     yields = selected_pool['연배당률'].values
-    
-    # 목표값과 차이가 적을수록(0에 가까울수록) 비중 높음
-    # 분모가 0이 되는 것을 방지하기 위해 +0.5
     inv_dist = 1 / (abs(yields - target_yield) + 0.5) 
     weights = (inv_dist / inv_dist.sum()) * 100
-    
-    # 정수화 및 100% 맞춤
     weights = weights.round().astype(int)
+    
+    # 비중 합계 100 보정
     diff = 100 - weights.sum()
-    weights[0] += diff # 1위 종목에 자투리 비중 몰아주기 (보통 가장 적합한 종목임)
+    if len(weights) > 0:
+        weights[0] += diff 
     
-    pick_weights = dict(zip(final_picks, weights))
+    pick_weights = dict(zip(selected_pool['pure_name'], weights))
     
-    # 결과 타이틀 생성
     timing_badge = {"mid": "15일 배당", "end": "월말 배당", "mix": "맞춤"}
-    
-    prefix = ""
-    if filter_stage == "relaxed" and timing != 'mix':
-        prefix = "(날짜 유연) " # 사용자가 날짜를 지정했으나 조건이 안 맞아 완화된 경우 표시
-        
+    prefix = "(날짜 유연) " if filter_stage == "relaxed" and timing != 'mix' else ""
     theme_title = f"{prefix}{timing_badge.get(timing, '맞춤')} 포트폴리오"
         
     return theme_title, final_picks, pick_weights
