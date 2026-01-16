@@ -331,7 +331,7 @@ def show_wizard():
         st.subheader("Q3. 구체적인 목표를 정해주세요")
         
         # 슬라이더
-        target = st.slider("💰 목표 연배당률 (%)", 3.0, 15.0, 7.0, 0.5)
+        target = st.slider("💰 목표 연배당률 (%)", 3.0, 20.0, 7.0, 0.5)
         
         current_style = st.session_state.wiz_data.get('style')
         
