@@ -265,6 +265,7 @@ def load_and_process_data(df_raw, is_admin=False):
                 '환구분': get_hedge_status(name, category),
                 '배당락일': str(row.get('배당락일', '-')), 
                 '분류': category,
+                '유형': row.get('유형', '-'),
                 '자산유형': classify_asset(row),
                 '캘린더링크': calculate_google_calendar_url(display_name, str(row.get('배당락일', '-'))),
                 'pure_name': name.replace("🚫 ", "").replace(" (필터대상)", ""), 
@@ -291,13 +292,34 @@ def load_and_process_data(df_raw, is_admin=False):
 
 @st.cache_data(ttl=1800)
 def load_stock_data_from_csv():
+    """로컬 stocks.csv에서 데이터를 읽고 컬럼명을 정제합니다."""
+    import os
+    
+    file_path = "stocks.csv"
+    
+    # 1. 파일이 진짜 있는지 확인 (없으면 에러 메시지 출력)
+    if not os.path.exists(file_path):
+        st.error(f"🚨 파일을 찾을 수 없습니다! 현재 위치에 '{file_path}'가 있는지 확인해주세요.")
+        return pd.DataFrame()
 
     try:
-        df = pd.read_csv("stocks.csv", dtype={'종목코드': str})
+        # 2. 로컬 파일 읽기
+        df = pd.read_csv(file_path, dtype={'종목코드': str})
+        
+        # 3. [핵심] 컬럼 이름 앞뒤의 눈에 안 보이는 공백(' ')이나 줄바꿈을 싹 지움
+        df.columns = df.columns.str.strip()
+        
+        # 4. '연배당금_크롤링' 없으면 생성
         if '연배당금_크롤링' not in df.columns:
             df['연배당금_크롤링'] = 0.0
+            
+        # 5. [디버깅] 만약 여전히 '유형'이 없다면 화면에 지금 컬럼이 뭔지 다 보여줌
+        if '유형' not in df.columns:
+            st.warning(f"⚠️ 파일은 읽었지만 '유형' 컬럼이 없습니다! 발견된 컬럼: {list(df.columns)}")
+            
         return df
-    except:
+    except Exception as e:
+        st.error(f"❌ 파일을 읽는 중 오류 발생: {e}")
         return pd.DataFrame()
 
 def save_to_github(df):
