@@ -199,6 +199,10 @@ def show_wizard():
             st.session_state.selected_stocks = picks
             st.session_state.ai_suggested_weights = weights
             st.session_state.ai_modal_open = False
+
+            # [핵심 추가] 다음에 실행할 때 새 결과를 뽑도록 캐시를 삭제합니다.
+            if "ai_result_cache" in st.session_state:
+                del st.session_state.ai_result_cache
             
             # 인증 상태 유지
             u_bk = st.session_state.get("user_info")
