@@ -70,23 +70,10 @@ def render_toss_style_heatmap(df, weights, total_invest):
 
     st.divider()
 
-    # ---------------------------------------------------------
-    # [2] 배당 구매력 분석 (재투자 동기부여)
-    # ---------------------------------------------------------
-    st.markdown("### 🛒 이번 달 배당금의 실질 가치")
-    target_stock_price = 12000 # 주당 평균가
-    can_buy_shares = int(total_m_div // target_stock_price)
-    
-    c_buy1, c_buy2 = st.columns([1.5, 1])
-    with c_buy1:
-        st.markdown(f"매달 받는 배당금으로 평균 **{target_stock_price:,.0f}원**대 종목을")
-    with c_buy2:
-        st.metric("추가 매수", f"{can_buy_shares}주 가능")
 
-    st.write("")
 
     # ---------------------------------------------------------
-    # [3] 입금 타이밍 리듬 (월초/월중/월말 밸런스)
+    # [2] 입금 타이밍 리듬 (월초/월중/월말 밸런스)
     # ---------------------------------------------------------
     st.markdown("### 🥁 현금흐름 입금 리듬")
     st.caption("배당금이 한 시기에 몰리지 않고 골고루 들어오는지 확인하세요.")
