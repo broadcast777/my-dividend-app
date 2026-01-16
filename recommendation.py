@@ -1,7 +1,7 @@
 """
-프로젝트: 배당 팽이 (Dividend Top) v1.8
+프로젝트: 배당 팽이 (Dividend Top) v1.9
 파일명: recommendation.py
-설명: AI 로보어드바이저 엔진 ('고배당주' vs '배당성장' 정밀 분리)
+설명: AI 로보어드바이저 엔진 (유형 기반 정밀 분류 + 셔플 + 쿼터제 통합)
 """
 
 import streamlit as st
@@ -40,7 +40,7 @@ def _check_timing_match(row_date, user_timing):
 def get_smart_recommendation(df, user_choices):
     """
     사용자 입력 분석 및 포트폴리오 최적화
-    (업데이트: '고배당주' vs '배당성장' 구분 로직 적용)
+    (업데이트: '고배당주' vs '배당성장' 구분 로직 + 셔플 + 쿼터제)
     """
     
     target_yield = user_choices.get('target_yield', 7.0)
@@ -48,9 +48,11 @@ def get_smart_recommendation(df, user_choices):
     wanted_count = user_choices.get('count', 3)
     timing = user_choices.get('timing', 'mix')
     
+    # 데이터 준비
     pool = df[df['연배당률'] > 0].copy()
     pool['temp_date_str'] = pool['배당락일'].fillna('').astype(str)
     
+    # 1. 필터링
     filtered_pool = pd.DataFrame()
     filter_stage = "strict" 
     
@@ -69,23 +71,23 @@ def get_smart_recommendation(df, user_choices):
         
     if filtered_pool.empty: return "조건에 맞는 종목 없음", [], {}
 
-    # 현금성 자산 식별 (채권 중 초단기)
+    # 현금성 자산 식별 함수
     cash_keywords = ['shv', 'bil', 'sgov', 'cd', 'kofr', '파킹', '단기채', '초단기']
     def check_is_cash(row):
         is_bond = (row.get('유형') == '채권')
         text = (str(row['종목명']) + " " + str(row.get('pure_name', ''))).lower()
         return is_bond and any(k in text for k in cash_keywords)
 
-    # 5. 점수 산정 (Scoring + Random Shuffle)
+    # 2. 점수 산정 (Scoring)
     filtered_pool['yield_diff'] = abs(filtered_pool['연배당률'] - target_yield)
     filtered_pool['score'] = 100 - (filtered_pool['yield_diff'] * 10)
     
-    # [★ 정밀 가산점 로직]
+    # [가산점 로직]
     for idx, row in filtered_pool.iterrows():
         cat = row.get('유형', '') # 배당성장, 고배당주, 리츠, 커버드콜, 채권
         
         if style == 'growth':
-            # [성장형] 배당성장이 1순위, 고배당주는 2순위
+            # 성장형: 배당성장 1순위, 고배당주 2순위
             if cat == '배당성장': 
                 filtered_pool.at[idx, 'score'] += 50 
             elif cat == '고배당주':
@@ -94,14 +96,14 @@ def get_smart_recommendation(df, user_choices):
                 filtered_pool.at[idx, 'score'] -= 30
 
         elif style == 'safe':
-            # [안정형] 채권/혼합 1순위, 배당성장 2순위
+            # 안정형: 채권/혼합 1순위
             if cat == '채권' or cat == '혼합':
                 filtered_pool.at[idx, 'score'] += 100
             elif cat == '배당성장':
                 filtered_pool.at[idx, 'score'] += 30
 
         elif style == 'flow':
-            # [현금흐름형] 커버드콜 1순위, 고배당주/리츠 2순위
+            # 현금흐름형: 커버드콜 1순위, 고배당주 2순위
             filtered_pool.at[idx, 'score'] += (row['연배당률'] * 2)
             if cat == '커버드콜':
                 filtered_pool.at[idx, 'score'] += 15
@@ -110,15 +112,13 @@ def get_smart_recommendation(df, user_choices):
             elif cat == '리츠':
                 filtered_pool.at[idx, 'score'] += 10
 
-    # 셔플 효과
+    # [셔플] 랜덤 노이즈 추가
     filtered_pool['random_luck'] = [random.uniform(0, 15) for _ in range(len(filtered_pool))]
     filtered_pool['score'] += filtered_pool['random_luck']
 
     filtered_pool = filtered_pool.sort_values('score', ascending=False)
 
-    # -------------------------------------------------------
-    # [교정 5] ★ 선발 로직 (쿼터제)
-    # -------------------------------------------------------
+    # 3. 선발 로직 (쿼터제)
     final_picks = []
     
     cc_count = 0
@@ -129,11 +129,10 @@ def get_smart_recommendation(df, user_choices):
     MAX_CC = 2
     MAX_CASH = 1
     MAX_BOND = 1
-    MAX_REIT = 1
+    MAX_REIT = 1 # 리츠 1개 제한
     
-    # [1] 의무 선발 (Mandatory Draft)
+    # (A) 의무 선발
     if style == 'safe':
-        # 1. 대장(채권)
         safe_candidates = filtered_pool[filtered_pool['유형'] == '채권']
         if not safe_candidates.empty:
             best_safe = safe_candidates.iloc[0]
@@ -141,26 +140,22 @@ def get_smart_recommendation(df, user_choices):
             if check_is_cash(best_safe): cash_count += 1
             else: bond_count += 1
             
-        # 2. 부대장(배당성장 우선)
-        # 배당성장이 있으면 걔를 뽑고, 없으면 고배당주/혼합 중에서
         growth_candidates = filtered_pool[filtered_pool['유형'] == '배당성장']
         if growth_candidates.empty:
              growth_candidates = filtered_pool[filtered_pool['유형'].isin(['고배당주', '혼합'])]
              
         growth_candidates = growth_candidates[~growth_candidates['pure_name'].isin(final_picks)]
-        
         if not growth_candidates.empty:
             best_growth = growth_candidates.iloc[0]
             final_picks.append(best_growth['pure_name'])
 
     elif style == 'growth':
-        # 성장형은 무조건 '배당성장' 종목 하나 픽!
         growth_candidates = filtered_pool[filtered_pool['유형'] == '배당성장']
         if not growth_candidates.empty:
             best_growth = growth_candidates.iloc[0]
             final_picks.append(best_growth['pure_name'])
 
-    # [2] 나머지 채우기
+    # (B) 나머지 채우기
     for idx, row in filtered_pool.iterrows():
         if len(final_picks) >= wanted_count: break
         if row['pure_name'] in final_picks: continue
@@ -184,7 +179,7 @@ def get_smart_recommendation(df, user_choices):
         if is_bond: bond_count += 1
         if is_reit: reit_count += 1
         
-    # [3] 모자라면 채우기
+    # (C) 모자라면 채우기
     if len(final_picks) < wanted_count:
         remain_pool = filtered_pool[~filtered_pool['pure_name'].isin(final_picks)].copy()
         
@@ -196,9 +191,7 @@ def get_smart_recommendation(df, user_choices):
 
     selected_pool = filtered_pool[filtered_pool['pure_name'].isin(final_picks)].copy()
 
-    # -------------------------------------------------------
-    # [교정 6] ★ 비중 최적화
-    # -------------------------------------------------------
+    # 4. 비중 최적화
     if selected_pool.empty: return "종목 선정 실패", [], {}
 
     selected_pool['sort_cat'] = pd.Categorical(selected_pool['pure_name'], categories=final_picks, ordered=True)
@@ -291,11 +284,11 @@ def show_wizard():
                     "💡 **Tip:** 더 높은 배당을 원하시면, 결과를 **[담기]** 한 뒤 리츠나 고배당주를 **직접 추가**해보세요."
                 )
         elif current_style == 'growth':
-            st.info("📈 **성장 집중:** 당장의 배당금보다 **미래 주가 상승**을 위한 종목이 의무 포함됩니다.")
+            st.info("📈 **성장 집중:** 당장의 배당금보다 **미래 주가 상승**을 위한 종목(SCHD, 테크 등)이 의무 포함됩니다.")
             if target >= 7.0:
                 st.warning(
                     f"⚠️ **배당률 괴리:** 성장주 비중(30%↑) 확보로 인해 **실제 배당률은 목표({target}%)보다 낮을 수 있습니다.**\n\n"
-                    "💡 **Tip:** 부족한 현금 흐름은 결과를 **[담기]** 한 뒤, 커버드콜 혹은 리츠를 **직접 추가**하여 보완할 수 있습니다."
+                    "💡 **Tip:** 부족한 현금 흐름은 결과를 **[담기]** 한 뒤, 커버드콜을 소량 **직접 추가**하여 보완할 수 있습니다."
                 )
         else: # flow
             st.info("💰 **현금 흐름:** 매월 들어오는 **월 배당금**에 집중합니다.")
@@ -340,6 +333,7 @@ def show_wizard():
 
         st.write("") 
         st.warning("⚠️ **투자 유의사항**
+                   
         * 본 결과는 과거 데이터를 기반으로 한 단순 시뮬레이션이며, 종목의 매수/매도 추천이 아닙니다.
         * 모든 투자의 책임은 투자자 본인에게 있습니다.
         * '안정성'을 추구하는 포트폴리오라 할지라도 시장 변동에 따라 원금 손실이 발생할 수 있습니다.")
