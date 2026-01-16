@@ -149,7 +149,7 @@ def main():
     # ---------------------------------------------------------
     with st.container(border=True):
         if not st.session_state.get("is_logged_in", False):
-            st.markdown("🔒 **로그인하시면 [AI 포트폴리오 진단]과 [저장 기능]이 활성화됩니다.**")
+            st.markdown("🔒 **로그인하기 **")
             
             # 현재 세션 ID 가져오기 (OAuth 리다이렉트용)
             try:
@@ -200,7 +200,7 @@ def main():
             user = st.session_state.user_info
             nickname = user.email.split("@")[0] if user.email else "User"
             c1, c2 = st.columns([3, 1])
-            c1.success(f"👋 **{nickname}**님, 환영합니다! 모든 고급 기능이 활성화되었습니다.")
+            c1.success(f"👋 **{nickname}**님, 환영합니다! 모든 기능이 활성화되었습니다.")
             if c2.button("🚪 로그아웃", use_container_width=True, key="top_logout"):
                 supabase.auth.sign_out()
                 st.session_state.is_logged_in = False
@@ -499,7 +499,7 @@ def main():
                                 else:
                                     # 비로그인 상태 -> 로그인 유도 토스트
                                     if st.button(btn_label, key=f"btn_cal_{i}", use_container_width=True):
-                                        st.toast("🔒 로그인 후 캘린더에 등록할 수 있습니다! (상단 참고)", icon="🔒")
+                                        st.toast("🔒 로그인 후 캘린더에 등록할 수 있습니다!", icon="🔒")
                             else:
                                 # 링크가 없는 경우 (날짜 미정 등)
                                 st.caption(f"📅 날짜 미정 ({ex_date_view})")
@@ -560,7 +560,7 @@ def main():
                     else:
                         # 2. 비로그인 상태: 가짜 버튼 (상단 유도)
                         if st.button("📥 전체 일정 파일 받기 (.ics)", key="ics_lock_btn", use_container_width=True):
-                            st.error("🔒 로그인 회원 전용 기능입니다. 상단 로그인을 완료해 주세요!")
+                            st.error("🔒 로그인 회원 전용 기능입니다. 로그인을 완료해 주세요!")
                             st.toast("맨 위로 올라가서 로그인을 해주세요!", icon="👆")
 
                 # [친절한 가이드]
@@ -589,9 +589,10 @@ def main():
                         # [안내만 표시] 복잡한 버튼 뭉치 제거
                         st.warning("⚠️ **로그인이 필요합니다.**")
                         st.markdown("""
+                        
                         나만의 포트폴리오를 저장하고 관리하시려면 
-                        **페이지 최상단(맨 위)**에 있는 로그인을 이용해 주세요.
-                        인증 즉시 이 자리에서 저장 기능이 활성화됩니다!
+                        페이지 최상단(맨 위)에 있는 로그인을 이용해 주세요.
+                        
                         """)
                     else:
                         # [기능 표시] 로그인 된 유저에게만 노출
@@ -697,9 +698,11 @@ def main():
                         st.write("📋 **상세 포트폴리오**")
                         ui.render_custom_table(df_ana)
                         st.error("""**⚠️ 포트폴리오 분석 시 유의사항**
+                        
 1. 과거의 데이터를 기반으로 한 단순 결과값이며, 실제 투자 수익을 보장하지 않습니다.
 2. '달러 자산' 비율 실제 환노출 여부와 다를 수 있습니다 투자 전 확인이 필요합니다.
-3. 실제 배당금 지급일과 금액은 운용사의 사정에 따라 변경될 수 있습니다.""")
+3. 실제 배당금 지급일과 금액은 운용사의 사정에 따라 변경될 수 있습니다.
+""")
 
                     with tab_simulation:
                         start_money = total_invest
@@ -845,9 +848,11 @@ def main():
                         annual_div_income = monthly_div_final * 12
                         if annual_div_income > 20000000: st.warning(f"🚨 **주의:** {years_sim}년 뒤 연간 배당금이 2,000만원을 초과하여 금융소득종합과세 대상이 될 수 있습니다.")
                         st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**
+                        
 1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 결과입니다.
 2. ISA 계좌의 비과세 한도 및 세율은 세법 개정에 따라 달라질 수 있습니다.
-3. 과거의 데이터를 기반으로 한 단순 시뮬레이션이며, 실제 투자 수익을 보장하지 않습니다.""")
+3. 과거의 데이터를 기반으로 한 단순 시뮬레이션이며, 실제 투자 수익을 보장하지 않습니다.
+""")
                         with tab_goal:
                             st.subheader("🎯 목표 배당금 역산기 (은퇴 시뮬레이터)")
                             st.caption("내가 원하는 월급을 받기 위해 얼마를 더 모아야 할지 정밀하게 계산합니다.")
@@ -907,9 +912,11 @@ def main():
                                 st.success(f"✅ **절세 전략:** 현재 목표는 금융소득종합과세 기준선 이내에서 최적화되어 있습니다.")
                         
                             st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**
+                            
                         1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 단순 결과입니다.
                         2. 재투자가 매월 칼같이 이루어진다는 가정하에 계산된 복리 결과입니다.
-                        3. 실제 투자 시에는 배당 삭감이나 주가 하락의 리스크를 반드시 고려해야 합니다.""")
+                        3. 실제 투자 시에는 배당 삭감이나 주가 하락의 리스크를 반드시 고려해야 합니다.
+                        """)
 
     elif menu == "📃 전체 종목 리스트":
         st.info("💡 **이동 안내:** '코드' 클릭 시 블로그 분석글로, '🔗정보' 클릭 시 네이버/야후 금융 정보로 이동합니다. (**⭐ 표시는 상장 1년 미만 종목입니다.**)")
