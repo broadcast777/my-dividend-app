@@ -15,6 +15,7 @@ import json
 import time
 import os
 from streamlit.runtime.scriptrunner import get_script_run_ctx
+from cryptography.fernet import Fernet
 
 # ---------------------------------------------------------
 # [SECTION 1] 사용자별 토큰 저장소 클래스 (Session Persistence)
