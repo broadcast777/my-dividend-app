@@ -148,7 +148,7 @@ def main():
     db.cleanup_old_tokens()
 
     # [점검 모드] 서비스 전체 점검 필요 시 True로 변경 (관리자 제외 접속 차단)
-    MAINTENANCE_MODE = False
+    MAINTENANCE_MODE = True
     
     # ---------------------------------------------------------
     # 1. 전역 변수 초기화 (Session State)
