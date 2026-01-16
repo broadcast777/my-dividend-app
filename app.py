@@ -471,21 +471,31 @@ def main():
                 remaining = 100
                 cols_w = st.columns(2)
                 all_data = []
-                
                 for i, stock in enumerate(selected):
                     with cols_w[i % 2]:
                         safe_rem = max(0, remaining)
+                        
+                        # --- [수정 포인트] AI 추천 비중 연동 ---
+                        # 1. AI가 제안한 비중 데이터가 있는지 확인합니다.
+                        ai_suggested = st.session_state.get('ai_suggested_weights', {})
+                        
+                        # 2. 제안된 비중이 있으면 그걸 쓰고, 없으면 기존처럼 1/N로 계산합니다.
+                        default_w = ai_suggested.get(stock, 100 // len(selected))
+                        # ---------------------------------------
+        
                         if i < len(selected) - 1:
-                            val = st.number_input(f"{stock} (%)", min_value=0, max_value=safe_rem, value=min(safe_rem, 100 // len(selected)), step=5, key=f"s_{i}")
+                            # value 인자에 100 // len(selected) 대신 default_w를 넣습니다.
+                            val = st.number_input(f"{stock} (%)", min_value=0, max_value=safe_rem, value=min(safe_rem, default_w), step=5, key=f"s_{i}")
                             weights[stock] = val
                             remaining -= val
                             amt = total_invest * (val / 100)
                         else:
+                            # 마지막 종목은 자동으로 남은 비중(safe_rem)을 다 가져갑니다. (기존 유지)
                             st.info(f"{stock}: {safe_rem}% 자동 적용")
                             weights[stock] = safe_rem
                             amt = total_invest * (safe_rem / 100)
+                        
                         st.caption(f"💰 투자금: **{amt/10000:,.0f}만원**")
-
                         # =================================================
                         # [캘린더 버튼] (Logic.py 연동 완료 버전)
                         # =================================================
