@@ -23,15 +23,7 @@ import db
 import recommendation
 import timeline
 
-# app.py 맨 위에 잠시 붙여넣으세요
-import streamlit as st
 
-# [진단용 코드]
-if "ENCRYPTION_KEY" not in st.secrets:
-    st.error("🚨 [진단 결과] 기계가 'ENCRYPTION_KEY'라는 이름의 장부를 찾지 못했습니다!")
-    st.info("💡 해결방법: 아래 '체크리스트'를 확인해 보세요.")
-else:
-    st.success("✅ [진단 결과] 장부를 찾았습니다! 하지만 암호 열쇠가 부러졌을 수 있습니다.")
 # ==========================================
 # [SECTION 1] 기본 페이지 설정 및 초기화
 # ==========================================
