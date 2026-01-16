@@ -737,7 +737,7 @@ def render_stocklist_page(df):
 # ==========================================
 def main():
     inject_ga()
-    """앱의 메인 실행 흐름을 제어합니다."""
+    
     
     # 1. 안전 장치 및 로깅
     # check_coppa_compliance() # 필요시 주석 해제
