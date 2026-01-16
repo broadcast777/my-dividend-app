@@ -1,3 +1,9 @@
+"""
+프로젝트: 배당 팽이 (Dividend Top) v1.5
+파일명: app.py (PART 1: 초기 설정 및 인증 섹션)
+설명: 라이브러리 로드, 세션 초기화, Supabase 인증 처리 및 로그인 UI 관리
+"""
+
 import streamlit as st
 import pandas as pd
 import altair as alt
@@ -5,62 +11,75 @@ import hashlib
 import time
 import random
 from streamlit.runtime.scriptrunner import get_script_run_ctx
+
 # [필수] 날짜 및 URL 라이브러리
 from datetime import datetime, timedelta
 import urllib.parse
 
-# [모듈화] 분리한 파일들을 불러옵니다
+# [모듈화] 기능을 분리한 커스텀 파일들을 불러옵니다
 import logic 
 import ui
 import db
 import recommendation
 import timeline
+
 # ==========================================
-# [1] 기본 설정
+# [SECTION 1] 기본 페이지 설정 및 초기화
 # ==========================================
+
+# 앱의 타이틀과 가로 너비를 설정합니다
 st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
 
 # ---------------------------------------------------------
-# 세션 상태 변수 초기화
+# 세션 상태(Session State) 변수 초기화 로직
+# 앱이 실행되는 동안 유지되어야 하는 상태값들을 설정합니다.
 # ---------------------------------------------------------
 for key in ["is_logged_in", "user_info", "code_processed"]:
     if key not in st.session_state:
+        # user_info는 None으로, 나머지는 False로 초기화
         st.session_state[key] = False if key != "user_info" else None
 
+# AI 추천 모달창 열림/닫힘 상태 관리 변수
 if "ai_modal_open" not in st.session_state:
     st.session_state.ai_modal_open = False
 
-
-
 # ---------------------------------------------------------
-# Supabase 연결
+# 외부 데이터베이스(Supabase) 연결 초기화
 # ---------------------------------------------------------
 supabase = db.init_supabase()
 
+
 # ==========================================
-# [2] 인증 상태 체크 (자동 복구 로직 포함)
+# [SECTION 2] 인증 상태 체크 엔진 (자동 복구 로직 포함)
 # ==========================================
+
 def check_auth_status():
+    """
+    사용자의 로그인 상태를 확인하고, 카카오/구글 로그인 후 
+    돌아오는 콜백(auth code)을 처리하여 세션을 확정합니다.
+    """
     if not supabase: return
 
-    # 1. 이미 로그인된 상태인지 확인
+    # 1. [기존 세션 확인] 이미 브라우저에 로그인 정보가 남아있는지 확인
     try:
         session = supabase.auth.get_session()
         if session and session.user:
             st.session_state.is_logged_in = True
             st.session_state.user_info = session.user
+            # 로그인 후 URL에 남은 불필요한 파라미터(code 등) 정리
             if "code" in st.query_params or "old_id" in st.query_params:
                 st.query_params.clear()
             return 
     except Exception:
         pass
 
-    # 2. 로그인 콜백 처리
+    # 2. [로그인 콜백 처리] OAuth 로그인 후 리다이렉트된 경우 처리
     query_params = st.query_params
     if "code" in query_params and not st.session_state.get("code_processed", False):
         st.session_state.code_processed = True
         
         try:
+            # URL의 auth_code를 세션 토큰으로 교환
             auth_code = query_params["code"]
             auth_response = supabase.auth.exchange_code_for_session({"auth_code": auth_code})
             session = auth_response.session
@@ -69,12 +88,13 @@ def check_auth_status():
                 st.session_state.is_logged_in = True
                 st.session_state.user_info = session.user
             
+            # 인증 성공 후 깨끗한 URL로 새로고침
             st.query_params.clear()
             st.success("✅ 로그인되었습니다!")
             st.rerun()
             
         except Exception as e:
-            # 오류 자동 복구 (verifier 오류 시 리셋)
+            # [자동 복구 로직] verifier 오류(새로고침 시 발생 등) 시 파라미터 리셋 후 재시도
             err_msg = str(e).lower()
             if "verifier" in err_msg or "non-empty" in err_msg:
                 st.warning("🔄 보안 토큰 갱신 중... 잠시만 기다려주세요.")
@@ -85,47 +105,66 @@ def check_auth_status():
                 st.error(f"🔴 인증 오류: {e}")
                 st.query_params.clear()
 
+# 인증 엔진 즉시 가동
 check_auth_status()
 
+
 # ==========================================
-# [3] 로그인 UI 함수 (사이드바용)
+# [SECTION 3] 로그인 UI 함수 (사이드바 출력용)
 # ==========================================
+
 def render_login_ui():
+    """사이드바 상단에 현재 로그인된 유저 정보를 표시하고 로그아웃 기능을 제공합니다."""
     if not supabase: return
     is_logged_in = st.session_state.get("is_logged_in", False)
     user_info = st.session_state.get("user_info", None)
     
     if is_logged_in and user_info:
+        # 이메일 앞부분을 닉네임으로 활용
         email = user_info.email if user_info.email else "User"
         nickname = email.split("@")[0]
+        
         with st.sidebar:
             st.markdown("---")
             st.success(f"👋 반가워요! **{nickname}**님")
+            
+            # 로그아웃 버튼 클릭 시 세션 초기화 및 새로고침
             if st.button("🚪 로그아웃", key="logout_btn_sidebar", use_container_width=True):
                 supabase.auth.sign_out()
                 st.session_state.is_logged_in = False
                 st.session_state.user_info = None
                 st.session_state.code_processed = False
                 st.rerun()
-
-
-
 # ==========================================
-# [4] 메인 애플리케이션
+# [SECTION 4] 메인 애플리케이션 실행 엔진
 # ==========================================
 def main():
-    # [청소기 가동] 앱 시작 시 24시간 지난 토큰 삭제
+    """
+    앱의 메인 실행 흐름을 제어합니다.
+    순서: 초기화 -> 관리자 체크 -> 로그인 UI -> 관리자 도구 -> 데이터 엔진 가동
+    """
+    
+    # [시스템 관리] 앱 시작 시 24시간이 경과한 임시 세션 토큰 파일들을 자동 삭제
     db.cleanup_old_tokens()
 
+    # [점검 모드] 서비스 전체 점검 필요 시 True로 변경 (관리자 제외 접속 차단)
     MAINTENANCE_MODE = False
     
-    # [1] 값 초기화
-    if "total_invest" not in st.session_state: st.session_state.total_invest = 30000000
-    if "selected_stocks" not in st.session_state: st.session_state.selected_stocks = []
+    # ---------------------------------------------------------
+    # 1. 전역 변수 초기화 (Session State)
+    # ---------------------------------------------------------
+    if "total_invest" not in st.session_state: 
+        st.session_state.total_invest = 30000000 # 기본 투자금 3,000만원
+    if "selected_stocks" not in st.session_state: 
+        st.session_state.selected_stocks = []   # 선택된 종목 리스트
 
-    # [2] 관리자 인증
+    # ---------------------------------------------------------
+    # 2. 관리자 인증 시스템
+    # URL 파라미터에 ?admin=true 가 포함될 경우 인증창 활성화
+    # ---------------------------------------------------------
     is_admin = False
     if st.query_params.get("admin", "false").lower() == "true":
+        # 관리자 비밀번호 해시값 (보안을 위해 원문이 아닌 SHA-256 저장)
         ADMIN_HASH = "c41b0bb392db368a44ce374151794850417b56c9786e3c482f825327c7153182"
         with st.expander("🔐 관리자 접속 (Admin)", expanded=False):
             password_input = st.text_input("비밀번호 입력", type="password")
@@ -136,43 +175,46 @@ def main():
                 else:
                     st.error("비밀번호 불일치")
 
+    # 사이드바 로그인 정보 UI 출력
     render_login_ui()
     
+    # [점검 모드 발동] 관리자가 아닌 일반 유저의 접근을 차단
     if MAINTENANCE_MODE and not is_admin:
         st.title("🚧 시스템 정기 점검 중")
         st.stop()
     
+    # 페이지 메인 제목 설정
     if is_admin: st.title("💰 배당팽이 대시보드 (관리자 모드)")
     else: st.title("💰 배당팽이 월배당 계산기")
 
 
-
     # ---------------------------------------------------------
-    # [최종 완성] 최상단 통합 로그인 센터 (성공 로직 100% 복구)
+    # 3. 최상단 통합 로그인 센터 (OAuth 연동 구역)
+    # 카카오 및 구글 로그인을 위한 복합 로직 (성공 로직 보존)
     # ---------------------------------------------------------
     auth_container = st.container(border=True)
     with auth_container:
         if not st.session_state.get("is_logged_in", False):
-            # 1. 로그인 전 안내
+            # [비로그인 상태] 로그인 안내 및 버튼 노출
             if "code" in st.query_params:
                  st.info("🔄 로그인 확인 중입니다... 잠시만 기다려주세요.")
             else:
                 st.info("🔒 로그인이 필요합니다. (AI 진단 및 저장 기능 활성화)")
                 
-                # [성공 공식 1] 세션 ID 가져오기
+                # [인증 복구 공식] 현재 세션 ID를 추출하여 리다이렉트 시 활용
                 try:
                     ctx = get_script_run_ctx()
                     current_session_id = ctx.session_id
                 except:
                     current_session_id = "unknown"
 
-                # [성공 공식 2] 파라미터가 포함된 리다이렉트 주소 사용
+                # 콜백을 받을 리다이렉트 주소 설정
                 redirect_url = f"https://dividend-pange.streamlit.app?old_id={current_session_id}"
 
                 col_l, col_r = st.columns(2)
                 
                 with col_l:
-                    # --- 🟡 카카오 로그인  ---
+                    # --- 🟡 카카오 로그인 (커스텀 HTML 버튼 스타일 보존) ---
                     try:
                         res_kakao = supabase.auth.sign_in_with_oauth({
                             "provider": "kakao",
@@ -182,7 +224,6 @@ def main():
                             }
                         })
                         if res_kakao.url:
-                            # target="_blank"와  원본 스타일 그대로 복구
                             btn_kakao_html = f'''
                             <a href="{res_kakao.url}" target="_blank" style="
                                 display: inline-flex; justify-content: center; align-items: center; width: 100%;
@@ -195,7 +236,7 @@ def main():
                     except: pass
 
                 with col_r:
-                    # --- 🔵 구글 로그인 ( 원본 meta refresh 방식 복구) ---
+                    # --- 🔵 구글 로그인 (Meta Refresh 리다이렉트 방식 보존) ---
                     if st.button("🔵 Google로 시작하기(pc/크롬 권장)", use_container_width=True, key="top_google_btn"):
                         try:
                             res_google = supabase.auth.sign_in_with_oauth({
@@ -207,12 +248,11 @@ def main():
                                 }
                             })
                             if res_google.url:
-                                # 구글 로그인에 가장 확실했던 meta refresh 방식
                                 st.markdown(f'<meta http-equiv="refresh" content="0;url={res_google.url}">', unsafe_allow_html=True)
                                 st.stop()
                         except: pass
         else:
-            # 2. 로그인 완료 후 상단 바
+            # [로그인 완료 상태] 상단바 유저 인사 및 로그아웃 버튼
             user = st.session_state.user_info
             nickname = user.email.split("@")[0] if user.email else "User"
             c1, c2 = st.columns([3, 1])
@@ -223,29 +263,29 @@ def main():
                 st.rerun()
 
                 
-    # 데이터 로드
+    # ---------------------------------------------------------
+    # 4. 데이터 로드 (GitHub CSV 소스)
+    # ---------------------------------------------------------
     df_raw = logic.load_stock_data_from_csv()
     if df_raw.empty: st.stop()
 
 
-    # [관리자] 갱신 도구
+    # ---------------------------------------------------------
+    # 5. [관리자 전용] 데이터 갱신 및 저장 도구 (Side Panel)
+    # ---------------------------------------------------------
     if is_admin:
         with st.sidebar:
             st.markdown("---")
             st.subheader("🛠️ 배당금 갱신 도구")
             
-            # 1. 신규 종목 식별 로직 (⭐ 라벨링)
+            # [신규 종목 식별] 신규 상장주에 ⭐ 라벨 추가
             stock_options = {}
             for idx, row in df_raw.iterrows():
                 name = row['종목명']
-                try:
-                    months = int(row.get('신규상장개월수', 0))
+                try: months = int(row.get('신규상장개월수', 0))
                 except: months = 0
                 
-                if months > 0:
-                    label = f"⭐ [신규 {months}개월] {name}"
-                else:
-                    label = name
+                label = f"⭐ [신규 {months}개월] {name}" if months > 0 else name
                 stock_options[label] = name
 
             selected_label = st.selectbox("갱신할 종목 선택", list(stock_options.keys()))
@@ -257,7 +297,7 @@ def main():
                 code = str(row.get('종목코드', '')).strip()
                 category = str(row.get('분류', '국내')).strip()
                 
-                # 2. 배당률 자동 조회 버튼
+                # [자동 조회] 하이브리드 크롤러를 이용한 실시간 배당률 확인
                 st.write("") 
                 col_info, col_btn = st.columns([1, 1.5])
                 with col_info:
@@ -276,18 +316,20 @@ def main():
                                 
                 st.divider()
 
-                # 3. 수동 입력 및 계산
+                # [수동 입력] 이번 달 배당금을 입력하여 Rolling 데이터 계산
                 new_div = st.number_input("이번 달 확정 배당금", value=0, step=10)
                 if st.button("계산 실행", use_container_width=True):
                     new_total, new_hist = logic.update_dividend_rolling(cur_hist, new_div)
                     st.success("완료!")
                     st.code(new_hist, language="text")
 
-            # 4. [New] 안전 저장 시스템 (백업 + 저장)
+            # ---------------------------------------------------------
+            # 6. 데이터 저장 및 GitHub 백업 시스템
+            # ---------------------------------------------------------
             st.markdown("---")
             st.subheader("💾 데이터 저장 및 백업")
 
-            # [안전 장치 1] 백업 다운로드
+            # [백업] 로컬 CSV 파일 다운로드 기능
             csv_data = df_raw.to_csv(index=False).encode('utf-8')
             st.download_button(
                 label="📂 (혹시 모르니) 현재 파일 백업하기",
@@ -299,7 +341,7 @@ def main():
 
             st.write("") 
 
-            # [안전 장치 2] 신규 제외 자동 갱신
+            # [전체 갱신] 신규 종목을 제외한 전 종목 자동 크롤링 업데이트
             with st.expander("⚡ 전체 종목 자동 업데이트 (신규 제외)"):
                 st.caption("신규 상장 종목(⭐)과 배당률 2% 미만은 건너뜁니다.")
                 if st.button("전체 자동 갱신 시작"):
@@ -317,36 +359,31 @@ def main():
                         try: months = int(row.get('신규상장개월수', 0))
                         except: months = 0
                         
-                        # [보호 장치] 신규 상장 종목(12개월 미만)은 크롤링 패스
+                        # [보호] 신규 상장 종목은 크롤링 제외
                         if 0 < months < 12:
                             skipped_count += 1
                             continue
                         
-                        # [핵심 변경] %가 아니라 '금액'을 긁어옵니다!
                         code = str(row['종목코드']).strip()
                         cat = str(row.get('분류', '국내')).strip()
                         
-                        # logic.py에 새로 만든 함수 호출 (금액 긁어오기)
+                        # 금액 기반 크롤링 함수 호출
                         amt, src = logic.fetch_dividend_amount_hybrid(code, cat)
                         
                         if amt > 0:
-                            # 긁어온 금액을 '연배당금_크롤링' 열에 저장 (새로운 저장소)
                             df_temp.at[i, '연배당금_크롤링'] = amt
                             updated_count += 1
                         else:
-                            # [디버그 모드] 실패 시 원인을 화면에 출력 (나중에 지우면 됩니다)
+                            # 디버그: 실패 원인 출력
                             st.warning(f"⚠️ {row['종목명']}({code}) 실패 -> 원인: {src}")
-                            pass
                             
                     status_text.text("완료!")
                     st.success(f"✅ {updated_count}개 금액 갱신 완료 / 🛡️ {skipped_count}개 신규주 보호됨")
-                    
-                    # 변경된 데이터 임시 저장
-                    st.session_state.df_dirty = df_temp
+                    st.session_state.df_dirty = df_temp # 변경 데이터 임시 세션 저장
 
             st.markdown("---")
 
-            # [안전 장치 3] 최종 저장 (체크박스 확인)
+            # [최종 커밋] 변경된 내용을 GitHub 저장소에 영구 반영
             st.info("💡 위에서 내용을 충분히 검토하셨나요?")
             confirm_save = st.checkbox("네, 덮어써도 좋습니다.")
 
@@ -358,18 +395,22 @@ def main():
                         if success:
                             st.success(msg)
                             st.balloons()
-                         
                             time.sleep(2)
                             st.rerun()
                         else:
                             st.error(msg)
             else:
                 st.button("🚀 깃허브에 영구 저장", disabled=True, use_container_width=True)
-    # ▼▼▼ [중요] 여기입니다! ▼▼▼
-    # 'if is_admin:' 과 머리(시작점)를 똑같이 맞추세요!
+
+    # ---------------------------------------------------------
+    # 7. 메인 데이터 처리 엔진 가동
+    # 실시간 시세 및 배당률 계산 프로세스 실행
+    # ---------------------------------------------------------
     with st.spinner('⚙️ 배당 데이터베이스 엔진 가동 중...'):
         df = logic.load_and_process_data(df_raw, is_admin=is_admin)
         st.session_state['shared_df'] = df
+
+
 
 
     # ---------------------------------------------------------
