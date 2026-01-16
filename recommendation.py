@@ -61,7 +61,7 @@ def _check_timing_match(row_date, user_timing):
 def get_smart_recommendation(df, user_choices):
     """
     사용자 입력 분석 및 포트폴리오 최적화
-    (개선: CC 쿼터제 + ★성장/안정 테마 의무 할당 + 개수별 가변 비중 시스템★)
+    (개선: CC 쿼터제 + 성장/안정 의무 + 가변 비중 + ★키워드 정밀 타격★)
     """
     
     # 1. 사용자 입력 추출
@@ -71,6 +71,7 @@ def get_smart_recommendation(df, user_choices):
     timing = user_choices.get('timing', 'mix')
     
     # 2. 데이터 준비
+    # [주의] 연배당률이 0.0인 종목은 여기서 바로 탈락합니다! (CSV 확인 필수)
     pool = df[df['연배당률'] > 0].copy()
     pool['temp_date_str'] = pool['배당락일'].fillna('').astype(str)
     
@@ -78,7 +79,7 @@ def get_smart_recommendation(df, user_choices):
     filtered_pool = pd.DataFrame()
     filter_stage = "strict" 
     
-    # (A) 안정형 필터 (수익률 상한선)
+    # (A) 안정형 필터
     if style == 'safe':
         pool = pool[pool['연배당률'] <= 6.5]
         target_yield = min(target_yield, 6.0)
@@ -95,10 +96,17 @@ def get_smart_recommendation(df, user_choices):
         
     if filtered_pool.empty: return "조건에 맞는 종목 없음", [], {}
 
-    # 4. 키워드 정의
-    growth_keywords = ['나스닥', 'nasdaq', 's&p', '미국', '테크', '성장', 'schd', 'qqq', 'spy', 'top10', 'magnificent', 'tech']
+    # 4. 키워드 정의 (정밀 타격 버전)
+    # [수정] '미국' 삭제 (미국 국채가 성장주로 오인됨)
+    # [추가] '다우존스', '배당성장', 'dividend', 'top10' 등 SCHD 계열 강화
+    growth_keywords = [
+        '나스닥', 'nasdaq', 's&p', '테크', '성장', 'schd', 'qqq', 'spy', 
+        'top10', 'magnificent', 'tech', '다우존스', 'dow', '배당성장', '플러스배당'
+    ]
+    
     safe_keywords = ['채권', '국채', 'treasury', '금', 'gold', '달러', 'bond', 'tlt', 'safe', '파킹', 'cd']
     cc_keywords = ['커버드', 'covered', 'call', 'jepi', 'qyld', 'tsly', 'play', 'high', 'premium']
+    cash_keywords = ['shv', 'bil', 'sgov', 'cd', 'kofr', '파킹', '단기채', '초단기']
 
     def has_keyword(row, keywords):
         text = (str(row['종목명']) + " " + str(row.get('pure_name', ''))).lower()
@@ -110,9 +118,14 @@ def get_smart_recommendation(df, user_choices):
     
     if style == 'growth':
         mask = filtered_pool.apply(lambda x: has_keyword(x, growth_keywords), axis=1)
+        # 성장주는 배당률이 낮아도 점수를 엄청 줘서 끌어올림 (+50점)
         filtered_pool.loc[mask, 'score'] += 50 
+        
+        # [추가] 성장 테마인데 국채(미국30년 등)가 키워드로 낚여서 들어오는 것 방지 (감점)
+        mask_fake_growth = filtered_pool.apply(lambda x: has_keyword(x, safe_keywords), axis=1)
+        filtered_pool.loc[mask_fake_growth, 'score'] -= 30
+
     elif style == 'safe':
-        # 안정형이면 채권/금 등 안전자산에 엄청난 가산점
         mask = filtered_pool.apply(lambda x: has_keyword(x, safe_keywords), axis=1)
         filtered_pool.loc[mask, 'score'] += 50
     elif style == 'flow':
@@ -123,24 +136,33 @@ def get_smart_recommendation(df, user_choices):
     filtered_pool = filtered_pool.sort_values('score', ascending=False)
 
     # -------------------------------------------------------
-    # [교정 5] ★ 선발 로직 (테마별 대장주 의무화 + CC 쿼터제) ★
+    # [교정 5] ★ 선발 로직 (쿼터제 및 중복 방지) ★
     # -------------------------------------------------------
     final_picks = []
     cc_count = 0
+    cash_count = 0 
     MAX_CC = 2
+    MAX_CASH = 1
     
-    # (1) 의무 할당 (낙하산 인사)
-    # 성장형 -> 성장주 1등 / 안정형 -> 안전자산 1등 무조건 선발
+    # (1) 의무 할당
     priority_keywords = []
     if style == 'growth': priority_keywords = growth_keywords
     elif style == 'safe': priority_keywords = safe_keywords
     
     if priority_keywords:
         candidates = filtered_pool[filtered_pool.apply(lambda x: has_keyword(x, priority_keywords), axis=1)]
+        # [성장 모드일 때 채권 제외] 
+        # 성장 키워드에 걸렸더라도, '안전' 키워드가 동시에 있으면(예: 미국채) 제외
+        if style == 'growth':
+            mask_safe = candidates.apply(lambda x: has_keyword(x, safe_keywords), axis=1)
+            candidates = candidates[~mask_safe]
+
         if not candidates.empty:
             best_pick = candidates.iloc[0]
             final_picks.append(best_pick['pure_name'])
+            
             if has_keyword(best_pick, cc_keywords): cc_count += 1
+            if has_keyword(best_pick, cash_keywords): cash_count += 1
 
     # (2) 나머지 채우기
     for idx, row in filtered_pool.iterrows():
@@ -148,53 +170,55 @@ def get_smart_recommendation(df, user_choices):
         if row['pure_name'] in final_picks: continue
             
         is_cc = has_keyword(row, cc_keywords)
+        is_cash = has_keyword(row, cash_keywords)
+        
         if is_cc and cc_count >= MAX_CC: continue
+        if is_cash and cash_count >= MAX_CASH: continue
             
         final_picks.append(row['pure_name'])
         if is_cc: cc_count += 1
+        if is_cash: cash_count += 1
         
-    # (3) 모자라면 강제 채우기 (CC 제외 2차 방어선)
+    # (3) 모자라면 강제 채우기
     if len(final_picks) < wanted_count:
         remain_pool = filtered_pool[~filtered_pool['pure_name'].isin(final_picks)].copy()
+        
         if cc_count >= MAX_CC:
              mask_cc = remain_pool.apply(lambda x: has_keyword(x, cc_keywords), axis=1)
              remain_pool = remain_pool[~mask_cc]
+        if cash_count >= MAX_CASH:
+             mask_cash = remain_pool.apply(lambda x: has_keyword(x, cash_keywords), axis=1)
+             remain_pool = remain_pool[~mask_cash]
+             
         if not remain_pool.empty:
             final_picks.extend(remain_pool.head(wanted_count - len(final_picks))['pure_name'].tolist())
 
     selected_pool = filtered_pool[filtered_pool['pure_name'].isin(final_picks)].copy()
 
     # -------------------------------------------------------
-    # [교정 6] ★ 비중 최적화 (가변 비중 시스템 적용) ★
+    # [교정 6] ★ 비중 최적화 (가변 비중 시스템) ★
     # -------------------------------------------------------
     if selected_pool.empty: return "종목 선정 실패", [], {}
 
     selected_pool['sort_cat'] = pd.Categorical(selected_pool['pure_name'], categories=final_picks, ordered=True)
     selected_pool = selected_pool.sort_values('sort_cat')
 
-    # 기본 비중 계산
+    # 기본 비중
     yields = selected_pool['연배당률'].values
     inv_dist = 1 / (abs(yields - target_yield) + 0.5) 
     weights = (inv_dist / inv_dist.sum()) * 100
     
-    # [가변 최소 비중 설정] 사장님 요청 로직 반영
-    # 3개 -> 30%, 4개 -> 25%, 5개 -> 20%
     min_weight_map = {3: 30.0, 4: 25.0, 5: 20.0}
-    # 혹시 모를 예외(6개 이상 등)를 위해 기본값 20.0 설정
     min_threshold = min_weight_map.get(len(final_picks), 20.0)
 
-    # [대장주 비중 부스팅] 성장형 or 안정형일 때만 적용
+    # 대장주 부스팅
     if style in ['growth', 'safe']:
-        # 첫 번째 종목(대장주) 확인
         first_row = selected_pool.iloc[0]
-        # 진짜 우리가 원하는 키워드를 가진 녀석인지 확인
         target_keys = growth_keywords if style == 'growth' else safe_keywords
         
         if has_keyword(first_row, target_keys):
-             # 현재 비중이 최소컷보다 낮으면 강제로 끌어올림
              if weights[0] < min_threshold:
                  weights[0] = min_threshold
-                 # 나머지 종목들은 남은 파이(100 - 최소컷)를 나눠가짐
                  if len(weights) > 1:
                      other_sum = weights[1:].sum()
                      if other_sum > 0:
@@ -202,7 +226,6 @@ def get_smart_recommendation(df, user_choices):
 
     weights = weights.round().astype(int)
     
-    # 100% 맞춤 보정
     diff = 100 - weights.sum()
     if len(weights) > 0:
         weights[0] += diff 
