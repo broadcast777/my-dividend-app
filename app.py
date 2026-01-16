@@ -372,23 +372,14 @@ def main():
         st.session_state['shared_df'] = df
 
 
-
     # ---------------------------------------------------------
-    # [최종] 사이드바 메뉴 & 실시간 로드맵 통합 센터
+    # 사이드바 메뉴 & 불러오기
     # ---------------------------------------------------------
     with st.sidebar:
-        st.title("🎯 대시보드 센터")
-        
-        # 1. 메뉴 이동 (선생님 요청대로 3가지 구성)
-        menu = st.radio(
-            "📂 **메뉴 이동**", 
-            ["💰 배당금 계산기", "🔍 전체 종목 리스트", "📅 배당 캘린더"], 
-            label_visibility="visible"
-        )
+        if not st.session_state.is_logged_in: st.markdown("---")
+        menu = st.radio("📂 **메뉴 이동**", ["💰 배당금 계산기", "📃 전체 종목 리스트"], label_visibility="visible")
         st.markdown("---")
-
-        # 2. 불러오기 / 관리 섹션 (기존 로직 유지)
-        with st.expander("📁 내 포트폴리오 관리"):
+        with st.expander("📂 불러오기 / 관리"):
             if not st.session_state.is_logged_in:
                 st.caption("🔒 상단에서 로그인을 해주세요.")
             else:
@@ -403,47 +394,25 @@ def main():
                             name = p.get('name') or '이름없음'
                             label = f"{name} ({date_str} {time_str})"
                             opts[label] = p
-                        
                         sel_name = st.selectbox("항목 선택", list(opts.keys()), label_visibility="collapsed")
-                        
-                        col_btn1, col_btn2 = st.columns(2)
-                        
-                        # [불러오기 버튼]
-                        if col_btn1.button("📂 불러오기", use_container_width=True):
-                            data = opts[sel_name]['ticker_data']
-                            st.session_state.total_invest = int(data.get('total_money', 30000000))
-                            st.session_state.selected_stocks = list(data.get('composition', {}).keys())
-                            # 비중 데이터도 세션에 복구 (시뮬레이션 연동용)
-                            st.session_state.ai_suggested_weights = data.get('composition', {})
-                            st.toast("포트폴리오를 불러왔습니다!", icon="✅")
-                            st.rerun()
-                        
-                        # [삭제 버튼]
-                        if col_btn2.button("🗑️ 삭제", type="secondary", use_container_width=True):
-                            target_id = opts[sel_name]['id']
-                            supabase.table("portfolios").delete().eq("id", target_id).execute()
-                            st.toast("삭제되었습니다.", icon="🗑️")
-                            st.rerun()
+                        is_delete_mode = st.toggle("🗑️ 삭제 모드 켜기")
+                        if is_delete_mode:
+                            if st.button("🚨 영구 삭제", type="primary", use_container_width=True):
+                                target_id = opts[sel_name]['id']
+                                supabase.table("portfolios").delete().eq("id", target_id).execute()
+                                st.toast("삭제되었습니다.", icon="🗑️")
+                                st.rerun()
+                        else:
+                            if st.button("📂 불러오기", use_container_width=True):
+                                data = opts[sel_name]['ticker_data']
+                                st.session_state.total_invest = int(data.get('total_money', 30000000))
+                                st.session_state.selected_stocks = list(data.get('composition', {}).keys())
+                                st.toast("성공적으로 불러왔습니다!", icon="✅")
+                                st.rerun()
                     else:
                         st.caption("저장된 기록이 없습니다.")
-                except:
-                    st.error("데이터 통신 실패")
-
-        # -------------------------------------------------------
-        # [신규 추가] 3. 실시간 배당 로드맵 (사이드바 하단 고정)
-        # -------------------------------------------------------
-        # 계산기 메뉴이거나, 선택된 종목이 있을 때만 로드맵을 보여줍니다.
-        if st.session_state.get('selected_stocks'):
-            # timeline 모듈의 함수 호출 (df, 현재 비중, 총 투자금 전달)
-            # weights는 시뮬레이션 섹션에서 정의되므로, 세션 state를 활용하는 것이 안전합니다.
-            current_weights = st.session_state.get('ai_suggested_weights', {})
-            if current_weights:
-                import timeline # 상단에서 안했다면 여기서 호출
-                timeline.display_sidebar_roadmap(
-                    st.session_state.shared_df, 
-                    current_weights, 
-                    st.session_state.total_invest
-                )
+                except Exception as e:
+                    st.error("불러오기 실패")
 
     # =================================================================================
     # [화면 1] 배당금 계산기
