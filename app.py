@@ -421,7 +421,7 @@ def main():
         if not st.session_state.is_logged_in: st.markdown("---")
         
         # 메인 메뉴 선택 (라디오 버튼)
-        menu = st.radio("📂 **메뉴 이동**", ["💰 배당금 계산기", "📃 전체 종목 리스트"], label_visibility="visible")
+        menu = st.radio("📂 **메뉴 이동**", ["💰 배당금 계산기", "📅 월별 로드맵", "📃 전체 종목 리스트"], label_visibility="visible")
         st.markdown("---")
         
         # [포트폴리오 불러오기] Supabase DB와 연동하여 저장된 기록을 로드
@@ -1063,6 +1063,56 @@ def main():
 1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 단순 결과입니다.
 2. 재투자가 매월 칼같이 이루어진다는 가정하에 계산된 복리 결과입니다.
 3. 실제 투자 시에는 배당 삭감이나 주가 하락의 리스크를 반드시 고려해야 합니다.""")
+
+    # =================================================================================
+    # [NEW SECTION] 화면 1.5: 월별 로드맵 (맛보기 수육 섹션)
+    # =================================================================================
+    elif menu == "📅 월별 로드맵":
+        st.header("📅 나의 배당 월급 로드맵")
+        st.info("💡 종목별 배당 주기를 반영한 **토스 스타일 히트맵**입니다. (로그인 없이 이용 가능)")
+
+        selected = st.session_state.get('selected_stocks', [])
+
+        if not selected:
+            st.warning("⚠️ **'💰 배당금 계산기'** 메뉴에서 종목을 먼저 선택해 주세요!")
+            st.stop()
+        
+        # [데이터 복원] 계산기에서 입력했던 비중(weights) 값을 다시 가져옵니다.
+        weights = {}
+        remaining = 100
+        for i, stock in enumerate(selected):
+            if i < len(selected) - 1:
+                # 계산기 메뉴의 number_input 키(s_0, s_1...)에서 값을 가져옴
+                val = st.session_state.get(f"s_{i}", 100 // len(selected))
+                weights[stock] = val
+                remaining -= val
+            else:
+                weights[stock] = max(0, remaining)
+
+        # ---------------------------------------------------------
+        # 1. 토스식 히트맵 출력 (timeline.py의 기능을 여기서 실행)
+        # ---------------------------------------------------------
+        # timeline.py에 render_toss_style_heatmap 함수가 있다고 가정합니다.
+        timeline.render_toss_style_heatmap(df, weights, st.session_state.total_invest)
+
+        # ---------------------------------------------------------
+        # 2. 로그인 유도 섹션 (고급 기능 잠금)
+        # ---------------------------------------------------------
+        if not st.session_state.get("is_logged_in", False):
+            st.write("")
+            with st.container(border=True):
+                st.markdown("### 🔓 로그인이 필요한 진짜 '고기' 기능")
+                col_lock1, col_lock2 = st.columns(2)
+                with col_lock1:
+                    st.write("✅ **내 폰으로 배당 알림 받기**")
+                    st.caption("전체 일정을 .ics 파일로 내려받아 캘린더에 1초 만에 등록하세요.")
+                with col_lock2:
+                    st.write("✅ **설계한 포트폴리오 저장**")
+                    st.caption("매번 입력할 필요 없이 언제든 다시 불러올 수 있습니다.")
+                
+                st.info("👆 페이지 최상단의 로그인 버튼을 이용해 주세요!")
+
+    
     # =================================================================================
     # [SECTION 8] 화면 2: 전체 종목 리스트
     # =================================================================================
