@@ -145,8 +145,9 @@ def main():
     else: st.title("💰 배당팽이 월배당 계산기")
 
 
+
     # ---------------------------------------------------------
-    # [디자인 완성] 최상단 통합 로그인 센터 (카카오 & 구글 디자인 통일)
+    # [정밀 교정] 최상단 통합 로그인 센터 (카카오 엄격 모드 적용)
     # ---------------------------------------------------------
     with st.container(border=True):
         if not st.session_state.get("is_logged_in", False):
@@ -161,16 +162,22 @@ def main():
                 except:
                     current_session_id = "unknown"
 
-                redirect_url = f"https://dividend-pange.streamlit.app?old_id={current_session_id}"
+                # 1. 구글용 주소 (파라미터 허용)
+                google_redirect = f"https://dividend-pange.streamlit.app?old_id={current_session_id}"
+                # 2. 카카오용 주소 (엄격한 순정 주소)
+                kakao_redirect = "https://dividend-pange.streamlit.app"
 
                 col_l, col_r = st.columns(2)
                 
                 with col_l:
-                    # --- 🟡 카카오 로그인 (기존 디자인 유지) ---
+                    # --- 🟡 카카오 로그인 (순정 주소 + 새 창) ---
                     try:
                         res_kakao = supabase.auth.sign_in_with_oauth({
                             "provider": "kakao",
-                            "options": {"redirect_to": redirect_url, "skip_browser_redirect": True}
+                            "options": {
+                                "redirect_to": kakao_redirect, # 파라미터 제거!
+                                "skip_browser_redirect": True
+                            }
                         })
                         if res_kakao.url:
                             btn_kakao = f'''
@@ -183,45 +190,43 @@ def main():
                                 </div>
                             </a>'''
                             st.markdown(btn_kakao, unsafe_allow_html=True)
-                    except: pass
+                    except: st.error("Kakao 오류")
 
                 with col_r:
-                    # --- ⚪ 구글 로그인 (새로운 디자인 적용) ---
+                    # --- ⚪ 구글 로그인 (기존 주소 + 새 디자인) ---
                     try:
                         res_google = supabase.auth.sign_in_with_oauth({
                             "provider": "google",
                             "options": {
-                                "redirect_to": redirect_url,
+                                "redirect_to": google_redirect, # 구글은 기존 방식 유지
                                 "queryParams": {"access_type": "offline", "prompt": "consent"},
-                                "skip_browser_redirect": True  # URL만 가져오기 위해 True로 설정
+                                "skip_browser_redirect": True
                             }
                         })
                         if res_google.url:
-                            # 카카오와 규격(Padding, Shadow, Radius)을 완벽히 맞춘 구글 버튼
                             btn_google = f'''
                             <a href="{res_google.url}" target="_blank" style="text-decoration: none;">
                                 <div style="display: inline-flex; justify-content: center; align-items: center; width: 100%;
                                     background-color: #ffffff; color: #000000; border: 1px solid #ddd;
                                     padding: 0.8rem; border-radius: 0.5rem; font-weight: bold; font-size: 1.05em;
                                     box-shadow: 0 1px 2px rgba(0,0,0,0.1);">
-                                    <img src="https://www.gstatic.com/images/branding/product/1x/gsa_512dp.png" width="18" style="margin-right:10px;">
+                                    <img src="https://www.gstatic.com/images/branding/product/1x/gsa_512dp.png" width="18" style="margin-right:10px; vertical-align:middle;">
                                     Google로 3초 만에 시작하기
                                 </div>
                             </a>'''
                             st.markdown(btn_google, unsafe_allow_html=True)
-                    except: pass
+                    except: st.error("Google 오류")
         else:
-            # 로그인 된 유저 상단 바 (기존 유지)
+            # 로그인 성공 시 상태바
             user = st.session_state.user_info
             nickname = user.email.split("@")[0] if user.email else "User"
             c1, c2 = st.columns([3, 1])
-            c1.success(f"👋 **{nickname}**님, 환영합니다! 모든 고급 기능이 잠금 해제되었습니다.")
+            c1.success(f"👋 **{nickname}**님, 환영합니다! 모든 기능이 활성화되었습니다.")
             if c2.button("🚪 로그아웃", use_container_width=True, key="top_logout_btn"):
                 supabase.auth.sign_out()
                 st.session_state.is_logged_in = False
                 st.session_state.user_info = None
                 st.rerun()
-
 
                 
     # 데이터 로드
