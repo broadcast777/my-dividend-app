@@ -152,6 +152,58 @@ def render_login_ui():
                 st.session_state.code_processed = False
                 st.rerun()
 
+# -----------------------------------------------------------
+# [추가됨] 사이드바 하단 커피 후원 버튼 렌더링 함수
+# -----------------------------------------------------------
+def render_sidebar_footer():
+    """사이드바 최하단 후원 버튼 및 저작권 정보"""
+    bmc_url = "https://www.buymeacoffee.com/dividenpange"
+
+    st.sidebar.markdown("---") # 구분선
+    
+    st.sidebar.markdown(f"""
+        <style>
+        .bmc-container {{
+            display: flex;
+            justify-content: center;
+            margin: 10px 0;
+        }}
+        .bmc-button {{
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #FFDD00;
+            color: #000000 !important;
+            padding: 10px 15px;
+            border-radius: 10px;
+            text-decoration: none;
+            font-weight: bold;
+            font-size: 14px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            transition: transform 0.2s;
+            width: 100%;
+        }}
+        .bmc-button:hover {{
+            transform: translateY(-2px);
+            text-decoration: none;
+            background-color: #FADA00;
+        }}
+        .bmc-logo {{
+            height: 18px;
+            margin-right: 8px;
+        }}
+        </style>
+        <div class="bmc-container">
+            <a class="bmc-button" href="{bmc_url}" target="_blank">
+                <img src="https://cdn.buymeacoffee.com/buttons/bmc-new-btn-logo.svg" alt="BMC logo" class="bmc-logo">
+                <span>배당팽이에게 커피 한 잔</span>
+            </a>
+        </div>
+    """, unsafe_allow_html=True)
+    
+
+
+
 # ==========================================
 # [SECTION 4] 페이지별 렌더링 함수 (부품화)
 # ==========================================
@@ -864,6 +916,9 @@ def main():
                     else: st.caption("저장된 기록이 없습니다.")
                 except Exception as e: st.error("불러오기 실패")
 
+        # [추가된 부분] 사이드바 하단 후원 버튼 호출 (여기 한 줄만 추가했습니다!)
+        render_sidebar_footer()
+
     # [라우팅 실행] 선택된 메뉴에 따라 해당 페이지 렌더링 함수 호출
     if menu == "💰 배당금 계산기":
         render_calculator_page(df)
@@ -877,7 +932,7 @@ def main():
     st.caption("© 2025 **배당팽이** | 실시간 데이터 기반 배당 대시보드")
     st.caption("First Released: 2025.12.31 | [📝 배당팽이의 배당 투자 일지 구경가기](https://blog.naver.com/dividenpange)")
 
-   
+    
 
 # ==========================================
 # [ENTRY POINT] 앱 실행 시작점
