@@ -436,6 +436,11 @@ def main():
                     st.session_state.ai_modal_open = True
                     st.session_state.wiz_step = 1 # 열 때 초기화
                     st.session_state.wiz_data = {}
+                    
+                    # [핵심 추가] 실행할 때마다 이전 캐시를 완전히 비우고 시작합니다.
+                    if "ai_result_cache" in st.session_state:
+                        del st.session_state.ai_result_cache
+                        
                 else:
                     st.error("🔒 로그인이 필요한 기능입니다. 페이지 최상단에서 로그인을 먼저 해주세요!")
                     st.toast("위에서 로그인을 해주세요!", icon="👆")
