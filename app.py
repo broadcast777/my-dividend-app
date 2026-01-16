@@ -149,7 +149,7 @@ def main():
     # ---------------------------------------------------------
     with st.container(border=True):
         if not st.session_state.get("is_logged_in", False):
-            st.markdown("🔒 **로그인하기 **")
+            st.markdown("🔒 로그인하기 ")
             
             # 현재 세션 ID 가져오기 (OAuth 리다이렉트용)
             try:
