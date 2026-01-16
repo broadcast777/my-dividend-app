@@ -11,6 +11,7 @@ import hashlib
 import time
 import random
 from streamlit.runtime.scriptrunner import get_script_run_ctx
+from logger import logger  # [추가] 블랙박스 배선 연결
 
 # [필수] 날짜 및 URL 라이브러리
 from datetime import datetime, timedelta
