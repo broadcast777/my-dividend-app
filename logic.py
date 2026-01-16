@@ -70,9 +70,17 @@ def classify_asset(row):
 def get_hedge_status(name, category):
     """종목명을 기반으로 환헤지(H) 여부 및 환노출 상태를 판별합니다."""
     name_str = str(name).upper()
+    
+    # 1. 해외 직투는 무조건 달러
     if category == '해외': return "💲달러(직투)"
+    
+    # 2. 이름에 '환노출'이라고 써있으면 무조건 환노출
     if "환노출" in name_str or "UNHEDGED" in name_str: return "⚡환노출"
-    if any(x in name_str for x in ["(H)", "헤지", "합성"]): return "🛡️환헤지(H)"
+    
+    # 3. [수정됨] '(H)'나 '헤지'가 있어야만 환헤지로 인정! ("합성"은 뺐음)
+    if any(x in name_str for x in ["(H)", "헤지"]): return "🛡️환헤지(H)"
+    
+    # 4. 나머지는 이름에 해외 관련 단어가 있으면 환노출로 간주
     return "⚡환노출" if any(x in name_str for x in ['미국', 'GLOBAL', 'S&P500', '나스닥', '국제']) else "-"
 
 
