@@ -56,12 +56,12 @@ def _check_timing_match(row_date, user_timing):
 # [SECTION 2] 스마트 필터링 & 비중 최적화 엔진
 # -----------------------------------------------------------
 
-# recommendation.py 의 get_smart_recommendation 함수를 이걸로 교체하세요
+# recommendation.py 의 get_smart_recommendation 함수 전체를 이것으로 교체
 
 def get_smart_recommendation(df, user_choices):
     """
-    사용자 입력(목표 배당률, 스타일, 시기 등)을 분석하여 최적의 종목 조합과 비중을 산출합니다.
-    (개선: Empty Pool 방지 + 정규식 날짜 필터 + ★커버드콜 쿼터제 적용★)
+    사용자 입력 분석 및 포트폴리오 최적화
+    (개선: CC 쿼터제 + ★성장/안정 테마 의무 할당 + 개수별 가변 비중 시스템★)
     """
     
     # 1. 사용자 입력 추출
@@ -70,19 +70,20 @@ def get_smart_recommendation(df, user_choices):
     wanted_count = user_choices.get('count', 3)
     timing = user_choices.get('timing', 'mix')
     
-    # 2. 데이터 기초 준비
+    # 2. 데이터 준비
     pool = df[df['연배당률'] > 0].copy()
     pool['temp_date_str'] = pool['배당락일'].fillna('').astype(str)
     
+    # 3. 필터링 (스타일/시기)
     filtered_pool = pd.DataFrame()
     filter_stage = "strict" 
     
-    # --- (A) 스타일 필터 ---
+    # (A) 안정형 필터 (수익률 상한선)
     if style == 'safe':
         pool = pool[pool['연배당률'] <= 6.5]
         target_yield = min(target_yield, 6.0)
     
-    # --- (B) 시기 필터 (1, 2차 시도) ---
+    # (B) 시기 필터
     mask_timing = pool['temp_date_str'].apply(lambda x: _check_timing_match(x, timing))
     first_try = pool[mask_timing].copy()
     
@@ -94,79 +95,114 @@ def get_smart_recommendation(df, user_choices):
         
     if filtered_pool.empty: return "조건에 맞는 종목 없음", [], {}
 
-    # -------------------------------------------------------
-    # [교정 2] 점수 산정 엔진
-    # -------------------------------------------------------
-    filtered_pool['yield_diff'] = abs(filtered_pool['연배당률'] - target_yield)
-    filtered_pool['score'] = 100 - (filtered_pool['yield_diff'] * 10)
-    
+    # 4. 키워드 정의
+    growth_keywords = ['나스닥', 'nasdaq', 's&p', '미국', '테크', '성장', 'schd', 'qqq', 'spy', 'top10', 'magnificent', 'tech']
+    safe_keywords = ['채권', '국채', 'treasury', '금', 'gold', '달러', 'bond', 'tlt', 'safe', '파킹', 'cd']
+    cc_keywords = ['커버드', 'covered', 'call', 'jepi', 'qyld', 'tsly', 'play', 'high', 'premium']
+
     def has_keyword(row, keywords):
         text = (str(row['종목명']) + " " + str(row.get('pure_name', ''))).lower()
         return any(k.lower() in text for k in keywords)
 
-    # 스타일별 가산점
+    # 5. 점수 산정 (Scoring)
+    filtered_pool['yield_diff'] = abs(filtered_pool['연배당률'] - target_yield)
+    filtered_pool['score'] = 100 - (filtered_pool['yield_diff'] * 10)
+    
     if style == 'growth':
-        mask = filtered_pool.apply(lambda x: has_keyword(x, ['나스닥', 'nasdaq', 'S&P', '미국', '테크', '성장', 'schd']), axis=1)
-        filtered_pool.loc[mask, 'score'] += 20
+        mask = filtered_pool.apply(lambda x: has_keyword(x, growth_keywords), axis=1)
+        filtered_pool.loc[mask, 'score'] += 50 
+    elif style == 'safe':
+        # 안정형이면 채권/금 등 안전자산에 엄청난 가산점
+        mask = filtered_pool.apply(lambda x: has_keyword(x, safe_keywords), axis=1)
+        filtered_pool.loc[mask, 'score'] += 50
     elif style == 'flow':
         filtered_pool['score'] += filtered_pool['연배당률'] * 2 
-        mask = filtered_pool.apply(lambda x: has_keyword(x, ['커버드콜', 'covered', 'jepi', 'qyld', '리츠', '고배당']), axis=1)
+        mask = filtered_pool.apply(lambda x: has_keyword(x, cc_keywords), axis=1)
         filtered_pool.loc[mask, 'score'] += 15
-    elif style == 'safe':
-        mask = filtered_pool.apply(lambda x: has_keyword(x, ['채권', '국채', 'treasury', '금', 'gold', '달러', '파킹']), axis=1)
-        filtered_pool.loc[mask, 'score'] += 30 
 
-    # 점수순 정렬
     filtered_pool = filtered_pool.sort_values('score', ascending=False)
 
     # -------------------------------------------------------
-    # [교정 4] ★ 쿼터제 적용 (포트폴리오 다양성 확보) ★
+    # [교정 5] ★ 선발 로직 (테마별 대장주 의무화 + CC 쿼터제) ★
     # -------------------------------------------------------
     final_picks = []
-    cc_count = 0  # 커버드콜 카운터
-    MAX_CC = 2    # 최대 허용 개수
+    cc_count = 0
+    MAX_CC = 2
     
-    # 커버드콜 식별 키워드
-    cc_keywords = ['커버드', 'covered', 'call', 'jepi', 'qyld', 'tsly', 'play', 'high']
+    # (1) 의무 할당 (낙하산 인사)
+    # 성장형 -> 성장주 1등 / 안정형 -> 안전자산 1등 무조건 선발
+    priority_keywords = []
+    if style == 'growth': priority_keywords = growth_keywords
+    elif style == 'safe': priority_keywords = safe_keywords
+    
+    if priority_keywords:
+        candidates = filtered_pool[filtered_pool.apply(lambda x: has_keyword(x, priority_keywords), axis=1)]
+        if not candidates.empty:
+            best_pick = candidates.iloc[0]
+            final_picks.append(best_pick['pure_name'])
+            if has_keyword(best_pick, cc_keywords): cc_count += 1
 
-    # 상위권부터 하나씩 검사하며 담기
+    # (2) 나머지 채우기
     for idx, row in filtered_pool.iterrows():
-        if len(final_picks) >= wanted_count:
-            break
+        if len(final_picks) >= wanted_count: break
+        if row['pure_name'] in final_picks: continue
             
         is_cc = has_keyword(row, cc_keywords)
-        
-        # 쿼터 초과 검사
-        if is_cc and cc_count >= MAX_CC:
-            continue  # 이미 2개 찼으면 얘는 건너뛰고 다음 종목 봄
+        if is_cc and cc_count >= MAX_CC: continue
             
         final_picks.append(row['pure_name'])
         if is_cc: cc_count += 1
         
-    # 만약 쿼터제 때문에 종목이 부족해졌다면? (나머지 채우기)
+    # (3) 모자라면 강제 채우기 (CC 제외 2차 방어선)
     if len(final_picks) < wanted_count:
-        remain_needed = wanted_count - len(final_picks)
-        # 이미 뽑힌거 제외하고 다시 가져오기
-        remain_pool = filtered_pool[~filtered_pool['pure_name'].isin(final_picks)]
-        final_picks.extend(remain_pool.head(remain_needed)['pure_name'].tolist())
+        remain_pool = filtered_pool[~filtered_pool['pure_name'].isin(final_picks)].copy()
+        if cc_count >= MAX_CC:
+             mask_cc = remain_pool.apply(lambda x: has_keyword(x, cc_keywords), axis=1)
+             remain_pool = remain_pool[~mask_cc]
+        if not remain_pool.empty:
+            final_picks.extend(remain_pool.head(wanted_count - len(final_picks))['pure_name'].tolist())
 
     selected_pool = filtered_pool[filtered_pool['pure_name'].isin(final_picks)].copy()
 
     # -------------------------------------------------------
-    # [교정 3] 비중 최적화
+    # [교정 6] ★ 비중 최적화 (가변 비중 시스템 적용) ★
     # -------------------------------------------------------
     if selected_pool.empty: return "종목 선정 실패", [], {}
 
-    # 선택된 순서(점수순)대로 다시 정렬 (중요)
     selected_pool['sort_cat'] = pd.Categorical(selected_pool['pure_name'], categories=final_picks, ordered=True)
     selected_pool = selected_pool.sort_values('sort_cat')
 
+    # 기본 비중 계산
     yields = selected_pool['연배당률'].values
     inv_dist = 1 / (abs(yields - target_yield) + 0.5) 
     weights = (inv_dist / inv_dist.sum()) * 100
+    
+    # [가변 최소 비중 설정] 사장님 요청 로직 반영
+    # 3개 -> 30%, 4개 -> 25%, 5개 -> 20%
+    min_weight_map = {3: 30.0, 4: 25.0, 5: 20.0}
+    # 혹시 모를 예외(6개 이상 등)를 위해 기본값 20.0 설정
+    min_threshold = min_weight_map.get(len(final_picks), 20.0)
+
+    # [대장주 비중 부스팅] 성장형 or 안정형일 때만 적용
+    if style in ['growth', 'safe']:
+        # 첫 번째 종목(대장주) 확인
+        first_row = selected_pool.iloc[0]
+        # 진짜 우리가 원하는 키워드를 가진 녀석인지 확인
+        target_keys = growth_keywords if style == 'growth' else safe_keywords
+        
+        if has_keyword(first_row, target_keys):
+             # 현재 비중이 최소컷보다 낮으면 강제로 끌어올림
+             if weights[0] < min_threshold:
+                 weights[0] = min_threshold
+                 # 나머지 종목들은 남은 파이(100 - 최소컷)를 나눠가짐
+                 if len(weights) > 1:
+                     other_sum = weights[1:].sum()
+                     if other_sum > 0:
+                         weights[1:] = (weights[1:] / other_sum) * (100.0 - min_threshold)
+
     weights = weights.round().astype(int)
     
-    # 비중 합계 100 보정
+    # 100% 맞춤 보정
     diff = 100 - weights.sum()
     if len(weights) > 0:
         weights[0] += diff 
