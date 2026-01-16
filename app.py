@@ -14,6 +14,7 @@ import logic
 import ui
 import db
 import recommendation
+import timeline
 # ==========================================
 # [1] 기본 설정
 # ==========================================
