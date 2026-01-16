@@ -50,7 +50,7 @@ def render_toss_style_heatmap(df, weights, total_invest):
             st.write(f"**현재 생활비 방어율: {coverage*100:.1f}%**")
             st.progress(min(coverage, 1.0))
         with col_res2:
-            st.metric("월 방어액", f"{total_m_div/10000:,.1f}만")
+            st.metric("월 배당금", f"{total_m_div/10000:,.1f}만")
 
         # 분석 결과 메시지
         with st.container(border=True):
