@@ -875,64 +875,7 @@ def main():
     st.caption("© 2025 **배당팽이** | 실시간 데이터 기반 배당 대시보드")
     st.caption("First Released: 2025.12.31 | [📝 배당팽이의 배당 투자 일지 구경가기](https://blog.naver.com/dividenpange)")
 
-    @st.fragment
-    def track_visitors():
-        if 'visited' not in st.session_state: st.session_state.visited = False
-        if not st.session_state.visited:
-            try:
-                if st.query_params.get("admin", "false").lower() != "true":
-                    if supabase:
-                        from streamlit.web.server.websocket_headers import _get_websocket_headers
-                        headers = _get_websocket_headers()
-                        referer = headers.get("Referer", "Direct")
-                        source_tag = st.query_params.get("source", referer)
-                        supabase.table("visit_logs").insert({"referer": source_tag}).execute()
-                        response = supabase.table("visit_counts").select("count").eq("id", 1).execute()
-                        if response.data:
-                            new_count = response.data[0]['count'] + 1
-                            supabase.table("visit_counts").update({"count": new_count}).eq("id", 1).execute()
-                            st.session_state.display_count = new_count
-                            logger.info(f"📈 새 방문자 유입 (누적: {new_count})")
-                        else: st.session_state.display_count = "Local"
-                else:
-                    if supabase:
-                        response = supabase.table("visit_counts").select("count").eq("id", 1).execute()
-                        st.session_state.display_count = response.data[0]['count'] if response.data else "Admin"
-                    else: st.session_state.display_count = "Admin"
-                st.session_state.visited = True
-            except Exception:
-                st.session_state.display_count = "확인 중"
-                st.session_state.visited = True
-
-        display_num = st.session_state.get('display_count', '집계 중')
-        st.write("") 
-        st.markdown(f"""
-            <div style="display: flex; justify-content: center; align-items: center; gap: 20px; padding: 25px; background: #f8f9fa; border-radius: 15px; border: 1px solid #eee; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 10px;">
-                <div style="text-align: center;">
-                    <p style="margin: 0; font-size: 0.9em; color: #666; font-weight: 500;">누적 방문자</p>
-                    <p style="margin: 0; font-size: 2.2em; font-weight: 800; color: #0068c9;">{display_num}</p>
-                </div>
-                <div style="width: 1px; height: 50px; background: #ddd;"></div>
-                <div style="text-align: left;">
-                    <p style="margin: 2px 0; font-size: 0.85em; color: #555;">🚀 <b>실시간 데이터</b> 연동 중</p>
-                    <p style="margin: 2px 0; font-size: 0.85em; color: #555;">🛡️ <b>보안 비밀번호</b> 적용 완료</p>
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
-
-    track_visitors()
-    
-    # 11. 관리자 유입 로그
-    if is_admin and supabase:
-        with st.expander("🛠️ 관리자 전용: 최근 유입 로그 (최근 5건)", expanded=False):
-            try:
-                recent_logs = supabase.table("visit_logs").select("referer, created_at").order("created_at", desc=True).limit(5).execute()
-                if recent_logs.data:
-                    log_df = pd.DataFrame(recent_logs.data)
-                    log_df['created_at'] = pd.to_datetime(log_df['created_at']).dt.tz_convert('Asia/Seoul').dt.strftime('%Y-%m-%d %H:%M:%S')
-                    st.table(log_df)
-                else: st.write("아직 기록된 유입이 없습니다.")
-            except Exception as e: st.error(f"로그 로드 실패: {e}")
+   
 
 # ==========================================
 # [ENTRY POINT] 앱 실행 시작점
