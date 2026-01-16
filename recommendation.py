@@ -1,13 +1,13 @@
 """
-프로젝트: 배당 팽이 (Dividend Top) v1.6
+프로젝트: 배당 팽이 (Dividend Top) v1.6.1
 파일명: recommendation.py
-설명: AI 로보어드바이저 엔진 (셔플 기능 + 리츠 1개 제한 + 쿼터제)
+설명: AI 로보어드바이저 엔진 (셔플 기능 + 리츠 1개 제한 + 쿼터제 + 안내문구 복구)
 """
 
 import streamlit as st
 import pandas as pd
 import re
-import random # [추가] 셔플을 위한 랜덤 모듈
+import random 
 
 # -----------------------------------------------------------
 # [SECTION 1] 내부 헬퍼 함수
@@ -107,7 +107,6 @@ def get_smart_recommendation(df, user_choices):
         filtered_pool.loc[mask_reit, 'score'] += 10
 
     # [핵심] 랜덤 노이즈 추가 (셔플 효과)
-    # 점수에 0~15점 사이의 랜덤 점수를 더해서, 비슷한 애들끼리 순위가 매번 바뀌게 함
     filtered_pool['random_luck'] = [random.uniform(0, 15) for _ in range(len(filtered_pool))]
     filtered_pool['score'] += filtered_pool['random_luck']
 
@@ -278,7 +277,7 @@ def show_wizard():
         st.button("🔚 월말/월초 (월급날 전후)", use_container_width=True, on_click=go_next_step, args=(3, 'timing', 'end'))
         st.button("🔄 상관없음 (섞어서 2주마다 받기)", use_container_width=True, on_click=go_next_step, args=(3, 'timing', 'mix'))
 
-    # [STEP 3]
+    # [STEP 3] - 안내 문구 복구 완료!
     elif step == 3:
         st.subheader("Q3. 구체적인 목표를 정해주세요")
         target = st.slider("💰 목표 연배당률 (%)", 3.0, 20.0, 7.0, 0.5)
@@ -286,13 +285,25 @@ def show_wizard():
         
         if current_style == 'safe':
             st.info("🛡️ **안정 추구:** 변동성이 낮은 채권 위주로 구성되나, **원금 손실 가능성은 여전히 존재**합니다.")
-            if target > 5.0: st.warning("⚠️ **수익률 제한:** 안전 자산 비중이 높아 목표 수익률 달성이 어려울 수 있습니다.")
+            if target > 5.0:
+                st.warning(
+                    "⚠️ **수익률 제한:** 안전 자산 비중이 높아 목표 수익률 달성이 어려울 수 있습니다.\n\n"
+                    "💡 **Tip:** 더 높은 배당을 원하시면, 결과를 **[담기]** 한 뒤 리츠나 고배당주를 **직접 추가**해보세요."
+                )
         elif current_style == 'growth':
-            st.info("📈 **성장 집중:** 미래 주가 상승을 위한 종목이 의무 포함됩니다.")
-            if target >= 7.0: st.warning(f"⚠️ **배당률 괴리:** 성장주 포함으로 실제 배당률은 목표({target}%)보다 낮을 수 있습니다.")
-        else:
+            st.info("📈 **성장 집중:** 당장의 배당금보다 **미래 주가 상승**을 위한 종목(SCHD, 테크 등)이 의무 포함됩니다.")
+            if target >= 7.0:
+                st.warning(
+                    f"⚠️ **배당률 괴리:** 성장주 비중(30%↑) 확보로 인해 **실제 배당률은 목표({target}%)보다 낮을 수 있습니다.**\n\n"
+                    "💡 **Tip:** 부족한 현금 흐름은 결과를 **[담기]** 한 뒤, 커버드콜을 소량 **직접 추가**하여 보완할 수 있습니다."
+                )
+        else: # flow
             st.info("💰 **현금 흐름:** 매월 들어오는 **월 배당금**에 집중합니다.")
-            if target >= 8.0: st.warning("⚠️ **리스크 관리:** 고위험군(커버드콜)은 최대 2개로 자동 제한됩니다.")
+            if target >= 8.0:
+                st.warning(
+                    "⚠️ **리스크 관리:** 포트폴리오 균형을 위해 **고위험군(커버드콜)은 최대 2개**로 자동 제한됩니다.\n\n"
+                    "💡 **Tip:** 더 공격적인 투자를 원하시면, 결과를 **[담기]** 한 뒤 메인 화면에서 종목을 **직접 추가**하실 수 있습니다."
+                )
             
         count = st.slider("📊 종목 개수", 3, 5, 3)
         if st.button("🚀 결과 확인하기", type="primary", use_container_width=True):
@@ -301,9 +312,8 @@ def show_wizard():
             st.session_state.wiz_step = 4
             st.rerun()
 
-    # [STEP 4] 결과 (셔플 버튼 추가됨)
+    # [STEP 4] 결과
     elif step == 4:
-        # 캐시가 없으면 계산 (셔플 버튼 누르면 캐시가 삭제되므로 여기서 재계산됨)
         if "ai_result_cache" not in st.session_state:
             with st.spinner("🎲 최적 조합 찾는 중..."):
                 t_res, p_res, w_res = get_smart_recommendation(df, st.session_state.wiz_data)
@@ -333,19 +343,16 @@ def show_wizard():
 
         st.divider()
         
-        # [UI 변경] 셔플 버튼 추가
         c1, c2 = st.columns(2)
         
-        # 🎲 다른 조합 보기 (캐시 삭제 -> 재실행 -> 랜덤 점수 반영된 새 결과)
         if c1.button("🎲 다른 조합", use_container_width=True):
-            del st.session_state.ai_result_cache # 기억 지우기
-            st.rerun() # 다시 실행 (Step 4 유지)
+            del st.session_state.ai_result_cache
+            st.rerun()
 
-        # 처음으로 (완전 리셋)
         if c2.button("🔄 처음부터", on_click=reset_wizard, use_container_width=True):
             st.rerun()
             
-        st.write("") # 여백
+        st.write("") 
         
         if st.button("✅ 이대로 담기", type="primary", use_container_width=True):
             st.session_state.selected_stocks = picks
