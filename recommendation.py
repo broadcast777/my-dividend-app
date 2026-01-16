@@ -1,7 +1,7 @@
 """
-프로젝트: 배당 팽이 (Dividend Top) v1.9
+프로젝트: 배당 팽이 (Dividend Top) v1.9.2
 파일명: recommendation.py
-설명: AI 로보어드바이저 엔진 (유형 기반 정밀 분류 + 셔플 + 쿼터제 통합)
+설명: AI 로보어드바이저 엔진 (유형 기반 정밀 분류 + 셔플 + 쿼터제 + 지수 중복 방지)
 """
 
 import streamlit as st
@@ -32,6 +32,14 @@ def _check_timing_match(row_date, user_timing):
     if user_timing == 'mid': return cat == 'mid'
     elif user_timing == 'end': return cat == 'end' or cat == 'early'
     return True
+
+# [추가] 지수 중복 확인을 위한 알맹이 이름 추출기
+def _get_core_index_name(name):
+    managers = ['ACE', 'TIGER', 'KODEX', 'SOL', 'RISE', 'PLUS', 'TIMEFOLIO', 'ARIRANG', 'HANARO', 'KBSTAR']
+    core = name.upper()
+    for m in managers:
+        core = core.replace(m, "")
+    return core.replace(" ", "").replace("(H)", "").replace("합성", "").strip()
 
 # -----------------------------------------------------------
 # [SECTION 2] 스마트 필터링 & 비중 최적화 엔진
@@ -120,6 +128,7 @@ def get_smart_recommendation(df, user_choices):
 
     # 3. 선발 로직 (쿼터제)
     final_picks = []
+    picked_core_names = [] # [추가] 지수 중복 체크용 장부
     
     cc_count = 0
     cash_count = 0 
@@ -137,6 +146,7 @@ def get_smart_recommendation(df, user_choices):
         if not safe_candidates.empty:
             best_safe = safe_candidates.iloc[0]
             final_picks.append(best_safe['pure_name'])
+            picked_core_names.append(_get_core_index_name(best_safe['pure_name'])) # 장부 기록
             if check_is_cash(best_safe): cash_count += 1
             else: bond_count += 1
             
@@ -145,20 +155,30 @@ def get_smart_recommendation(df, user_choices):
              growth_candidates = filtered_pool[filtered_pool['유형'].isin(['고배당주', '혼합'])]
              
         growth_candidates = growth_candidates[~growth_candidates['pure_name'].isin(final_picks)]
-        if not growth_candidates.empty:
-            best_growth = growth_candidates.iloc[0]
-            final_picks.append(best_growth['pure_name'])
+        
+        # [수정] 중복 지수 필터링 추가
+        for _, g_row in growth_candidates.iterrows():
+            core = _get_core_index_name(g_row['pure_name'])
+            if core not in picked_core_names:
+                final_picks.append(g_row['pure_name'])
+                picked_core_names.append(core)
+                break
 
     elif style == 'growth':
         growth_candidates = filtered_pool[filtered_pool['유형'] == '배당성장']
         if not growth_candidates.empty:
             best_growth = growth_candidates.iloc[0]
             final_picks.append(best_growth['pure_name'])
+            picked_core_names.append(_get_core_index_name(best_growth['pure_name']))
 
     # (B) 나머지 채우기
     for idx, row in filtered_pool.iterrows():
         if len(final_picks) >= wanted_count: break
         if row['pure_name'] in final_picks: continue
+            
+        # [추가] 동일 지수 중복 검사
+        core_name = _get_core_index_name(row['pure_name'])
+        if core_name in picked_core_names: continue
             
         cat = row.get('유형', '')
         
@@ -173,13 +193,14 @@ def get_smart_recommendation(df, user_choices):
         if is_reit and reit_count >= MAX_REIT: continue
             
         final_picks.append(row['pure_name'])
+        picked_core_names.append(core_name)
         
         if is_cc: cc_count += 1
         if is_cash: cash_count += 1
         if is_bond: bond_count += 1
         if is_reit: reit_count += 1
         
-    # (C) 모자라면 채우기
+    # (C) 모자라면 채우기 (중복 방어선 해제하여 개수 맞춤)
     if len(final_picks) < wanted_count:
         remain_pool = filtered_pool[~filtered_pool['pure_name'].isin(final_picks)].copy()
         
@@ -224,9 +245,8 @@ def get_smart_recommendation(df, user_choices):
 
 
 # -----------------------------------------------------------
-# [SECTION 3] 화면 전환 도우미
+# [SECTION 3] 화면 전환 도우미 (생략 - 기존과 동일)
 # -----------------------------------------------------------
-
 def go_next_step(next_step_num, key=None, value=None):
     st.session_state.wiz_step = next_step_num
     if key is not None:
@@ -237,6 +257,13 @@ def reset_wizard():
     st.session_state.wiz_data = {}
     if "ai_result_cache" in st.session_state:
         del st.session_state.ai_result_cache
+
+# -----------------------------------------------------------
+# [SECTION 4] UI 위자드 (생략 - 기존과 동일)
+# -----------------------------------------------------------
+@st.dialog("🕵️ AI 포트폴리오 설계", width="small")
+def show_wizard():
+    # ... (중략 - 기존 코드 그대로 사용)
 
 
 # -----------------------------------------------------------
