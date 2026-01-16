@@ -524,6 +524,8 @@ def main():
             selected = col2.multiselect("📊 종목 선택", df['pure_name'].unique(), default=st.session_state.selected_stocks)
             st.session_state.selected_stocks = selected
 
+            all_data = [] # 결과 분석용 데이터 수집 리스트
+
             # 해외 종목 포함 시 ISA/연금계좌 혜택 주의사항 안내
             if selected:
                 has_foreign_stock = any(df[df['pure_name'] == s_name].iloc[0]['분류'] == '해외' for s_name in selected)
@@ -536,7 +538,7 @@ def main():
                 weights = {}
                 remaining = 100 # 남은 비중 계산용
                 cols_w = st.columns(2)
-                all_data = [] # 결과 분석용 데이터 수집 리스트
+                \
                 
                 for i, stock in enumerate(selected):
                     with cols_w[i % 2]:
