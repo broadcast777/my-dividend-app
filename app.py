@@ -165,7 +165,7 @@ def main():
                     res_kakao = supabase.auth.sign_in_with_oauth({
                         "provider": "kakao",
                         "options": {
-                            "redirect_to": f"https://dividend-pange.streamlit.app?old_id={current_session_id}",
+                            "redirect_to": "https://dividend-pange.streamlit.app",
                             "skip_browser_redirect": True
                         }
                     })
