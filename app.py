@@ -35,17 +35,17 @@ st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
 # ---------------------------------------------------------
 # [추가 과제] 4과제: COPPA 나이 확인 (안전 장치)
 # ---------------------------------------------------------
-# def check_coppa_compliance():#
-    """만 13세 이상 이용 확인 (법적 준수 안내판)"""
-    if "age_verified" not in st.session_state:
-        st.warning("📋 **서비스 이용 안내**")
-        st.write("본 서비스는 개인정보보호법 및 COPPA 규정에 따라 만 13세 이상 사용자만 이용 가능합니다.")
-        if st.checkbox("나는 만 13세 이상이며, 이용 약관 및 개인정보 처리방침에 동의합니다."):
-            st.session_state.age_verified = True
-            logger.info("✅ 사용자가 나이 확인 및 약관에 동의함")
-            st.rerun()
-        else:
-            st.stop() # 동의 안 하면 기계 가동 중단
+# # def check_coppa_compliance():#
+#     """만 13세 이상 이용 확인 (법적 준수 안내판)"""
+#     if "age_verified" not in st.session_state:
+#         st.warning("📋 **서비스 이용 안내**")
+#         st.write("본 서비스는 개인정보보호법 및 COPPA 규정에 따라 만 13세 이상 사용자만 이용 가능합니다.")
+#         if st.checkbox("나는 만 13세 이상이며, 이용 약관 및 개인정보 처리방침에 동의합니다."):
+#             st.session_state.age_verified = True
+#             logger.info("✅ 사용자가 나이 확인 및 약관에 동의함")
+#             st.rerun()
+#         else:
+#             st.stop() # 동의 안 하면 기계 가동 중단
 
 # 세션 상태(Session State) 변수 초기화 로직
 # 앱이 실행되는 동안 유지되어야 하는 상태값들을 설정합니다.
