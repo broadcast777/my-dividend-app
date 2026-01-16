@@ -171,7 +171,7 @@ def main():
                 col_l, col_r = st.columns(2)
                 
                 with col_l:
-                    # --- 🟡 카카오 로그인 (선생님 원본 방식 복구) ---
+                    # --- 🟡 카카오 로그인  ---
                     try:
                         res_kakao = supabase.auth.sign_in_with_oauth({
                             "provider": "kakao",
@@ -181,7 +181,7 @@ def main():
                             }
                         })
                         if res_kakao.url:
-                            # target="_blank"와 선생님의 원본 스타일 그대로 복구
+                            # target="_blank"와  원본 스타일 그대로 복구
                             btn_kakao_html = f'''
                             <a href="{res_kakao.url}" target="_blank" style="
                                 display: inline-flex; justify-content: center; align-items: center; width: 100%;
@@ -194,8 +194,8 @@ def main():
                     except: pass
 
                 with col_r:
-                    # --- 🔵 구글 로그인 (선생님 원본 meta refresh 방식 복구) ---
-                    if st.button("🔵 Google로 시작하기", use_container_width=True, key="top_google_btn"):
+                    # --- 🔵 구글 로그인 ( 원본 meta refresh 방식 복구) ---
+                    if st.button("🔵 Google로 시작하기(pc/크롬 권장)", use_container_width=True, key="top_google_btn"):
                         try:
                             res_google = supabase.auth.sign_in_with_oauth({
                                 "provider": "google",
@@ -215,7 +215,7 @@ def main():
             user = st.session_state.user_info
             nickname = user.email.split("@")[0] if user.email else "User"
             c1, c2 = st.columns([3, 1])
-            c1.success(f"👋 **{nickname}**님, 환영합니다! 모든 고급 기능이 활성화되었습니다.")
+            c1.success(f"👋 **{nickname}**님, 환영합니다! 모든 기능이 활성화되었습니다.")
             if c2.button("🚪 로그아웃", use_container_width=True, key="top_logout_final"):
                 supabase.auth.sign_out()
                 st.session_state.is_logged_in = False
