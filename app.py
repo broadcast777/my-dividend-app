@@ -144,12 +144,69 @@ def main():
     if is_admin: st.title("💰 배당팽이 대시보드 (관리자 모드)")
     else: st.title("💰 배당팽이 월배당 계산기")
 
-    # [로그인 상태바]
-    if st.session_state.get("is_logged_in", False):
-        user = st.session_state.user_info
-        nickname = user.email.split("@")[0] if user.email else "User"
-        st.info(f"👋 **{nickname}**님, 환영합니다! (로그인됨)")
-    
+    # ---------------------------------------------------------
+    # [수정] 최상단 통합 로그인 센터 배치 (모바일 동선 개선)
+    # ---------------------------------------------------------
+    with st.container(border=True):
+        if not st.session_state.get("is_logged_in", False):
+            st.markdown("🔒 **로그인하시면 [AI 포트폴리오 진단]과 [저장 기능]이 활성화됩니다.**")
+            
+            # 현재 세션 ID 가져오기 (OAuth 리다이렉트용)
+            try:
+                ctx = get_script_run_ctx()
+                current_session_id = ctx.session_id
+            except:
+                current_session_id = "unknown"
+
+            col_l, col_r = st.columns(2)
+            with col_l:
+                # 1. 카카오 로그인 (3초 브랜딩 적용)
+                try:
+                    res_kakao = supabase.auth.sign_in_with_oauth({
+                        "provider": "kakao",
+                        "options": {
+                            "redirect_to": f"https://dividend-pange.streamlit.app?old_id={current_session_id}",
+                            "skip_browser_redirect": True
+                        }
+                    })
+                    if res_kakao.url:
+                        kakao_btn_html = f'''
+                        <a href="{res_kakao.url}" target="_self" style="text-decoration:none;">
+                            <div style="background-color:#FEE500; color:#3C1E1E; padding:10px; border-radius:8px; text-align:center; font-weight:bold; font-size:1.1em; box-shadow: 0 1px 2px rgba(0,0,0,0.1);">
+                                💬 Kakao로 3초 만에 시작하기
+                            </div>
+                        </a>'''
+                        st.markdown(kakao_btn_html, unsafe_allow_html=True)
+                except: pass
+
+            with col_r:
+                # 2. 구글 로그인
+                if st.button("🔵 Google로 로그인", use_container_width=True):
+                    try:
+                        res = supabase.auth.sign_in_with_oauth({
+                            "provider": "google",
+                            "options": {
+                                "redirect_to": f"https://dividend-pange.streamlit.app?old_id={current_session_id}",
+                                "queryParams": {"access_type": "offline", "prompt": "consent"},
+                                "skip_browser_redirect": False
+                            }
+                        })
+                        if res.url:
+                            st.markdown(f'<meta http-equiv="refresh" content="0;url={res.url}">', unsafe_allow_html=True)
+                            st.stop()
+                    except: pass
+        else:
+            # 로그인 된 유저 상태 바
+            user = st.session_state.user_info
+            nickname = user.email.split("@")[0] if user.email else "User"
+            c1, c2 = st.columns([3, 1])
+            c1.success(f"👋 **{nickname}**님, 환영합니다! 모든 고급 기능이 활성화되었습니다.")
+            if c2.button("🚪 로그아웃", use_container_width=True, key="top_logout"):
+                supabase.auth.sign_out()
+                st.session_state.is_logged_in = False
+                st.session_state.user_info = None
+                st.rerun()
+
     # 데이터 로드
     df_raw = logic.load_stock_data_from_csv()
     if df_raw.empty: st.stop()
@@ -308,7 +365,7 @@ def main():
         st.markdown("---")
         with st.expander("📂 불러오기 / 관리"):
             if not st.session_state.is_logged_in:
-                st.caption("로그인이 필요합니다.")
+                st.caption("🔒 상단에서 로그인을 해주세요.")
             else:
                 try:
                     uid = st.session_state.user_info.id
@@ -358,14 +415,15 @@ def main():
             
         with col_rec2:
             st.write("") 
-            # [수정] 콜백 없이 버튼 안에서 바로 스위치를 켭니다.
+            # [수정] 버튼 클릭 시 로그인 여부에 따른 동선 가이드 강화
             if st.button("🕵️ AI 로보어드바이저 실행", use_container_width=True, type="primary"):
                 if st.session_state.get("is_logged_in"):
                     st.session_state.ai_modal_open = True
                     st.session_state.wiz_step = 1 # 열 때 초기화
                     st.session_state.wiz_data = {}
                 else:
-                    st.toast("🔒 로그인이 필요한 기능입니다!", icon="🔒")
+                    st.error("🔒 로그인이 필요한 기능입니다. 페이지 최상단에서 로그인을 먼저 해주세요!")
+                    st.toast("위에서 로그인을 해주세요!", icon="👆")
                     st.session_state.ai_modal_open = False
 
             # [중요] 팝업 호출
@@ -441,7 +499,7 @@ def main():
                                 else:
                                     # 비로그인 상태 -> 로그인 유도 토스트
                                     if st.button(btn_label, key=f"btn_cal_{i}", use_container_width=True):
-                                        st.toast("🔒 로그인 후 캘린더에 등록할 수 있습니다!", icon="🔒")
+                                        st.toast("🔒 로그인 후 캘린더에 등록할 수 있습니다! (상단 참고)", icon="🔒")
                             else:
                                 # 링크가 없는 경우 (날짜 미정 등)
                                 st.caption(f"📅 날짜 미정 ({ex_date_view})")
@@ -476,7 +534,7 @@ def main():
 
 
                 # =========================================================
-                # [통합 캘린더 다운로드] (로그인 잠금 기능 적용)
+                # [통합 캘린더 다운로드] (로그인 유도 로직 적용)
                 # =========================================================
                 st.divider()
                 ics_data = logic.generate_portfolio_ics(all_data)
@@ -489,7 +547,6 @@ def main():
                     st.caption("아래 버튼으로 **모든 종목의 알림**을 한 번에 내 폰/PC 캘린더에 넣으세요.")
                 
                 with col_d2:
-                    # [수정] 로그인 여부에 따라 버튼 동작 분기
                     if st.session_state.get("is_logged_in", False):
                         # 1. 로그인 상태: 진짜 다운로드 버튼 표시
                         st.download_button(
@@ -501,9 +558,10 @@ def main():
                             type="primary"
                         )
                     else:
-                        # 2. 비로그인 상태: 가짜 버튼 (누르면 경고 토스트)
+                        # 2. 비로그인 상태: 가짜 버튼 (상단 유도)
                         if st.button("📥 전체 일정 파일 받기 (.ics)", key="ics_lock_btn", use_container_width=True):
-                            st.toast("🔒 로그인 회원만 '전체 다운로드'를 할 수 있습니다!", icon="🔒")
+                            st.error("🔒 로그인 회원 전용 기능입니다. 상단 로그인을 완료해 주세요!")
+                            st.toast("맨 위로 올라가서 로그인을 해주세요!", icon="👆")
 
                 # [친절한 가이드]
                 with st.expander("❓ 다운로드 받은 파일은 어떻게 쓰나요? (사용법 보기)"):
@@ -519,74 +577,24 @@ def main():
                     💡 **팁:** - **아이폰/갤럭시:** 파일이 열리면서 자동으로 캘린더 앱이 켜집니다.
                     - **PC(컴퓨터):** 파일이 다운로드 폴더에 저장됩니다. 더블 클릭하면 아웃룩이나 기본 캘린더가 열립니다.
                     """)
+
                 # =========================================================
-                # [저장 로직] (URL 릴레이 방식)
+                # [저장 로직] (UI 개선 완료: 버튼 일원화)
                 # =========================================================
                 st.write("") 
                 with st.container(border=True):
                     st.write("💾 **포트폴리오 저장 / 수정**")
                     
                     if not st.session_state.get('is_logged_in', False):
-                        if "code" in st.query_params:
-                             st.info("🔄 로그인 확인 중입니다... 잠시만 기다려주세요.")
-                        else:
-                            st.info("🔒 로그인이 필요합니다.")
-                            st.caption("✅ **카카오 로그인을 추천합니다!** (네이버/카카오 앱에서도 바로 됩니다)")
-                            
-                            # 현재 세션 ID 가져오기 (old_id 전달용)
-                            try:
-                                ctx = get_script_run_ctx()
-                                current_session_id = ctx.session_id
-                            except:
-                                current_session_id = "unknown"
-
-                            # 1. 카카오 로그인
-                            try:
-                                res_kakao = supabase.auth.sign_in_with_oauth({
-                                    "provider": "kakao",
-                                    "options": {
-                                        "redirect_to": f"https://dividend-pange.streamlit.app?old_id={current_session_id}",
-                                        "skip_browser_redirect": True
-                                    }
-                                })
-                                if res_kakao.url:
-                                    btn_kakao = f'''
-                                    <a href="{res_kakao.url}" target="_blank" style="
-                                        display: inline-flex; justify-content: center; align-items: center; width: 100%;
-                                        background-color: #FEE500; color: #000000; border: 1px solid rgba(0,0,0,0.05);
-                                        padding: 0.8rem; border-radius: 0.5rem; text-decoration: none; font-weight: bold; font-size: 1.1em;
-                                        box-shadow: 0 1px 2px rgba(0,0,0,0.1); margin-bottom: 10px;">
-                                        💬 Kakao로 3초 만에 시작하기
-                                    </a>
-                                    '''
-                                    st.markdown(btn_kakao, unsafe_allow_html=True)
-                            except Exception as e:
-                                st.error(f"Kakao 오류: {e}")
-
-                            # 2. 구글 로그인
-                            st.write("") 
-                            st.markdown("---")
-                            st.caption("🚨 **구글 로그인 안 되시나요?** (네이버/카카오 앱 보안 정책 때문입니다)")
-                            st.caption("👉 화면 구석의 **[ ··· ]** 버튼 → **'다른 브라우저로 열기'**를 이용하시거나, 위쪽 **카카오 로그인**을 이용해 주세요.")
-                            
-                            if st.button("🔵 Google 로그인 (PC/크롬 추천)", key="save_google", use_container_width=True):
-                                try:
-                                    res = supabase.auth.sign_in_with_oauth({
-                                        "provider": "google",
-                                        "options": {
-                                            "redirect_to": f"https://dividend-pange.streamlit.app?old_id={current_session_id}",
-                                            "queryParams": {"access_type": "offline", "prompt": "consent"},
-                                            "skip_browser_redirect": False
-                                        }
-                                    })
-                                    if res.url:
-                                        st.markdown(f'<meta http-equiv="refresh" content="0;url={res.url}">', unsafe_allow_html=True)
-                                        st.stop()
-                                except Exception as e:
-                                    st.error(f"Google 오류: {e}")
-
+                        # [안내만 표시] 복잡한 버튼 뭉치 제거
+                        st.warning("⚠️ **로그인이 필요합니다.**")
+                        st.markdown("""
+                        나만의 포트폴리오를 저장하고 관리하시려면 
+                        **페이지 최상단(맨 위)**에 있는 로그인을 이용해 주세요.
+                        인증 즉시 이 자리에서 저장 기능이 활성화됩니다!
+                        """)
                     else:
-                        # [로그인 성공 시] 저장/수정 UI
+                        # [기능 표시] 로그인 된 유저에게만 노출
                         try:
                             user = st.session_state.user_info
                             save_mode = st.radio("방식 선택", ["✨ 새로 만들기", "🔄 기존 파일 수정"], horizontal=True, label_visibility="collapsed")
@@ -837,7 +845,7 @@ def main():
                         annual_div_income = monthly_div_final * 12
                         if annual_div_income > 20000000: st.warning(f"🚨 **주의:** {years_sim}년 뒤 연간 배당금이 2,000만원을 초과하여 금융소득종합과세 대상이 될 수 있습니다.")
                         st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**
-1. 본 결과는 주가·환율 변동과 수수료 등을 제외하고, 현재 배당률로만 계산한 결과입니다.
+1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 결과입니다.
 2. ISA 계좌의 비과세 한도 및 세율은 세법 개정에 따라 달라질 수 있습니다.
 3. 과거의 데이터를 기반으로 한 단순 시뮬레이션이며, 실제 투자 수익을 보장하지 않습니다.""")
                         with tab_goal:
