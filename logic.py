@@ -1,20 +1,34 @@
+"""
+프로젝트: 배당 팽이 (Dividend Top) v1.5
+파일명: logic.py
+설명: 금융 API 연동, 시세 크롤링, 자산 분류 및 외부 연계(GitHub/Calendar) 핵심 엔진
+"""
+
 import streamlit as st
 import pandas as pd
 import yfinance as yf
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 import mojito 
-import datetime  # <--- 추가
-import calendar  # <--- 추가
-from urllib.parse import quote # <--- 추가
+import datetime 
+import calendar 
+from urllib.parse import quote
 import re
 import requests
 from github import Github
-# --- [1] 시세 조회 및 유틸 함수 ---
+
+# -----------------------------------------------------------
+# [SECTION 1] 시세 조회 및 유틸리티 함수
+# -----------------------------------------------------------
+
 def _fetch_price_raw(broker, code, category):
+    """
+    한투 API 및 yfinance를 활용하여 종목의 현재가를 조회합니다.
+    1순위: 한국투자증권 API (국내) / 2순위: yfinance (해외 및 국내 백업)
+    """
     try:
         code_str = str(code).strip()
-        # 1. 국내 종목 (한투 API)
+        # 1. 국내 종목 (한투 API 시도)
         if category == '국내':
             try:
                 resp = broker.fetch_price(code_str)
@@ -24,7 +38,7 @@ def _fetch_price_raw(broker, code, category):
             except Exception:
                 pass
         
-        # 2. 해외/국내 백업 (yfinance)
+        # 2. 해외/국내 백업 (yfinance 시도)
         ticker_code = f"{code_str}.KS" if category == '국내' else code_str
         ticker = yf.Ticker(ticker_code)
         price = ticker.fast_info.get('last_price')
@@ -37,6 +51,7 @@ def _fetch_price_raw(broker, code, category):
         return None
 
 def get_safe_price(broker, code, category):
+    """네트워크 오류에 대비하여 시세 조회를 2회 재시도합니다."""
     for _ in range(2):
         price = _fetch_price_raw(broker, code, category)
         if price is not None: return price
@@ -44,6 +59,7 @@ def get_safe_price(broker, code, category):
     return None
 
 def classify_asset(row):
+    """종목명과 코드를 분석하여 자산의 유형(커버드콜, 채권, 리츠 등)을 분류합니다."""
     name, symbol = str(row.get('종목명', '')).upper(), str(row.get('종목코드', '')).upper()
     if any(k in name or k in symbol for k in ['커버드콜', 'COVERED', 'QYLD', 'JEPI', 'JEPQ', 'NVDY', 'TSLY', 'QQQI']): return '🛡️ 커버드콜'
     if '혼합' in name: return '⚖️ 혼합형'
@@ -52,6 +68,7 @@ def classify_asset(row):
     return '📈 주식형'
 
 def get_hedge_status(name, category):
+    """종목명을 기반으로 환헤지(H) 여부 및 환노출 상태를 판별합니다."""
     name_str = str(name).upper()
     if category == '해외': return "💲달러(직투)"
     if "환노출" in name_str or "UNHEDGED" in name_str: return "⚡환노출"
@@ -59,12 +76,14 @@ def get_hedge_status(name, category):
     return "⚡환노출" if any(x in name_str for x in ['미국', 'GLOBAL', 'S&P500', '나스닥', '국제']) else "-"
 
 
+# -----------------------------------------------------------
+# [SECTION 2] 구글 캘린더 연동 엔진
+# -----------------------------------------------------------
+
 def calculate_google_calendar_url(ticker_name, pay_date_str):
     """
-    [최종 완벽 버전] 
-    1. "매월 15일" -> 15일 인식
-    2. "매월 마지막 영업일" / "말일" -> 자동으로 그 달의 마지막 날짜(28~31) 계산
-    3. 주말/공휴일 피해서 D-3 안전 매수일 계산
+    종목별 배당락일을 기반으로 구글 캘린더 등록 URL을 생성합니다.
+    D-3 안전 매수일 계산 및 주말 보정 로직이 포함되어 있습니다.
     """
     try:
         import datetime, calendar, re
@@ -77,9 +96,7 @@ def calculate_google_calendar_url(ticker_name, pay_date_str):
             pay_date_str = str(pay_date_str)
         clean_str = pay_date_str.replace(" ", "").strip()
 
-        # -------------------------------
-        # 날짜 파싱 로직
-        # -------------------------------
+        # [날짜 파싱 로직] 매월/말일/특정일자별 타겟 날짜 도출
         if "매월" in clean_str:
             if "마지막" in clean_str or "말일" in clean_str or "월말" in clean_str:
                 last_day_current = calendar.monthrange(today.year, today.month)[1]
@@ -132,19 +149,15 @@ def calculate_google_calendar_url(ticker_name, pay_date_str):
         if target_date is None:
             return None
 
-        # -------------------------------
-        # D-3 안전 매수일 계산 (주말 보정)
-        # -------------------------------
+        # [D-3 안전 매수일 계산] 주말(토, 일)일 경우 금요일로 앞당김
         safe_buy_date = target_date - datetime.timedelta(days=3)
-        while safe_buy_date.weekday() >= 5:  # 토(5), 일(6)
+        while safe_buy_date.weekday() >= 5: 
             safe_buy_date -= datetime.timedelta(days=1)
 
         start_str = safe_buy_date.strftime("%Y%m%d")
         end_str = (safe_buy_date + datetime.timedelta(days=1)).strftime("%Y%m%d")
 
-        # -------------------------------
-        # 구글 캘린더 URL 조립
-        # -------------------------------
+        # [구글 캘린더 URL 조립] 제목 및 상세 안내 문구 포함
         title = quote(f"💰 [{ticker_name}] 매수 준비 (D-3)")
         details = quote(
             f"배당 기준일(예상): {target_date}\n"
@@ -167,9 +180,16 @@ def calculate_google_calendar_url(ticker_name, pay_date_str):
         return None
 
 
-# --- [2] 메인 데이터 로직 (스마트 계산 복구) ---
+# -----------------------------------------------------------
+# [SECTION 3] 메인 데이터 로드 및 병렬 처리 엔진
+# -----------------------------------------------------------
+
 @st.cache_data(ttl=600, show_spinner=False)
 def load_and_process_data(df_raw, is_admin=False):
+    """
+    CSV 원본 데이터를 가공하여 실시간 시세와 배당률이 포함된 최종 데이터프레임을 생성합니다.
+    ThreadPoolExecutor를 사용하여 시세 조회를 병렬로 처리합니다.
+    """
     if df_raw.empty: return pd.DataFrame()
     
     try:
@@ -185,6 +205,7 @@ def load_and_process_data(df_raw, is_admin=False):
     results = [None] * len(df_raw)
     
     def process_row(idx, row):
+        """각 행(종목)별 시세 조회 및 스마트 배당률 계산 로직"""
         try:
             code = str(row.get('종목코드', '')).strip()
             name = str(row.get('종목명', '')).strip()
@@ -193,62 +214,39 @@ def load_and_process_data(df_raw, is_admin=False):
             price = get_safe_price(broker, code, category)
             if not price: return idx, None
 
-            # -------------------------------------------------------
-            # [업그레이드] 스마트 배당률 결정 로직 (API 시세 연동 유지)
-            # -------------------------------------------------------
-            # ▼▼▼▼▼ [여기서부터 덮어쓰기 시작하세요] ▼▼▼▼▼
-
-            # -------------------------------------------------------
-            # [업그레이드 완료] 교차 검증 및 우선순위 로직
-            # -------------------------------------------------------
-            
-            # 1. 사용할 데이터 후보군 준비
-            crawled_div = float(row.get('연배당금_크롤링', 0)) # 기계가 긁어온 값 (1순위)
-            manual_div = float(row.get('연배당금', 0))       # 수동으로 적은 값 (2순위)
+            # [스마트 배당률 결정] 크롤링 값과 수동 입력값 교차 검증
+            crawled_div = float(row.get('연배당금_크롤링', 0))
+            manual_div = float(row.get('연배당금', 0))        
             
             try: months = int(row.get('신규상장개월수', 0))
             except: months = 0
 
-            # 2. 분자(연배당금) 확정 ("어떤 돈을 믿을 것인가?")
-            
-            # -----------------------------------------------------------
-            # [핵심 로직] 분자(배당금) 확정
-            # -----------------------------------------------------------
+            # (A) 신규 상장주: 상장 이후 누적 배당금을 개월수로 나누어 연환산 추정
             if 0 < months < 12:
-                # [수정] 신규 상장주는 '지금까지 받은 총액'을 '개월수'로 나눠야 함
-                # 예: SOL 금커버드콜 (363원, 9개월) -> (363 / 9) * 12 = 484원 (약 3.2%)
-                
-                # 수동 데이터가 합계라고 가정하고 월평균을 구함
                 if manual_div > 0:
                     monthly_avg = manual_div / months
                     target_div = monthly_avg * 12
                 else:
-                    # 수동 데이터도 없으면 크롤링 값 시도
                     target_div = crawled_div if crawled_div > 0 else 0
-                
                 display_name = f"{name} ⭐"
 
-            # (B) 일반 종목 -> 크롤링 데이터 신뢰 (없으면 수동)
+            # (B) 일반 종목: 크롤링 데이터 우선, 없을 시 수동 데이터 활용
             else:
                 if crawled_div > 0:
-                    target_div = crawled_div # 야후/네이버가 가져온 값
+                    target_div = crawled_div 
                 else:
-                    target_div = manual_div  # 기존 수동 값
-                
+                    target_div = manual_div  
                 display_name = name
 
-            # 3. 최종 실시간 배당률 계산
-            # 분자(확정된 배당금) / 분모(한투 실시간 현재가)
+            # 최종 실시간 배당률 계산 (배당금 / 현재가)
             yield_val = (target_div / price) * 100
 
-            # 필터링 및 서식 지정
+            # 비정상 수치 필터링 (2% ~ 25% 범위 외 제외)
             if not is_admin and (yield_val < 2.0 or yield_val > 25.0): return idx, None
             if is_admin and (yield_val < 2.0 or yield_val > 25.0): display_name = f"🚫 {display_name}"
 
             price_fmt = f"{int(price):,}원" if category == '국내' else f"${price:.2f}"
 
-            # ▲▲▲▲▲ [여기까지 덮어쓰고 바로 return idx, {...} 로 이어집니다] ▲▲▲▲▲
-            
             return idx, {
                 '코드': code, 
                 '종목명': display_name,
@@ -261,13 +259,14 @@ def load_and_process_data(df_raw, is_admin=False):
                 '분류': category,
                 '자산유형': classify_asset(row),
                 '캘린더링크': calculate_google_calendar_url(display_name, str(row.get('배당락일', '-'))),
-                'pure_name': name.replace("🚫 ", "").replace(" (필터대상)", ""), # 순수 이름 저장
+                'pure_name': name.replace("🚫 ", "").replace(" (필터대상)", ""), 
                 '신규상장개월수': months,
                 '배당기록': str(row.get('배당기록', ''))
             }
         except:
             return idx, None
 
+    # 병렬 실행 (최대 5개 스레드)
     with ThreadPoolExecutor(max_workers=5) as executor:
         futures = {executor.submit(process_row, idx, row): idx for idx, row in df_raw.iterrows()}
         for future in as_completed(futures):
@@ -277,45 +276,67 @@ def load_and_process_data(df_raw, is_admin=False):
     final_data = [r for r in results if r is not None]
     return pd.DataFrame(final_data).sort_values('연배당률', ascending=False) if final_data else pd.DataFrame()
 
-# --- [3] 데이터 로드 ---
+
+# -----------------------------------------------------------
+# [SECTION 4] 데이터 파일 관리 (GitHub/CSV)
+# -----------------------------------------------------------
+
 @st.cache_data(ttl=600)
 def load_stock_data_from_csv():
+    """GitHub 저장소에서 최신 종목 마스터 데이터를 로드합니다."""
     url = "https://raw.githubusercontent.com/broadcast777/my-dividend-app/main/stocks.csv"
     try:
-        return pd.read_csv(url, dtype={'종목코드': str})
-    # [안전장치] 연배당금_크롤링 열이 없으면 0.0으로 생성
+        df = pd.read_csv(url, dtype={'종목코드': str})
         if '연배당금_크롤링' not in df.columns:
             df['연배당금_크롤링'] = 0.0
-            
         return df
     except:
         return pd.DataFrame()
-        
-# --- [4] 배당금 갱신 로직 (스마트 Rolling) ---
+
+def save_to_github(df):
+    """관리자용: 수정된 데이터프레임을 GitHub 레포지토리에 커밋하여 반영합니다."""
+    try:
+        token = st.secrets["github"]["token"]
+        repo_name = st.secrets["github"]["repo_name"]
+        file_path = st.secrets["github"]["file_path"]
+
+        g = Github(token)
+        repo = g.get_repo(repo_name)
+        contents = repo.get_contents(file_path)
+        csv_data = df.to_csv(index=False).encode("utf-8")
+
+        repo.update_file(
+            path=contents.path,
+            message="🤖 관리자 패널에서 데이터 자동 갱신",
+            content=csv_data,
+            sha=contents.sha
+        )
+        return True, "✅ 깃허브 저장 성공! (반영까지 1~2분 걸립니다)"
+    except Exception as e:
+        return False, f"❌ 저장 실패: {str(e)}"
+
+
+# -----------------------------------------------------------
+# [SECTION 5] 배당금 및 포트폴리오 유틸리티
+# -----------------------------------------------------------
+
 def update_dividend_rolling(current_history_str, new_dividend_amount):
+    """최근 12개월 배당 기록을 갱신하고 연간 합계를 산출합니다. (Rolling Window)"""
     if pd.isna(current_history_str) or str(current_history_str).strip() == "":
         history = []
     else:
         history = [int(float(x)) for x in str(current_history_str).split('|')]
 
-    # 12개가 꽉 찼을 때만 맨 앞을 삭제 (신규 상장주는 그냥 쌓임)
     if len(history) >= 12:
         history.pop(0)
         
     history.append(int(new_dividend_amount))
-    
     new_annual_total = sum(history)
     new_history_str = "|".join(map(str, history))
-    
     return new_annual_total, new_history_str
 
-# [logic.py 맨 아래에 추가]
-
 def generate_portfolio_ics(selected_stocks_data):
-    """
-    선택된 종목들의 일정 데이터를 받아서 
-    하나의 통합 ICS(캘린더 파일) 텍스트를 생성함
-    """
+    """선택된 포트폴리오 종목들의 배당락 일정을 통합 ICS 파일 형식으로 생성합니다."""
     cal_content = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
@@ -327,23 +348,11 @@ def generate_portfolio_ics(selected_stocks_data):
     today = datetime.date.today()
     
     for item in selected_stocks_data:
-        # 1. 데이터 가져오기
         name = item.get('종목', '종목명')
         pay_date_str = item.get('배당락일', '-')
-        
-        # 2. 날짜 계산 (아까 그 로직 재사용)
-        # (코드를 재사용하기 위해 logic.py 안의 함수를 호출하거나 로직을 가져옴)
-        # 여기서 간단히 처리하기 위해 calculate_google_calendar_url 내부 로직을 
-        # 살짝 변형해서 날짜만 추출하는 게 정석이지만, 
-        # 편의상 '배당락일' 텍스트를 파싱하는 핵심 로직만 가져옵니다.
-        
-        target_date = None
-        # ---------------------------------------------------------
-        # 2. 날짜 계산 및 이월 로직 (정밀 수리 부위)
-        # ---------------------------------------------------------
         clean_str = str(pay_date_str).replace(" ", "").strip()
         
-        # [내부 함수] 기준일 구하기 (함수 중복 방지를 위해 루프 안에서 정의하거나 밖으로 빼도 됩니다)
+        # 내부 헬퍼: 타겟 날짜 도출
         def get_target_date_inner(y, m, txt):
             if "마지막" in txt or "말일" in txt or "월말" in txt:
                 return datetime.date(y, m, calendar.monthrange(y, m)[1])
@@ -357,26 +366,23 @@ def generate_portfolio_ics(selected_stocks_data):
                     return datetime.date(y, m, min(d, last_d))
             return None
 
-        # [내부 함수] 안전 매수일 구하기
+        # 내부 헬퍼: 안전 매수일 도출
         def get_safe_buy_date_inner(base_d):
             s_d = base_d - datetime.timedelta(days=3)
             while s_d.weekday() >= 5: s_d -= datetime.timedelta(days=1)
             return s_d
 
-        # [단계 1] 이번 달 기준으로 일단 계산
         target_date = get_target_date_inner(today.year, today.month, clean_str)
         
-        # 날짜 형식이 특이한 경우(2024.12.31 등) 예외 처리
         if not target_date:
             try:
                 dt_part = clean_str.split("(")[0].replace(".", "-")
                 target_date = datetime.datetime.strptime(dt_part, "%Y-%m-%d").date()
             except: continue
 
-        # [단계 2] 안전 매수일 도출
         safe_buy_date = get_safe_buy_date_inner(target_date)
 
-        # [단계 3] 핵심: 매수 마감일이 오늘보다 전이라면 다음 달로 이월
+        # 이미 지난 일정은 다음 달로 자동 이월
         is_recurring = any(x in clean_str for x in ["매월", "월말", "월초"])
         if is_recurring and safe_buy_date < today:
             next_m = today.month + 1 if today.month < 12 else 1
@@ -384,53 +390,44 @@ def generate_portfolio_ics(selected_stocks_data):
             target_date = get_target_date_inner(next_y, next_m, clean_str)
             safe_buy_date = get_safe_buy_date_inner(target_date)
         elif not is_recurring and safe_buy_date < today:
-            continue # 확정 날짜가 지났으면 일정에서 제외
+            continue
 
-        # ---------------------------------------------------------
-        # 3. ICS 포맷 생성 (여기서부터는 기존 코드와 연결)
-        # ---------------------------------------------------------
-            
-            # ICS 포맷 생성
-            dt_start = safe_buy_date.strftime("%Y%m%d")
-            dt_end = (safe_buy_date + datetime.timedelta(days=1)).strftime("%Y%m%d")
-            
-            event = [
-                "BEGIN:VEVENT",
-                f"DTSTART;VALUE=DATE:{dt_start}",
-                f"DTEND;VALUE=DATE:{dt_end}",
-                f"SUMMARY:💰 [{name}] 매수 준비 (D-3)",  # 제목 변경됨
-                f"DESCRIPTION:배당 기준일(예상): {target_date}\\n"  # 내용 변경됨
-                  f"✅ 안전하게 오늘 매수하세요! (D-3일전)\\n\\n"
-                  f"⚠️ 필독: 본 알림은 과거 기록 기반의 추정일입니다.\\n"
-                  f"실제 지급일은 운용사 사정에 따라 변동될 수 있으니, "
-                  f"매수 전 반드시 증권사/공시를 통해 확정 일자를 확인하시기 바랍니다.",
-                "STATUS:CONFIRMED",
-                "sequence:0",
-                "END:VEVENT"
-            ]
-            cal_content.extend(event)
-        # ▲▲▲ [여기까지 덮어쓰기 끝] ▲▲▲
+        # ICS 이벤트 블록 생성
+        dt_start = safe_buy_date.strftime("%Y%m%d")
+        dt_end = (safe_buy_date + datetime.timedelta(days=1)).strftime("%Y%m%d")
+        
+        event = [
+            "BEGIN:VEVENT",
+            f"DTSTART;VALUE=DATE:{dt_start}",
+            f"DTEND;VALUE=DATE:{dt_end}",
+            f"SUMMARY:💰 [{name}] 매수 준비 (D-3)",
+            f"DESCRIPTION:배당 기준일(예상): {target_date}\\n"
+              f"✅ 안전하게 오늘 매수하세요! (D-3일전)\\n\\n"
+              f"⚠️ 필독: 본 알림은 과거 기록 기반의 추정일입니다.\\n"
+              f"실제 지급일은 운용사 사정에 따라 변동될 수 있으니, "
+              f"매수 전 반드시 증권사/공시를 통해 확정 일자를 확인하시기 바랍니다.",
+            "STATUS:CONFIRMED",
+            "sequence:0",
+            "END:VEVENT"
+        ]
+        cal_content.extend(event)
 
     cal_content.append("END:VCALENDAR")
     return "\n".join(cal_content)
 
 
-# [logic.py]
+# -----------------------------------------------------------
+# [SECTION 6] 실시간 배당 정보 크롤링 (Hybrid)
+# -----------------------------------------------------------
 
 def fetch_dividend_yield_hybrid(code, category):
     """
-    1단계: 한투 API (국내 전용)
-    2단계: 야후 파이낸스 (국내 백업 + 해외 메인)
-    3단계: 네이버 금융 (국내 최후 수단)
-    * 해외 주식(ETF) 로직 대폭 강화 (현재가 조회 실패 방어)
+    한투 API, 야후 파이낸스, 네이버 금융을 교차 활용하여 실시간 배당수익률을 조회합니다.
     """
     code = str(code).strip()
     
-    # ===============================================
-    # [영역 1] 🇰🇷 국내 주식 (한투 -> 야후 -> 네이버)
-    # ===============================================
+    # [국내 주식 조회 로직]
     if category == '국내':
-        # 1. 한투 API
         try:
             broker = mojito.KoreaInvestment(
                 api_key=st.secrets["kis"]["app_key"],
@@ -445,41 +442,30 @@ def fetch_dividend_yield_hybrid(code, category):
                     return float(yield_str), "✅ 한투 API"
         except: pass
 
-        # 2. 야후 파이낸스 (국내 백업)
         try:
             ticker_code = f"{code}.KS"
             stock = yf.Ticker(ticker_code)
-            
-            # Info 확인
             dy = stock.info.get('dividendYield')
             if dy and dy > 0: return round(dy * 100, 2), "✅ 야후(Info)"
-            
-            # 직접 계산
             divs = stock.dividends
             if not divs.empty:
                 if divs.index.tz is not None: divs.index = divs.index.tz_localize(None)
                 one_year_ago = pd.Timestamp.now() - pd.Timedelta(days=365)
                 recent_total = divs[divs.index >= one_year_ago].sum()
-                
-                # 현재가 (국내)
                 price = stock.fast_info.get('last_price')
                 if not price: 
                     hist = stock.history(period='1d')
                     if not hist.empty: price = hist['Close'].iloc[-1]
-                
                 if price and price > 0:
                     yield_cal = (recent_total / price) * 100
                     if yield_cal > 0: return round(yield_cal, 2), "✅ 야후(Rolling)"
         except: pass
 
-        # 3. 네이버 금융 (최후의 보루)
         try:
             url = f"https://finance.naver.com/item/main.naver?code={code}"
             headers = {'User-Agent': 'Mozilla/5.0'}
             response = requests.get(url, headers=headers)
             response.encoding = 'euc-kr' 
-            
-            # ETF용 Table 파싱
             dfs = pd.read_html(response.text)
             for df in dfs:
                 table_str = df.to_string()
@@ -492,8 +478,6 @@ def fetch_dividend_yield_hybrid(code, category):
                                     num = float(val.replace("%", "").strip())
                                     if 0 < num < 30: return num, "✅ 네이버(Table)"
                                 except: pass
-                                
-            # ID 파싱
             if '_dvr' in response.text:
                 part = response.text.split('<em id="_dvr">')[1]
                 val = part.split('</em>')[0]
@@ -502,112 +486,43 @@ def fetch_dividend_yield_hybrid(code, category):
             return 0.0, f"❌ 네이버 에러: {str(e)}"
 
         return 0.0, "⚠️ 데이터 없음 (국내)"
-        # [logic.py] fetch_dividend_yield_hybrid 함수 내부...
 
-    # ===============================================
-    # [영역 2] 🇺🇸 해외 주식 (소수점 자동 보정 탑재)
-    # ===============================================
+    # [해외 주식 조회 로직]
     else:
         try:
             stock = yf.Ticker(code)
-            
-            # -----------------------------------------------------------
-            # [1순위] 배당금 내역으로 직접 계산 (가장 정확함)
-            # -----------------------------------------------------------
             try:
                 divs = stock.dividends
-                
                 if not divs.empty:
                     if divs.index.tz is not None:
                         divs.index = divs.index.tz_localize(None)
-                    
                     one_year_ago = pd.Timestamp.now() - pd.Timedelta(days=365)
                     recent_divs = divs[divs.index >= one_year_ago]
                     recent_total = recent_divs.sum()
-                    
                     price = stock.fast_info.get('last_price')
                     if not price or price <= 0:
                         hist = stock.history(period="1d")
                         if not hist.empty: price = hist['Close'].iloc[-1]
-                    
                     if price and price > 0 and recent_total > 0:
                         yield_cal = (recent_total / price) * 100
-                        
-                        # [🚨 눈치 챙겨 로직 1] 
-                        # 계산값이 100%를 넘으면 뭔가 이상한 거임 (데이터 단위 오류 등)
-                        # 혹시 모르니 소수점 조정 시도
-                        if yield_cal > 50: 
-                            yield_cal = yield_cal / 100
-                            
-                        # 그래도 50% 넘으면 에러 처리 (배당률이 50%일 리가 없음)
+                        if yield_cal > 50: yield_cal = yield_cal / 100
                         if 0 < yield_cal < 50:
                             return round(yield_cal, 2), f"✅ 야후(계산:${recent_total:.2f})"
-            except:
-                pass 
+            except: pass 
 
-            # -----------------------------------------------------------
-            # [2순위] Info에서 가져오기 (백업용)
-            # -----------------------------------------------------------
             dy = stock.info.get('dividendYield')
             if dy and dy > 0: 
-                # [🚨 눈치 챙겨 로직 2]
-                # 야후가 0.041(정상)이 아니라 4.1(비정상)을 줬을 때 방어
-                # 일단 100을 곱해보고
                 calc_dy = dy * 100
-                
-                # 50%가 넘어가면 "아, 이거 이미 퍼센트구나" 하고 100으로 나눔
-                if calc_dy > 50:
-                    calc_dy = dy # 그냥 원래 값(4.1)을 씀
-                
+                if calc_dy > 50: calc_dy = dy 
                 return round(calc_dy, 2), "✅ 야후(Info)"
-                
             return 0.0, "⚠️ 데이터 없음"
-            
         except Exception as e:
             return 0.0, f"❌ 해외 에러: {str(e)}"
 
-# [logic.py 파일 맨 아래에 추가하세요]
-
-def save_to_github(df):
-    """
-    [기능] 현재 수정된 데이터프레임(df)을 깃허브 stocks.csv 파일에 덮어쓰기 (Commit)
-    """
-    try:
-        # 1. secrets.toml에서 열쇠와 주소 꺼내기
-        token = st.secrets["github"]["token"]
-        repo_name = st.secrets["github"]["repo_name"]
-        file_path = st.secrets["github"]["file_path"]
-
-        # 2. 깃허브 문 따고 들어가기
-        g = Github(token)
-        repo = g.get_repo(repo_name)
-
-        # 3. 기존 파일 정보 가져오기 (덮어쓰려면 'SHA'라는 기존 파일 주민번호가 필요함)
-        contents = repo.get_contents(file_path)
-
-        # 4. 데이터프레임을 CSV 텍스트로 변환
-        csv_data = df.to_csv(index=False).encode("utf-8")
-
-        # 5. 파일 업데이트 (Commit)
-        repo.update_file(
-            path=contents.path,
-            message="🤖 관리자 패널에서 데이터 자동 갱신",  # 커밋 메시지
-            content=csv_data,
-            sha=contents.sha
-        )
-        return True, "✅ 깃허브 저장 성공! (반영까지 1~2분 걸립니다)"
-
-    except Exception as e:
-        return False, f"❌ 저장 실패: {str(e)}"
-
-# ▼▼▼ [1단계] 여기에 새 함수 추가 (save_to_github 바로 위에 붙여넣으세요) ▼▼▼
-
 def fetch_dividend_amount_hybrid(code, category):
     """
-    [선생님 발견 기반 최종 수정]
-    1. 일반 주식은 '배당금(dividend)' API 사용
-    2. ETF(KODEX, TIGER 등)는 '분배금(distribution)' API 사용 (모바일 데이터 원천)
-    3. 네이버가 안 되면 야후로 2차 방어
+    네이버 모바일 API 및 야후 파이낸스를 활용하여 실시간 연간 배당금(분배금) 총액을 조회합니다.
+    ETF의 경우 분배금(distribution) API를 우선 활용합니다.
     """
     import requests
     import yfinance as yf
@@ -615,9 +530,6 @@ def fetch_dividend_amount_hybrid(code, category):
     
     code = str(code).strip()
     
-    # =======================================================
-    # 1. 국내 (네이버 금융 모바일 API)
-    # =======================================================
     if category == '국내':
         try:
             code = code.zfill(6)
@@ -626,81 +538,53 @@ def fetch_dividend_amount_hybrid(code, category):
                 'Referer': 'https://m.stock.naver.com/'
             }
             
-            # ---------------------------------------------------
-            # [시도 A] 일반 주식 배당금 창구
-            # ---------------------------------------------------
+            # [시도 A] 일반 주식 배당금 조회
             url_stock = f"https://api.stock.naver.com/stock/{code}/dividend"
             res = requests.get(url_stock, headers=headers, timeout=3)
-            
             if res.status_code == 200:
                 data = res.json()
-                # 데이터 구조 파악
                 items = data.get('dividendHistory', []) or data.get('items', [])
                 if items:
-                    # 최신 배당금 추출
                     latest = items[0]
                     val = latest.get('dividendPerShare') or latest.get('dividend') or 0
                     val = float(str(val).replace(',', ''))
                     if val > 0:
                         return val * 12, "✅ 네이버(주식)"
 
-            # ---------------------------------------------------
-            # [시도 B] ETF 분배금 창구 (선생님이 찾은 그곳!)
-            # ---------------------------------------------------
-            # 404가 떴거나 데이터가 없으면 여기로 옵니다.
+            # [시도 B] ETF 분배금 조회
             url_etf = f"https://api.stock.naver.com/etf/{code}/distribution"
             res = requests.get(url_etf, headers=headers, timeout=3)
-            
             if res.status_code == 200:
                 data = res.json()
-                # ETF는 'result' > 'distributionInfoList' 안에 데이터가 있음
                 dist_list = data.get('result', {}).get('distributionInfoList', [])
-                
                 if dist_list:
-                    # 가장 최근 분배금 (0번 인덱스가 최신)
                     latest_dist = dist_list[0].get('amount', 0)
                     latest_dist = float(str(latest_dist).replace(',', ''))
-                    
                     if latest_dist > 0:
-                        # ETF도 월배당 가정 연환산 (최근 1회분 * 12)
-                        # (만약 1년치 합계를 원하시면 로직 변경 가능하지만, 현재 기조 유지)
                         return latest_dist * 12, "✅ 네이버(ETF)"
-
-        except Exception as e:
-            # 국내 실패 시 조용히 야후로 넘어감 (로그는 생략하거나 필요시 출력)
+        except Exception:
             pass
             
-    # =======================================================
-    # 2. 해외 및 국내 실패 시 (야후 파이낸스)
-    # =======================================================
-    # (위에서 못 찾았으면 야후로 2차 시도)
+    # [해외 및 국내 백업 조회] 야후 파이낸스 활용
     try:
-        # 국내 종목이면 .KS 붙이기
-        if category == '국내':
-            ticker_symbol = f"{code}.KS"
-        else:
-            ticker_symbol = code
-            
+        ticker_symbol = f"{code}.KS" if category == '국내' else code
         stock = yf.Ticker(ticker_symbol)
         
-        # 1순위: Info의 Rate
+        # 1순위: API 제공 Rate
         rate = stock.info.get('dividendRate')
         if rate and rate > 0:
             return float(rate), "✅ 야후(Rate)"
             
-        # 2순위: 1년치 합산
+        # 2순위: 최근 1년치 실제 배당금 합산
         hist = stock.dividends
         if not hist.empty:
             if hist.index.tz is not None:
                 hist.index = hist.index.tz_localize(None)
-            
             one_year_ago = pd.Timestamp.now() - pd.Timedelta(days=365)
             recent_hist = hist[hist.index >= one_year_ago]
             total = recent_hist.sum()
-            
             if total > 0:
                 return float(total), "✅ 야후(합계)"
-                
     except:
         pass
 
