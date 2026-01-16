@@ -756,10 +756,18 @@ def main():
                 else:
                     st.error("비밀번호 불일치")
 
-    # 3. 사이드바 UI 및 인증
+    # ---------------------------------------------------------
+    # 3. [긴급 추가] 필수 세션 변수 초기화 (연료 주입)
+    # ---------------------------------------------------------
+    if "total_invest" not in st.session_state:
+        st.session_state.total_invest = 30000000  # 기본 투자금 3,000만원
+    if "selected_stocks" not in st.session_state:
+        st.session_state.selected_stocks = []     # 선택 종목 리스트 초기화
+
+    # 4. 사이드바 UI 및 인증
     render_login_ui()
     
-    # 4. 상단 로그인 버튼 구역
+    # 5. 상단 로그인 버튼 구역
     auth_container = st.container(border=True)
     with auth_container:
         if not st.session_state.get("is_logged_in", False):
@@ -794,22 +802,22 @@ def main():
             nickname = user.email.split("@")[0] if user.email else "User"
             st.success(f"👋 **{nickname}**님, 환영합니다! 모든 기능이 활성화되었습니다.")
 
-    # 5. 데이터 로드
+    # 6. 데이터 로드
     df_raw = logic.load_stock_data_from_csv()
     if df_raw.empty: 
         logger.error("❌ 데이터 로드 실패: CSV 파일이 비어있음")
         st.stop()
 
-    # 6. 관리자 도구 렌더링
+    # 7. 관리자 도구 렌더링
     if is_admin:
         render_admin_tools(df_raw)
 
-    # 7. 데이터 엔진 가동
+    # 8. 데이터 엔진 가동
     with st.spinner('⚙️ 배당 데이터베이스 엔진 가동 중...'):
         df = logic.load_and_process_data(df_raw, is_admin=is_admin)
         st.session_state['shared_df'] = df
 
-    # 8. 라우팅 (페이지 전환)
+    # 9. 라우팅 (페이지 전환)
     with st.sidebar:
         if not st.session_state.is_logged_in: st.markdown("---")
         menu = st.radio("📂 **메뉴 이동**", ["💰 배당금 계산기", "📅 월별 로드맵", "📃 전체 종목 리스트"], label_visibility="visible")
@@ -862,7 +870,7 @@ def main():
     elif menu == "📃 전체 종목 리스트":
         render_stocklist_page(df)
 
-    # 9. 하단 정보 및 방문자 추적
+    # 10. 하단 정보 및 방문자 추적
     st.divider()
     st.caption("© 2025 **배당팽이** | 실시간 데이터 기반 배당 대시보드")
     st.caption("First Released: 2025.12.31 | [📝 배당팽이의 배당 투자 일지 구경가기](https://blog.naver.com/dividenpange)")
@@ -914,7 +922,7 @@ def main():
 
     track_visitors()
     
-    # 10. 관리자 유입 로그
+    # 11. 관리자 유입 로그
     if is_admin and supabase:
         with st.expander("🛠️ 관리자 전용: 최근 유입 로그 (최근 5건)", expanded=False):
             try:
