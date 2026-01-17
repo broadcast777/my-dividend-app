@@ -827,21 +827,42 @@ def render_calculator_page(df):
                 months_passed += 1
 
             st.markdown("---")
-            c_res1, c_res2 = st.columns(2)
+            # ... (위쪽 while 루프는 그대로 두세요) ...
+
+            st.markdown("---")
+
+            # [수정] 진행률 및 차감 금액 계산
+            gap_money = max(0, required_asset_at_time - actual_start_bal)
+            progress_rate = (actual_start_bal / required_asset_at_time) if required_asset_at_time > 0 else 0
+
+            # 1. 진행률 시각화
+            st.write(f"📊 **목표 달성 진행률: {min(progress_rate * 100, 100):.1f}%**")
+            st.progress(min(progress_rate, 1.0))
+            
+            # 2. 3단 결과 표시 (최종 / 남은금액 / 기간)
+            c_res1, c_res2, c_res3 = st.columns(3)
             
             if months_passed >= max_months:
                 st.error("⚠️ 현재 적립액으로는 60년 내 달성이 어렵습니다. 적립금을 높여주세요.")
             else:
                 with c_res1:
-                    st.metric("목표 달성 필요 자산", f"{required_asset_at_time/100000000:,.2f} 억원")
-                    st.caption(f"🏁 시작 자산: {actual_start_bal/10000:,.0f}만원")
+                    st.metric("최종 필요 자산", f"{required_asset_at_time/100000000:,.2f} 억원")
+                    st.caption("목표 배당을 위한 몸집")
                 
                 with c_res2:
-                    st.metric("목표 달성까지 소요 기간", f"{months_passed // 12}년 {months_passed % 12}개월")
-                    if apply_inflation_goal:
-                        st.success("✅ **안전 경로:** 구매력 보호 완료!")
+                    if gap_money > 0:
+                        # 시작 자산을 뺀 나머지 금액을 표시 (마이너스 델타로 차감 효과 강조)
+                        st.metric("앞으로 모을 금액", f"{gap_money/100000000:,.2f} 억원", delta=f"-{actual_start_bal/10000:,.0f}만원 (보유)", delta_color="normal")
+                        st.caption("시작 자산 차감 완료")
                     else:
-                        st.info("🚀 **희망 경로:** 현재 가치 기준")
+                        st.success("🎉 이미 자산 목표 달성!")
+                
+                with c_res3:
+                    st.metric("목표 달성 소요 기간", f"{months_passed // 12}년 {months_passed % 12}개월")
+                    if apply_inflation_goal:
+                        st.caption("🛡️ 물가상승률 반영됨")
+                    else:
+                        st.caption("🚀 현재 가치 기준")
 
             if apply_inflation_goal and months_passed < max_months:
                 st.info(f"🛡️ **안전 모드 분석:** {months_passed // 12}년 뒤에는 물가 때문에 월 **{adjusted_target/10000:,.0f}만원**을 받아야 지금의 가치가 유지됩니다.")
@@ -851,8 +872,10 @@ def render_calculator_page(df):
                 st.warning(f"🚨 **현실적 조언:** 목표 달성 시 연간 배당소득(세전)이 2,000만원을 초과하여 **금융소득종합과세** 대상이 될 수 있습니다.")
                 
             st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**
+            
             1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 단순 결과입니다.
-            2. 재투자가 매월 이루어진다는 가정하에 계산된 복리 결과입니다.""")
+            2. 재투자가 매월 이루어진다는 가정하에 계산된 복리 결과입니다.
+            """)
             
 def render_roadmap_page(df):
     """📅 월별 로드맵 페이지 렌더링"""
