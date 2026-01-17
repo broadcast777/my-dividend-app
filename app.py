@@ -244,11 +244,56 @@ def render_admin_tools(df_raw):
                             st.caption(f"원인: {src}")
                             
             st.divider()
-            new_div = st.number_input("이번 달 확정 배당금", value=0, step=10)
-            if st.button("계산 실행", use_container_width=True):
+            # [새로 붙여넣을 코드 시작] =================================
+            st.caption("👇 배당금 업데이트 모드 선택")
+            new_div = st.number_input("이번 달 확정 배당금 (또는 월평균)", value=0, step=10)
+            
+            col_btn1, col_btn2 = st.columns(2)
+            
+            # [버튼 1] 일반적인 1개월 추가 (Rolling)
+            if col_btn1.button("💾 1개월 추가", help="기존 기록 맨 뒤에 이번 달 금액만 추가합니다. (일반 종목용)", use_container_width=True):
                 new_total, new_hist = logic.update_dividend_rolling(cur_hist, new_div)
-                st.success("완료!")
-                st.code(new_hist, language="text")
+                
+                # 데이터 반영
+                df_raw.loc[df_raw['종목코드'] == code, '배당기록'] = new_hist
+                df_raw.loc[df_raw['종목코드'] == code, '연배당금'] = new_total
+                
+                # 배당률 재계산
+                current_price = row.get('현재가', 0)
+                if not current_price: current_price = logic._fetch_price_raw(st.session_state.get('broker'), code, category)
+                
+                if current_price > 0:
+                    new_yield = round((new_total / current_price) * 100, 2)
+                    df_raw.loc[df_raw['종목코드'] == code, '연배당률'] = new_yield
+                    st.success(f"✅ 1개월 추가 완료 ({new_total}원 / {new_yield}%)")
+                
+                # 변경사항 저장 준비
+                st.session_state.df_dirty = df_raw
+
+            # [버튼 2] 1년치 강제 적용 (Forward Yield) - 신규 종목용
+            if col_btn2.button("⚡ 1년치 강제 적용", type="primary", help="과거 기록을 무시하고, 이번 달 금액이 1년 내내 나온다고 가정합니다.", use_container_width=True):
+                # 1. 연배당금을 (이번달 * 12)로 강제 설정
+                new_total = new_div * 12
+                
+                # 2. 기록도 12개월치 꽉 채우기 (그래야 차트가 예쁨)
+                new_hist = "|".join([str(new_div)] * 12)
+                
+                # 데이터 반영
+                df_raw.loc[df_raw['종목코드'] == code, '배당기록'] = new_hist
+                df_raw.loc[df_raw['종목코드'] == code, '연배당금'] = new_total
+                
+                # 배당률 재계산 (이제 4.1% 나올 겁니다)
+                current_price = row.get('현재가', 0)
+                if not current_price: current_price = logic._fetch_price_raw(st.session_state.get('broker'), code, category)
+                
+                if current_price > 0:
+                    new_yield = round((new_total / current_price) * 100, 2)
+                    df_raw.loc[df_raw['종목코드'] == code, '연배당률'] = new_yield
+                    st.success(f"⚡ 1년치 강제 적용 완료! ({new_total}원 / {new_yield}%)")
+                
+                # 변경사항 저장 준비
+                st.session_state.df_dirty = df_raw
+            # [새로 붙여넣을 코드 끝] ===================================
 
         st.markdown("---")
         st.subheader("💾 데이터 저장 및 백업")
