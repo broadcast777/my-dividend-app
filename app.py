@@ -876,6 +876,9 @@ def render_calculator_page(df):
     # -------------------------------------------------------
     # [탭 3] 목표 달성 (여기가 사장님이 원하시던 그 기능!)
     # -------------------------------------------------------
+    # -------------------------------------------------------
+    # [탭 3] 목표 달성 (수정: 긍정적 표시 + 글자 크기 정상화)
+    # -------------------------------------------------------
     with tab3:
         st.subheader("🎯 목표 배당금 역산기")
         
@@ -888,7 +891,7 @@ def render_calculator_page(df):
             monthly_input_goal = st.number_input("매월 적립할 돈 (만원)", 0, 5000, 150, key="goal_monthly_input") * 10000
             use_start = st.checkbox("현재 보유 자산 포함", value=True)
 
-        # [정보 요약 박스] - 사장님 픽!
+        # [정보 요약 박스]
         with st.container(border=True):
             ci1, ci2, ci3 = st.columns(3)
             ci1.metric("📊 평균 연배당률", f"{avg_y:.2f}%")
@@ -918,7 +921,7 @@ def render_calculator_page(df):
             current_bal += monthly_input_goal + div
             months_passed += 1
 
-        # [결과 시각화] - 초록색 차감 표시 적용
+        # [결과 시각화]
         gap = max(0, required_asset - start_bal_static)
         prog = (start_bal_static / required_asset) * 100 if required_asset > 0 else 0
         
@@ -932,9 +935,13 @@ def render_calculator_page(df):
         
         with res2:
             if gap > 0:
-                # [핵심] 보유 자산을 뺀 금액을 초록색 마이너스로 표시
-                st.metric("앞으로 모을 금액", f"{gap/100000000:,.2f} 억원", 
-                          delta=f"-{start_bal_static/10000:,.0f}만원 (보유)", delta_color="inverse")
+                # [수정 포인트 1] 마이너스(-) 대신 체크(✅) 사용 & 색상을 'normal'(기본 녹색)로 변경
+                st.metric(
+                    "앞으로 모을 금액", 
+                    f"{gap/100000000:,.2f} 억원", 
+                    delta=f"✅ {start_bal_static/10000:,.0f}만원 보유 중", 
+                    delta_color="normal"
+                )
             else:
                 st.success("🎉 목표 달성 완료!")
                 
@@ -944,15 +951,18 @@ def render_calculator_page(df):
             else:
                 st.metric("예상 소요 기간", f"{months_passed//12}년 {months_passed%12}개월")
                 st.caption("월 복리 재투자 기준")
-                
-        # [복구된 주의사항 멘트]
-        st.write("") # 간격 좀 띄우고
+
+        # [경고 문구]
+        st.write("") 
         if (target_monthly_goal * 12 / tax_factor) > 20000000:
             st.warning(f"🚨 **현실적 조언:** 목표 달성 시 연간 배당소득(세전)이 2,000만원을 초과하여 **금융소득종합과세** 대상이 될 수 있습니다.")
 
-        st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**
-        1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 단순 결과입니다.
-        2. 재투자가 매월 이루어진다는 가정하에 계산된 복리 결과입니다.""")    
+        # [수정 포인트 2] 텍스트 들여쓰기 제거 (왼쪽으로 바짝 붙임)
+        st.error("""
+**⚠️ 시뮬레이션 활용 시 유의사항**
+1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 단순 결과입니다.
+2. 재투자가 매월 이루어진다는 가정하에 계산된 복리 결과입니다.
+""")
         
 def render_roadmap_page(df):
     """📅 월별 로드맵 페이지 렌더링"""
