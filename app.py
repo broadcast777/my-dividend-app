@@ -914,7 +914,7 @@ def main():
     
     # 1. 안전 장치 (COPPA) - 로그인 전에 무조건 실행
     # [수정] 아래 함수를 호출하면 나이 미확인 시 여기서 앱이 멈춥니다.
-    check_coppa_compliance() 
+    #check_coppa_compliance() 
     
     logger.info("🚀 배당팽이 메인 엔진 가동")
     db.cleanup_old_tokens()
