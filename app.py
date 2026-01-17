@@ -347,44 +347,55 @@ def render_calculator_page(df):
 
     # 6-2. 포트폴리오 시뮬레이션
     with st.expander("🧮 나만의 배당 포트폴리오 시뮬레이션", expanded=True):
-        col1, col2 = st.columns([1, 2])
-        current_invest_val = int(st.session_state.total_invest / 10000)
-        invest_input = col1.number_input("💰 총 투자 금액 (만원)", min_value=100, value=current_invest_val, step=100)
-        st.session_state.total_invest = invest_input * 10000
-        total_invest = st.session_state.total_invest 
+    col1, col2 = st.columns([1, 2])
+    current_invest_val = int(st.session_state.total_invest / 10000)
+    invest_input = col1.number_input("💰 총 투자 금액 (만원)", min_value=100, value=current_invest_val, step=100)
+    st.session_state.total_invest = invest_input * 10000
+    total_invest = st.session_state.total_invest 
 
-        # --- [수정] 종목 검색 기능 (데이터 형식 무관하게 No Results 해결) ---
-        def clean_label(row):
-            code_val = str(row.get('종목코드') or row.get('코드') or '').strip()
-            if '.' in code_val: code_val = code_val.split('.')[0]
-            if code_val.isdigit() and len(code_val) < 6: code_val = code_val.zfill(6)
-            
-            name_val = str(row.get('종목명') or row.get('pure_name') or '').strip()
-            return f"{code_val} {name_val}"
+    # --- 여기부터 expander 내부 ---
+    def clean_label(row):
+        code = str(row.get('종목코드', '')).strip()
+        if '.' in code and code.replace('.', '').isdigit():
+            code = code.split('.')[0]
+        name = str(row.get('종목명', '')).strip()
+        return [f"{code} {name}", code]  # 코드+이름, 코드 단독
 
-        # 검색 옵션 생성 (중복 제거 및 정렬)
-        search_options = sorted(list(set(df.apply(clean_label, axis=1).tolist())))
-        
-        # 이름 기반 매핑 딕셔너리 생성 (검색 성능 최적화)
-        label_map = {opt: opt.split(" ", 1)[-1] if " " in opt else opt for opt in search_options}
+    # 옵션 생성 (flatten + 중복 제거)
+    search_options = list(set([item for sublist in df.apply(clean_label, axis=1).tolist() for item in sublist]))
 
-        default_selected = []
-        if st.session_state.get('selected_stocks'):
-            for s_name in st.session_state.selected_stocks:
-                match = [opt for opt in search_options if opt.endswith(s_name)]
-                if match: default_selected.append(match[0])
+    # 이름 매핑 (UI 표시용)
+    label_map = {}
+    for opt in search_options:
+        if " " in opt:  # "코드 이름"
+            label_map[opt] = opt.split(" ", 1)[1]
+        else:           # "코드" 단독
+            match = df[df['종목코드'] == opt]
+            if not match.empty:
+                label_map[opt] = match.iloc[0]['종목명']
+            else:
+                label_map[opt] = opt
 
-        selected_search = col2.multiselect(
-            "📊 종목 선택 (이름 또는 코드로 검색)", 
-            options=search_options, 
-            default=default_selected,
-            format_func=lambda x: label_map.get(x, x),
-            help="종목코드 숫자(예: 476800)나 종목명을 입력해 보세요!"
-        )
+    # 기본 선택 복원
+    default_selected = []
+    if st.session_state.get('selected_stocks'):
+        for s_name in st.session_state.selected_stocks:
+            match = [opt for opt in search_options if opt.endswith(s_name)]
+            if match: default_selected.append(match[0])
 
-        selected = [label_map.get(opt, opt) for opt in selected_search]
-        st.session_state.selected_stocks = selected
-        # --- [수정 끝] ---
+    # 멀티셀렉트
+    selected_search = col2.multiselect(
+        "📊 종목 선택 (이름 또는 코드로 검색)", 
+        options=search_options, 
+        default=default_selected,
+        format_func=lambda x: label_map.get(x, x),
+        help="종목코드 숫자(예: 476800)나 종목명을 입력해 보세요!"
+    )
+
+    # 선택 결과 → 종목명만 추출
+    selected = [label_map.get(opt, opt) for opt in selected_search]
+    st.session_state.selected_stocks = selected
+
 
         if selected:
             has_foreign_stock = any(df[df['pure_name'] == s_name].iloc[0]['분류'] == '해외' for s_name in selected)
