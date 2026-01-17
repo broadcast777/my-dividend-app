@@ -354,47 +354,47 @@ def render_calculator_page(df):
         total_invest = st.session_state.total_invest 
 
     # --- 여기부터 expander 내부 ---
-    def clean_label(row):
-        code = str(row.get('종목코드', '')).strip()
-        if '.' in code and code.replace('.', '').isdigit():
-            code = code.split('.')[0]
-        name = str(row.get('종목명', '')).strip()
-        return [f"{code} {name}", code]  # 코드+이름, 코드 단독
-
-    # 옵션 생성 (flatten + 중복 제거)
-    search_options = list(set([item for sublist in df.apply(clean_label, axis=1).tolist() for item in sublist]))
-
-    # 이름 매핑 (UI 표시용)
-    label_map = {}
-    for opt in search_options:
-        if " " in opt:  # "코드 이름"
-            label_map[opt] = opt.split(" ", 1)[1]
-        else:           # "코드" 단독
-            match = df[df['종목코드'] == opt]
-            if not match.empty:
-                label_map[opt] = match.iloc[0]['종목명']
-            else:
-                label_map[opt] = opt
-
-    # 기본 선택 복원
-    default_selected = []
-    if st.session_state.get('selected_stocks'):
-        for s_name in st.session_state.selected_stocks:
-            match = [opt for opt in search_options if opt.endswith(s_name)]
-            if match: default_selected.append(match[0])
-
-    # 멀티셀렉트
-    selected_search = col2.multiselect(
-        "📊 종목 선택 (이름 또는 코드로 검색)", 
-        options=search_options, 
-        default=default_selected,
-        format_func=lambda x: label_map.get(x, x),
-        help="종목코드 숫자(예: 476800)나 종목명을 입력해 보세요!"
-    )
-
-    # 선택 결과 → 종목명만 추출
-    selected = [label_map.get(opt, opt) for opt in selected_search]
-    st.session_state.selected_stocks = selected
+        def clean_label(row):
+            code = str(row.get('종목코드', '')).strip()
+            if '.' in code and code.replace('.', '').isdigit():
+                code = code.split('.')[0]
+            name = str(row.get('종목명', '')).strip()
+            return [f"{code} {name}", code]  # 코드+이름, 코드 단독
+    
+        # 옵션 생성 (flatten + 중복 제거)
+        search_options = list(set([item for sublist in df.apply(clean_label, axis=1).tolist() for item in sublist]))
+    
+        # 이름 매핑 (UI 표시용)
+        label_map = {}
+        for opt in search_options:
+            if " " in opt:  # "코드 이름"
+                label_map[opt] = opt.split(" ", 1)[1]
+            else:           # "코드" 단독
+                match = df[df['종목코드'] == opt]
+                if not match.empty:
+                    label_map[opt] = match.iloc[0]['종목명']
+                else:
+                    label_map[opt] = opt
+    
+        # 기본 선택 복원
+        default_selected = []
+        if st.session_state.get('selected_stocks'):
+            for s_name in st.session_state.selected_stocks:
+                match = [opt for opt in search_options if opt.endswith(s_name)]
+                if match: default_selected.append(match[0])
+    
+        # 멀티셀렉트
+        selected_search = col2.multiselect(
+            "📊 종목 선택 (이름 또는 코드로 검색)", 
+            options=search_options, 
+            default=default_selected,
+            format_func=lambda x: label_map.get(x, x),
+            help="종목코드 숫자(예: 476800)나 종목명을 입력해 보세요!"
+        )
+    
+        # 선택 결과 → 종목명만 추출
+        selected = [label_map.get(opt, opt) for opt in selected_search]
+        st.session_state.selected_stocks = selected
 
 
         if selected:
