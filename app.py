@@ -356,10 +356,7 @@ def render_calculator_page(df):
         total_invest = st.session_state.total_invest 
 
   
-        # 💸 월 평균 지출액 입력칸 추가
-        expense_input = col1.number_input("💸 월 평균 지출액 (만원)", min_value=10, 
-                                          value=st.session_state.monthly_expense, step=10)
-        st.session_state.monthly_expense = expense_input
+
         
         selected = col2.multiselect("📊 종목 선택", df['pure_name'].unique(), default=st.session_state.selected_stocks)
         st.session_state.selected_stocks = selected
@@ -887,6 +884,20 @@ def main():
     with st.sidebar:
         if not st.session_state.is_logged_in: st.markdown("---")
         menu = st.radio("📂 **메뉴 이동**", ["💰 배당금 계산기", "📅 월별 로드맵", "📃 전체 종목 리스트"], label_visibility="visible")
+
+        # --- 💡 [바로 여기에 아래 코드를 복사해서 붙여넣으세요] ---
+        st.markdown("---")
+        st.subheader("⚙️ 기본 설정")
+        
+        # 통합 관리되는 생활비 입력 칸
+        expense_input = st.number_input(
+            "💸 나의 월평균 지출 (만원)", 
+            min_value=10, 
+            value=st.session_state.monthly_expense, 
+            step=10,
+            help="이 수치는 배당 방어율 계산의 기준이 됩니다."
+        )
+        st.session_state.monthly_expense = expense_input
         
         # 개인정보 처리방침
         st.markdown("---")
