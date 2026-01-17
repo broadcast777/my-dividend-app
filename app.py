@@ -354,6 +354,12 @@ def render_calculator_page(df):
         invest_input = col1.number_input("💰 총 투자 금액 (만원)", min_value=100, value=current_invest_val, step=100)
         st.session_state.total_invest = invest_input * 10000
         total_invest = st.session_state.total_invest 
+
+  
+        # 💸 월 평균 지출액 입력칸 추가
+        expense_input = col1.number_input("💸 월 평균 지출액 (만원)", min_value=10, 
+                                          value=st.session_state.monthly_expense, step=10)
+        st.session_state.monthly_expense = expense_input
         
         selected = col2.multiselect("📊 종목 선택", df['pure_name'].unique(), default=st.session_state.selected_stocks)
         st.session_state.selected_stocks = selected
@@ -475,7 +481,7 @@ def render_calculator_page(df):
                     try:
                         user = st.session_state.user_info
                         save_mode = st.radio("방식 선택", ["✨ 새로 만들기", "🔄 기존 파일 수정"], horizontal=True, label_visibility="collapsed")
-                        save_data = {"total_money": st.session_state.total_invest, "composition": weights, "summary": {"monthly": total_m, "yield": avg_y}}
+                        save_data = {"total_money": st.session_state.total_invest, "composition": weights, "summary": {"monthly": total_m, "yield": avg_y}, "monthly_expense": st.session_state.monthly_expense}
 
                         if save_mode == "✨ 새로 만들기":
                             c_new1, c_new2 = st.columns([2, 1])
@@ -817,6 +823,12 @@ def main():
         st.session_state.total_invest = 30000000  # 기본 투자금 3,000만원
     if "selected_stocks" not in st.session_state:
         st.session_state.selected_stocks = []     # 선택 종목 리스트 초기화
+        
+    # --- 💡 [바로 아래에 이 줄을 추가하세요] ---
+    if "monthly_expense" not in st.session_state:
+        st.session_state.monthly_expense = 200    # 기본 지출액 250만원 초기화
+
+
 
     # 4. 사이드바 UI 및 인증
     render_login_ui()
@@ -910,6 +922,7 @@ def main():
                                 data = opts[sel_name]['ticker_data']
                                 st.session_state.total_invest = int(data.get('total_money', 30000000))
                                 st.session_state.selected_stocks = list(data.get('composition', {}).keys())
+                                st.session_state.monthly_expense = int(data.get('monthly_expense', 200))
                                 logger.info(f"📂 포트폴리오 로드: {sel_name}")
                                 st.toast("성공적으로 불러왔습니다!", icon="✅")
                                 st.rerun()
