@@ -765,44 +765,41 @@ def render_calculator_page(df):
             st.subheader("🎯 목표 배당금 역산기 (은퇴 시뮬레이터)")
             st.caption("내가 원하는 월급을 받기 위해 얼마를 더 모아야 할지 정밀하게 계산합니다.")
             
-            # [수정] 중복되는 입력창 제거, 물가 보호 토글만 배치
             col_g1, col_g2 = st.columns(2)
             with col_g1:
-                target_monthly_goal = st.number_input("목표 월 배당금 (만원, 세후)", min_value=10, value=166, step=10) * 10000
+                target_monthly_goal = st.number_input("목표 월 배당금 (만원, 세후)", min_value=10, value=166, step=10, key="target_monthly_goal_input") * 10000
                 st.caption(f"💡 월 166.5만원 설정 시 연간 약 1,998만원으로 절세가 가능합니다.")
+                # [부활] 초기 자산 포함 여부 체크박스
+                use_start_money = st.checkbox("현재 설정된 초기 자산을 포함하여 계산", value=True, help="체크 해제 시 '0원'에서 시작하는 제로베이스 시뮬레이션이 진행됩니다.")
             with col_g2:
                 apply_inflation_goal = st.toggle("🛡️ 내 돈의 가치 지키기 (권장)", value=False, help="미래의 물가 상승을 고려하여 목표치를 자동으로 상향 조정하는 안전 모드입니다.")
-                # 앞서 입력한 적립금을 그대로 쓴다는 안내만 남김
-                st.caption(f"💰 적립금 연동: 매월 **{monthly_input/10000:,.0f}만원**씩 추가 납입 가정")
+                # 적립금 연동 안내
+                st.info(f"💰 **적립금 연동:** 상단에서 설정하신 매월 **{monthly_input/10000:,.0f}만원**씩 납입하는 조건으로 계산됩니다.")
 
-            # [수정] 앞선 시뮬레이션에서 설정한 초기 자산과 적립금을 그대로 엔진에 투입
-            use_start_money = True 
-            start_bal_goal = total_invest
+            # 엔진 투입 연료 결정 (초기 자산 포함 여부)
+            start_bal_goal = total_invest if use_start_money else 0
             
             tax_factor = 0.846
             monthly_yld = avg_y / 100 / 12
             
-            # --- [핵심 엔진] 목표 달성 시뮬레이션 (적립금 연동형) ---
+            # --- [핵심 엔진] 목표 달성 시뮬레이션 ---
             current_bal_goal = start_bal_goal
             months_passed = 0
             max_months = 600 
             
             while months_passed < max_months:
-                # 물가 반영 시 타겟 금액 동적 상향
                 if apply_inflation_goal:
                     adjusted_target = target_monthly_goal * ((1.025) ** (months_passed / 12))
                 else:
                     adjusted_target = target_monthly_goal
                 
-                # 목표 자산 역산
                 required_asset_at_time = (adjusted_target / tax_factor) / (avg_y / 100) * 12
                 
                 if current_bal_goal >= required_asset_at_time:
                     break
                     
-                # 복리 증식: (현재자산 * 세후배당) + [연동된 매월 적립금]
                 div_reinvest = current_bal_goal * monthly_yld * tax_factor
-                current_bal_goal += monthly_input + div_reinvest # monthly_input 값을 그대로 사용
+                current_bal_goal += monthly_input + div_reinvest
                 months_passed += 1
 
             st.markdown("---")
@@ -822,19 +819,17 @@ def render_calculator_page(df):
                     else:
                         st.info("🚀 **희망 경로:** 현재 가치 기준")
 
-            # 안내 문구 및 에러 가이드는 기존과 동일
             if apply_inflation_goal and months_passed < max_months:
                 st.info(f"""
-                🔍 **안전 모드 분석 결과** {months_passed // 12}년 뒤 물가 상승을 고려하면 월 **{adjusted_target/10000:,.0f}만원**을 받아야 현재의 구매력이 유지됩니다.
+                🔍 **안전 모드 분석 결과** {months_passed // 12}년 뒤 물가 상승(연 2.5%)을 고려하면 월 **{adjusted_target/10000:,.0f}만원**을 받아야 현재의 **{target_monthly_goal/10000:,.0f}만원**과 같은 가치를 누릴 수 있습니다.
                 """)
             
             target_annual_income = adjusted_target * 12
             if (target_annual_income / tax_factor) > 20000000:
                 st.warning(f"🚨 **현실적 조언:** 목표 달성 시 연간 배당소득(세전)이 2,000만원을 초과하여 **금융소득종합과세** 대상이 될 수 있습니다.")
                 
-            st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**
-            1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 단순 결과입니다.
-            2. 재투자가 이루어진다는 가정하에 계산된 복리 결과입니다.""")
+            st.error("""**⚠️ 시뮬레이션 활용 시 유의사항** 1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 단순 결과입니다.  
+            2. 재투자가 매월 이루어진다는 가정하에 계산된 복리 결과입니다.""")
             
 def render_roadmap_page(df):
     """📅 월별 로드맵 페이지 렌더링"""
