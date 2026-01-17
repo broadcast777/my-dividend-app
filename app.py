@@ -322,6 +322,9 @@ def render_admin_tools(df_raw):
 
 def render_calculator_page(df):
     """💰 배당금 계산기 페이지 렌더링"""
+    # [수정] 변수 초기화 위치 최상단으로 이동 (IndentationError 방지)
+    all_data = []
+
     # 6-1. AI 로보어드바이저
     st.write("")
     col_rec1, col_rec2 = st.columns([2, 1])
@@ -355,59 +358,42 @@ def render_calculator_page(df):
         st.session_state.total_invest = invest_input * 10000
         total_invest = st.session_state.total_invest 
 
-
-
-        
-        # --- [수정 시작] 종목명만 표시 + 코드로 검색 가능한 방탄 로직 ---
-        
-def render_calculator_page(df):
-        # --- [최종 정밀 보정 버전] ---
-        all_data = []
-
-        # 1. '코드 + 이름' 결합 리스트 생성 (데이터 정제)
+        # --- [수정] 종목 검색 기능 (숫자/문자/공백 완벽 대응) ---
         def clean_label(row):
             code = str(row.get('종목코드', '')).strip()
-            # float 형태(476800.0) 및 앞자리 0 잘림 방어
+            # float 형태(476800.0) 방어
             if '.' in code:
                 code = code.split('.')[0]
+            # 한국 종목(6자리 숫자)의 경우 앞자리 0이 잘리지 않게 보정
             if code.isdigit() and len(code) < 6:
-                code = code.zfill(6) # 0052D0 등 문자 혼합형은 그대로, 숫자형만 6자리 보정
-                
-            name = str(row.get('종목명', '')).strip()
-            # 코드와 이름 사이에 명확한 '구분자' 한 칸을 둡니다.
+                code = code.zfill(6)
+            
+            # pure_name이 없는 경우 종목명 사용
+            name = str(row.get('pure_name', row.get('종목명', ''))).strip()
             return f"{code} {name}"
 
-        # 중복 제거 및 리스트화 (순서 유지를 위해 sorted 추천)
+        # 중복 제거 및 리스트화
         search_options = sorted(list(set(df.apply(clean_label, axis=1).tolist())))
 
-        # 2. 기존 세션 데이터 복원 (이름 기반 매칭)
+        # 기존 세션 복원
         default_selected = []
         if st.session_state.get('selected_stocks'):
             for s_name in st.session_state.selected_stocks:
-                # 이름이 정확히 일치하는 옵션을 찾습니다.
                 match = [opt for opt in search_options if opt.split(" ", 1)[-1] == s_name]
                 if match:
                     default_selected.append(match[0])
 
-        # 3. [핵심 UI] 멀티셀렉트 실행
         selected_search = col2.multiselect(
             "📊 종목 선택 (이름 또는 코드로 검색)", 
             options=search_options, 
             default=default_selected,
-            # [안전장치] 공백이 있는 경우에만 잘라내서 이름을 표시
             format_func=lambda x: x.split(" ", 1)[1] if " " in x else x,
             help="종목코드 숫자(예: 476800)나 종목명을 입력해 보세요!"
         )
 
-        # 4. 결과값에서 다시 '순수 이름'만 추출하여 엔진에 전달
-        # 리스트 컴프리헨션에도 안전장치를 추가합니다.
         selected = [opt.split(" ", 1)[1] if " " in opt else opt for opt in selected_search]
         st.session_state.selected_stocks = selected
-  
-
-        
-
-
+        # --- [수정 끝] ---
 
         if selected:
             has_foreign_stock = any(df[df['pure_name'] == s_name].iloc[0]['분류'] == '해외' for s_name in selected)
@@ -440,11 +426,9 @@ def render_calculator_page(df):
                     if not stock_match.empty:
                         s_row = stock_match.iloc[0]
                         cal_link = s_row.get('캘린더링크') 
-                        # --- [수정] 이 부분을 찾아서 아래 코드로 교체하세요 ---
                         ex_date_view = s_row.get('배당락일', '-')
                         
                         if cal_link:
-                            # [핵심] 종목이 딱 1개일 때만 개별 버튼을 노출하여 모바일 가독성 확보
                             if len(selected) == 1:
                                 btn_label = f"📅 {ex_date_view} (D-3 알림)"
                                 if st.session_state.get("is_logged_in", False):
@@ -453,7 +437,6 @@ def render_calculator_page(df):
                                     if st.button(btn_label, key=f"btn_cal_{i}", use_container_width=True):
                                         st.toast("🔒 로그인 후 캘린더에 등록할 수 있습니다!", icon="🔒")
                             else:
-                                # [핵심] 종목이 여러 개면 지저분하지 않게 텍스트로만 표시
                                 st.caption(f"🗓️ 배당락일: **{ex_date_view}**")
                         else:
                             st.caption(f"📅 날짜 미정 ({ex_date_view})")
@@ -468,11 +451,10 @@ def render_calculator_page(df):
                             '환구분': s_row.get('환구분', '-'), '배당락일': s_row.get('배당락일', '-')
                         })
             
-      
+    
             
             timeline.display_sidebar_roadmap(df, weights, total_invest)
             
-            # --- [추가] 여러 종목 선택 시 하단으로 유도하는 안내창 ---
             if len(selected) > 1:
                 st.markdown("""
                     <div style="padding: 12px; border-radius: 8px; background-color: #f0f7ff; border: 1px solid #d0e8ff; margin: 15px 0;">
@@ -584,6 +566,7 @@ def render_calculator_page(df):
                 st.warning(f"🚨 **주의:** 연간 예상 배당금이 **{total_y_div/10000:,.0f}만원**입니다. 금융소득종합과세 대상에 해당될 수 있습니다.")
 
     # 6-7. 심층 분석
+    # [수정] all_data가 항상 초기화되어 있으므로 여기서는 에러가 발생하지 않음
     df_ana = pd.DataFrame(all_data)
     if not df_ana.empty:
         st.write("")
@@ -653,14 +636,12 @@ def render_calculator_page(df):
             monthly_input = st.number_input("➕ 매월 추가 적립 (만원)", min_value=0, max_value=3000, value=150, step=10) * 10000
             monthly_add = monthly_input
             
-            # ISA 한도 자동 조정 경고 (안내용)
             if is_isa_mode and monthly_add > 1666666:
                 st.warning("⚠️ **ISA 연간 한도 제한:** 월 납입금이 **약 166만원(연 2,000만원)**을 초과하면 초과분은 일반 계좌로 자동 계산됩니다.")
             
             months_sim = years_sim * 12
             monthly_yld = avg_y / 100 / 12
             
-            # [수정] 계좌 분리 초기화
             ISA_YEARLY_CAP = 20000000
             ISA_TOTAL_CAP = 100000000
             
@@ -681,8 +662,6 @@ def render_calculator_page(df):
             year_tracker = 0
             yearly_contribution = 0
 
-            # [수정] 메인 시뮬레이션 루프 (오버플로우 로직 적용)
-            # [수정 시작] 메인 시뮬레이션 루프 (오버플로우 로직 및 오류 해결 버전)
             for m in range(1, months_sim + 1):
                 if m // 12 > year_tracker:
                     yearly_contribution = 0
@@ -692,7 +671,6 @@ def render_calculator_page(df):
                     remaining_isa_yearly = max(0, ISA_YEARLY_CAP - yearly_contribution)
                     remaining_isa_total = max(0, ISA_TOTAL_CAP - isa_principal)
                     
-                    # ISA 납입액과 일반계좌 초과분 계산
                     actual_isa_add = min(monthly_add, remaining_isa_yearly, remaining_isa_total)
                     actual_general_add = monthly_add - actual_isa_add
                     
@@ -706,12 +684,9 @@ def render_calculator_page(df):
                     general_bal += monthly_add
                     general_principal += monthly_add
 
-                # 계좌별 배당 및 재투자 로직
-                # 1. ISA 계좌 (비과세 전액 재투자)
                 div_isa = isa_bal * monthly_yld
                 isa_bal += div_isa
                 
-                # 2. 일반 계좌 (15.4% 세후 재투자 비율 적용)
                 div_gen = general_bal * monthly_yld
                 this_tax = div_gen * 0.154
                 total_tax_paid_general += this_tax
@@ -731,7 +706,6 @@ def render_calculator_page(df):
             line = base.mark_line(color='#ff9f43', strokeDash=[5,5]).encode(y='총원금:Q')
             st.altair_chart((area + line).properties(height=280), use_container_width=True)
 
-            # --- 결과값 계산 (NameError 해결 핵심 파트) ---
             final_row = df_sim_chart.iloc[-1]
             final_asset = (isa_bal + general_bal)
             final_principal = (isa_principal + general_principal)
@@ -749,7 +723,6 @@ def render_calculator_page(df):
                 tax_msg = f"기납부 세금 {total_tax_paid_general/10000:,.0f}만원 (15.4% 원천징수)"
                 monthly_pocket = monthly_div_final * 0.846
 
-            # 물가상승률 반영 문구
             inflation_msg_money = ""
             inflation_msg_monthly = ""
             if apply_inflation:
@@ -759,7 +732,6 @@ def render_calculator_page(df):
                 inflation_msg_money = f"<br><span style='font-size:0.6em; color:#ff6b6b;'>(현재가치: 약 {pv_money/10000:,.0f}만원)</span>"
                 inflation_msg_monthly = f"<span style='font-size:0.7em; color:#ff6b6b;'>(현재가치: {pv_monthly/10000:,.1f}만원)</span>"
 
-            # 생활비 비유 아이템 선정 로직 (selected_item NameError 방지)
             analogy_items = [
                 {"name": "스타벅스", "unit": "잔", "price": 4500, "emoji": "☕"},
                 {"name": "뜨끈한 국밥", "unit": "그릇", "price": 10000, "emoji": "🍲"},
@@ -778,13 +750,11 @@ def render_calculator_page(df):
                 item_count = int(monthly_pocket // selected_item['price'])
                 msg_count = f"{item_count:,}"
 
-            # 일반계좌 운용 안내 문구
             general_ratio_msg = ""
             if is_isa_mode and general_bal > 1:
                 gen_val_manwon = general_bal / 10000
                 general_ratio_msg = f"<div style='color: #6c757d; font-size: 0.85em; margin-top: 15px; border-top: 1px dashed #d0e8ff; padding-top: 10px;'>💡 최종 자산 중 <b>약 {gen_val_manwon:,.0f}만원</b>은 ISA 한도 초과로 인해<br>일반 계좌(15.4% 과세)로 운용된 결과입니다.</div>"
 
-            # [핵심] 결과 박스 출력 - 찌꺼기 제거를 위해 왼쪽 벽에 바짝 붙임
             st.markdown(f"""
 <div style="background-color: #e7f3ff; border: 1.5px solid #d0e8ff; border-radius: 16px; padding: 25px; text-align: center; box-shadow: 0 4px 10px rgba(0,104,201,0.05);">
     <p style="color: #666; font-size: 0.95em; margin: 0 0 8px 0;">{years_sim}년 뒤 모이는 돈 (세후)</p>
@@ -800,19 +770,15 @@ def render_calculator_page(df):
     </div>
 </div>
 """, unsafe_allow_html=True)
-            # [수정 끝] 여기서부터는 기존의 연간 배당금 경고 로직이 이어집니다.
             
             annual_div_income = monthly_div_final * 12
             if annual_div_income > 20000000: st.warning(f"🚨 **주의:** {years_sim}년 뒤 연간 배당금이 2,000만원을 초과하여 금융소득종합과세 대상이 될 수 있습니다.")
             st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**\n1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 결과입니다.\n2. ISA 계좌의 비과세 한도 및 세율은 세법 개정에 따라 달라질 수 있습니다.\n3. 과거의 데이터를 기반으로 한 단순 시뮬레이션이며, 실제 투자 수익을 보장하지 않습니다.""")
-    
-        #-
+        
         with tab_goal:
             st.subheader("🎯 목표 배당금 역산기 (은퇴 시뮬레이터)")
             st.caption("내가 원하는 월급을 받기 위해 얼마를 더 모아야 할지 정밀하게 계산합니다.")
 
-            # --- [1단계] 현재 포트폴리오 제원표 (Summary Box) ---
-            # 엔진 가동 전, 어떤 부품(데이터)이 들어가는지 명시합니다.
             with st.container(border=True):
                 col_info1, col_info2, col_info3 = st.columns(3)
                 col_info1.metric("📊 평균 연배당률", f"{avg_y:.2f}%")
@@ -820,9 +786,8 @@ def render_calculator_page(df):
                 col_info3.metric("📦 선택 종목 수", f"{len(selected)}개")
                 st.caption(f"🔎 **적용 종목:** {', '.join(selected)}")
 
-            st.write("") # 시각적 간격
+            st.write("")
 
-            # --- [2단계] 사용자 입력 설정 ---
             col_g1, col_g2 = st.columns(2)
             with col_g1:
                 target_monthly_goal = st.number_input(
@@ -832,7 +797,6 @@ def render_calculator_page(df):
                 ) * 10000
                 st.caption(f"💡 월 166.5만원 설정 시 연간 약 1,998만원으로 절세가 가능합니다.")
                 
-                # 제로베이스 시작 여부 선택
                 use_start_money = st.checkbox(
                     "현재 설정된 초기 자산을 포함하여 계산", 
                     value=True, 
@@ -849,37 +813,29 @@ def render_calculator_page(df):
                 )
                 st.info("상단 제원표의 배당률과 적립금을 바탕으로 목표 달성 시점을 계산합니다.")
 
-            # --- [3단계] 시뮬레이션 엔진 가동 ---
-            # 초기 자산 포함 여부에 따른 출발점 결정
             current_bal_goal = total_invest if use_start_money else 0
             actual_start_bal = current_bal_goal 
             
             tax_factor = 0.846
-            monthly_yld = avg_y / 100 / 12  # 월 배당률
+            monthly_yld = avg_y / 100 / 12  
             months_passed = 0
-            max_months = 720               # 최대 60년 추적
+            max_months = 720               
             
-            # 동적 타겟팅 루프
             while months_passed < max_months:
-                # 물가 반영 시 목표 수령액을 매달 조금씩 올림
                 if apply_inflation_goal:
                     adjusted_target = target_monthly_goal * ((1.025) ** (months_passed / 12))
                 else:
                     adjusted_target = target_monthly_goal
                 
-                # 해당 시점의 목표 자산 역산
                 required_asset_at_time = (adjusted_target / tax_factor) / (avg_y / 100) * 12
                 
-                # 목표 달성 시 탈출
                 if current_bal_goal >= required_asset_at_time:
                     break
                     
-                # 복리 증식 (배당 재투자 + 월 적립금)
                 div_reinvest = current_bal_goal * monthly_yld * tax_factor
                 current_bal_goal += monthly_input + div_reinvest
                 months_passed += 1
 
-            # --- [4단계] 결과 리포트 출력 ---
             st.markdown("---")
             c_res1, c_res2 = st.columns(2)
             
@@ -897,11 +853,9 @@ def render_calculator_page(df):
                     else:
                         st.info("🚀 **희망 경로:** 현재 가치 기준")
 
-            # 물가 반영 시 추가 분석 정보
             if apply_inflation_goal and months_passed < max_months:
                 st.info(f"🛡️ **안전 모드 분석:** {months_passed // 12}년 뒤에는 물가 때문에 월 **{adjusted_target/10000:,.0f}만원**을 받아야 지금의 가치가 유지됩니다.")
             
-            # 종합과세 경고
             final_annual_income = adjusted_target * 12
             if (final_annual_income / tax_factor) > 20000000:
                 st.warning(f"🚨 **현실적 조언:** 목표 달성 시 연간 배당소득(세전)이 2,000만원을 초과하여 **금융소득종합과세** 대상이 될 수 있습니다.")
@@ -962,9 +916,9 @@ def render_stocklist_page(df):
 def main():
     inject_ga()
     
-    
     # 1. 안전 장치 및 로깅
-    # check_coppa_compliance() # 필요시 주석 해제
+    check_coppa_compliance() 
+    
     logger.info("🚀 배당팽이 메인 엔진 가동")
     db.cleanup_old_tokens()
 
