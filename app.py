@@ -363,48 +363,38 @@ def render_calculator_page(df):
         name_col_name = next((c for c in df.columns if 'pure' in c), 
                              next((c for c in df.columns if '명' in c), '종목명'))
 
-        # --- [최종 보강] 검색 엔진용 데이터 정밀 가공 ---
+        # --- [UI 고도화] 검색은 코드로, 표시는 이름만! ---
         def get_clean_search_options(df):
             options = []
             for _, row in df.iterrows():
-                # 1. 종목코드 정밀 세척 (소수점 제거 및 문자열 강제 변환)
                 raw_code = str(row.get('종목코드', row.get('코드', ''))).strip()
-                if '.' in raw_code:
-                    raw_code = raw_code.split('.')[0]
+                if '.' in raw_code: raw_code = raw_code.split('.')[0]
+                if raw_code.isdigit() and len(raw_code) < 6: raw_code = raw_code.zfill(6)
                 
-                # 2. 한국 종목코드(숫자 6자리) 0 살리기
-                if raw_code.isdigit() and len(raw_code) < 6:
-                    raw_code = raw_code.zfill(6)
-                
-                # 3. 이름 세척 (순수 이름 우선, 없으면 종목명)
                 raw_name = str(row.get('pure_name', row.get('종목명', ''))).strip()
-                
-                # 4. [중요] 검색용 라벨 생성: "이름 (코드)"
-                # 이렇게 해야 검색창에 이름을 쳐도, 숫자를 쳐도 엔진이 다 찾아냅니다.
+                # 검색을 위해 "이름 (코드)" 형식을 유지합니다.
                 label = f"{raw_name} ({raw_code})"
                 options.append(label)
             return sorted(list(set(options)))
 
-        # 검색 옵션 생성
         search_options = get_clean_search_options(df)
         
-        # 기존 세션에 저장된 종목이 있다면 자동 선택 (이름 매칭)
         default_selected = []
         if st.session_state.get('selected_stocks'):
             for s_name in st.session_state.selected_stocks:
                 match = [opt for opt in search_options if opt.startswith(s_name)]
-                if match:
-                    default_selected.append(match[0])
+                if match: default_selected.append(match[0])
 
-        # 멀티셀렉트 UI
+        # [핵심 수정 지점]
         selected_search = col2.multiselect(
             "📊 종목 선택 (이름 또는 코드로 검색)", 
             options=search_options, 
             default=default_selected,
+            # (마법의 한 줄) 선택된 후나 리스트에서는 '(' 앞의 이름만 보여줍니다.
+            format_func=lambda x: x.split(" (")[0] if " (" in x else x,
             help="숫자 코드(예: 476800)나 종목명을 입력해 보세요!"
         )
 
-        # 선택된 값에서 다시 '순수 이름'만 추출하여 저장
         selected = [opt.split(" (")[0] for opt in selected_search]
         st.session_state.selected_stocks = selected
 
