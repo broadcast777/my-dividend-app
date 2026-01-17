@@ -359,52 +359,62 @@ def render_calculator_page(df):
         total_invest = st.session_state.total_invest 
 
         # --- [수정] 검색 로직 강화: 코드를 맨 앞에 배치하여 숫자 검색 가능 ---
+                # --- [최종 수정] 커스텀 검색 + Streamlit multiselect ---
         code_col_name = next((c for c in df.columns if '코드' in c), '코드')
         name_col_name = next((c for c in df.columns if 'pure' in c), 
                              next((c for c in df.columns if '명' in c), '종목명'))
 
         def clean_label(row):
             c = str(row.get(code_col_name, '')).strip()
-            # float 형태(476800.0) 방어 및 6자리 보정
             if '.' in c: c = c.split('.')[0]
             if c.isdigit() and len(c) < 6: c = c.zfill(6)
             
             n = str(row.get(name_col_name, '')).strip()
-            # 이모지 제거 (매칭 일관성)
             n = n.replace(" ⭐", "").replace("⭐", "")
-            return f"{c} {n}"
+            return f"{c}|{n}"  # ← 파이프로 구분
 
-        # 검색 리스트 생성 및 정렬
-        search_options = sorted(list(set(df.apply(clean_label, axis=1).tolist())))
+        # 전체 검색 리스트
+        all_options = sorted(list(set(df.apply(clean_label, axis=1).tolist())))
         
-        # 기존 세션 복원 (이모지 무시)
+        # 기존 세션 복원
         default_selected = []
         if st.session_state.get('selected_stocks'):
             for s_name in st.session_state.selected_stocks:
-                # 이모지를 제거하고 매칭
-                match = [opt for opt in search_options 
-                        if opt.split(' ', 1)[1] == s_name.replace(" ⭐", "").replace("⭐", "")]
-                if match: 
-                    default_selected.append(match[0])
+                for opt in all_options:
+                    if opt.split('|')[1] == s_name:
+                        default_selected.append(opt)
+                        break
 
+        # ========== [핵심] 커스텀 검색 입력 ==========
+        search_input = col2.text_input("🔍 종목 검색 (코드 또는 이름)", key="stock_search")
+        
+        # 검색어에 따라 필터링
+        if search_input.strip():
+            filtered_options = [
+                opt for opt in all_options 
+                if search_input.lower() in opt.lower()
+            ]
+        else:
+            filtered_options = all_options
+
+        # Streamlit multiselect (이제는 이미 필터된 목록만 표시)
         selected_search = col2.multiselect(
-            "📊 종목 선택 (이름 또는 코드로 검색)", 
-            options=search_options, 
+            "📊 종목 선택", 
+            options=filtered_options,  # ← 필터된 목록
             default=default_selected,
-            # 화면에는 이름만 보여주어 시각적 청결함 유지
-            format_func=lambda x: x.split(' ', 1)[1] if ' ' in x else x,
-            help="종목코드 (예: 476800, 0052D0)나 종목명으로 검색하세요!"
+            format_func=lambda x: x.split('|')[1] if '|' in x else x,
+            help="위의 검색창에 코드나 이름을 입력하세요!"
         )
 
         # 엔진에는 이름만 전달
         selected = []
         for opt in selected_search:
-            name = opt.split(' ', 1)[1] if ' ' in opt else opt
-            name = name.replace(" ⭐", "").replace("⭐", "")
+            name = opt.split('|')[1] if '|' in opt else opt
             selected.append(name)
 
         st.session_state.selected_stocks = selected
         # --- [수정 끝] ---
+
 
         if selected:
             has_foreign_stock = any(df[df['pure_name'] == s_name].iloc[0]['분류'] == '해외' for s_name in selected)
