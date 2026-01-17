@@ -269,7 +269,7 @@ def render_admin_tools(df_raw):
 
         st.write("") 
         with st.expander("⚡ 전체 종목 자동 업데이트 (신규 제외)"):
-            st.caption("신규 상장 종목(⭐)과 배당률 2% 미만은 건너뜜")
+            st.caption("신규 상장 종목(⭐)과 배당률 2% 미만은 건너뜁니다.")
             if st.button("전체 자동 갱신 시작"):
                 progress_bar = st.progress(0)
                 status_text = st.empty()
@@ -358,45 +358,43 @@ def render_calculator_page(df):
         st.session_state.total_invest = invest_input * 10000
         total_invest = st.session_state.total_invest 
 
-        # --- [수정] 검색 로직 강화: 코드를 맨 앞에 배치하여 숫자 검색 가능 ---
-        code_col_name = next((c for c in df.columns if '코드' in c), '코드')
-        name_col_name = next((c for c in df.columns if 'pure' in c), 
-                             next((c for c in df.columns if '명' in c), '종목명'))
+        # --- [수정] 가장 확실한 '이름 (코드)' 방식 (검색 100% 보장) ---
+        code_col_name = next((c for c in df.columns if '코드' in c), '종목코드')
+        name_col_name = next((c for c in df.columns if 'pure' in c or '명' in c), '종목명')
 
-        # --- [UI 고도화] 검색은 코드로, 표시는 이름만! ---
-        def get_clean_search_options(df):
-            options = []
-            for _, row in df.iterrows():
-                raw_code = str(row.get('종목코드', row.get('코드', ''))).strip()
-                if '.' in raw_code: raw_code = raw_code.split('.')[0]
-                if raw_code.isdigit() and len(raw_code) < 6: raw_code = raw_code.zfill(6)
-                
-                raw_name = str(row.get('pure_name', row.get('종목명', ''))).strip()
-                # 검색을 위해 "이름 (코드)" 형식을 유지합니다.
-                label = f"{raw_name} ({raw_code})"
-                options.append(label)
-            return sorted(list(set(options)))
+        def clean_label(row):
+            c = str(row.get(code_col_name, '')).strip()
+            # 소수점 제거 및 6자리 보정
+            if '.' in c: c = c.split('.')[0]
+            if c.isdigit() and len(c) < 6: c = c.zfill(6)
+            
+            n = str(row.get(name_col_name, '')).strip()
+            # 검색 엔진이 무조건 찾을 수 있게 "이름 (코드)" 형식 사용
+            return f"{n} ({c})"
 
-        search_options = get_clean_search_options(df)
+        # 검색 리스트 생성 및 정렬
+        search_options = sorted(list(set(df.apply(clean_label, axis=1).tolist())))
         
+        # 기존 세션 복원
         default_selected = []
         if st.session_state.get('selected_stocks'):
             for s_name in st.session_state.selected_stocks:
-                match = [opt for opt in search_options if opt.startswith(s_name)]
+                match = [opt for opt in search_options if opt.startswith(f"{s_name} (")]
                 if match: default_selected.append(match[0])
 
-        # [핵심 수정 지점]
         selected_search = col2.multiselect(
             "📊 종목 선택 (이름 또는 코드로 검색)", 
             options=search_options, 
             default=default_selected,
-            # (마법의 한 줄) 선택된 후나 리스트에서는 '(' 앞의 이름만 보여줍니다.
-            format_func=lambda x: x.split(" (")[0] if " (" in x else x,
-            help="숫자 코드(예: 476800)나 종목명을 입력해 보세요!"
+            # [선택 태그 가리기] 화면에는 " (" 앞의 이름만 보여줍니다.
+            format_func=lambda x: x.split(' (')[0] if ' (' in x else x,
+            help="종목코드 숫자(예: 476800)나 종목명을 입력해 보세요!"
         )
 
-        selected = [opt.split(" (")[0] for opt in selected_search]
+        # 엔진에는 순수 이름만 전달
+        selected = [opt.split(' (')[0] if ' (' in opt else opt for opt in selected_search]
         st.session_state.selected_stocks = selected
+        # --- [수정 끝] ---
 
         if selected:
             has_foreign_stock = any(df[df['pure_name'] == s_name].iloc[0]['분류'] == '해외' for s_name in selected)
@@ -773,7 +771,9 @@ def render_calculator_page(df):
             
             annual_div_income = monthly_div_final * 12
             if annual_div_income > 20000000: st.warning(f"🚨 **주의:** {years_sim}년 뒤 연간 배당금이 2,000만원을 초과하여 금융소득종합과세 대상이 될 수 있습니다.")
-            st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**\n1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 결과입니다.\n2. ISA 계좌의 비과세 한도 및 세율은 세법 개정에 따라 달라질 수 있습니다.\n3. 과거의 데이터를 기반으로 한 단순 시뮬레이션이며, 실제 투자 수익을 보장하지 않습니다.""")
+            st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**
+            1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 단순 결과입니다.
+            2. 재투자가 매월 이루어진다는 가정하에 계산된 복리 결과입니다.""")
         
         with tab_goal:
             st.subheader("🎯 목표 배당금 역산기 (은퇴 시뮬레이터)")
@@ -916,6 +916,7 @@ def render_stocklist_page(df):
 def main():
     inject_ga()
     
+    # 1. 안전 장치 및 로깅
     # [수정] 1. 안전 장치 (COPPA 비활성화)
     # check_coppa_compliance() 
     
