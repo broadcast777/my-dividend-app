@@ -618,6 +618,7 @@ def render_calculator_page(df):
             yearly_contribution = 0
 
             # [수정] 메인 시뮬레이션 루프 (오버플로우 로직 적용)
+            # [수정 시작] 메인 시뮬레이션 루프 (오버플로우 로직 및 오류 해결 버전)
             for m in range(1, months_sim + 1):
                 if m // 12 > year_tracker:
                     yearly_contribution = 0
@@ -641,12 +642,12 @@ def render_calculator_page(df):
                     general_bal += monthly_add
                     general_principal += monthly_add
 
-                # 계좌별 배당 및 재투자
-                # 1. ISA 계좌 (과세이연 전액 재투자)
+                # 계좌별 배당 및 재투자 로직
+                # 1. ISA 계좌 (비과세 전액 재투자)
                 div_isa = isa_bal * monthly_yld
                 isa_bal += div_isa
                 
-                # 2. 일반 계좌 (15.4% 세전후 재투자 비율 적용)
+                # 2. 일반 계좌 (15.4% 세후 재투자 비율 적용)
                 div_gen = general_bal * monthly_yld
                 this_tax = div_gen * 0.154
                 total_tax_paid_general += this_tax
@@ -666,6 +667,7 @@ def render_calculator_page(df):
             line = base.mark_line(color='#ff9f43', strokeDash=[5,5]).encode(y='총원금:Q')
             st.altair_chart((area + line).properties(height=280), use_container_width=True)
 
+            # --- 결과값 계산 (NameError 해결 핵심 파트) ---
             final_row = df_sim_chart.iloc[-1]
             final_asset = (isa_bal + general_bal)
             final_principal = (isa_principal + general_principal)
@@ -677,43 +679,40 @@ def render_calculator_page(df):
                 tax_isa = taxable_isa * 0.099
                 real_money = final_asset - tax_isa
                 tax_msg = f"예상 세금 {tax_isa/10000:,.0f}만원 (9.9% 분리과세)"
-                monthly_pocket = monthly_div_final # ISA 내 배당은 일단 세전으로 표기 (과세이연)
+                monthly_pocket = monthly_div_final 
             else:
                 real_money = final_asset
                 tax_msg = f"기납부 세금 {total_tax_paid_general/10000:,.0f}만원 (15.4% 원천징수)"
                 monthly_pocket = monthly_div_final * 0.846
 
-            # 일반계좌 운용 안내 문구 생성
-            # [수정] 일반계좌 운용 안내 문구 (유격 방지를 위해 HTML 구조 정밀 조정)
-            general_ratio_msg = ""
-            if is_isa_mode and general_bal > 0:
-                gen_val_manwon = general_bal / 10000
-                general_ratio_msg = f"<div style='color: #6c757d; font-size: 0.85em; margin-top: 15px; border-top: 1px dashed #d0e8ff; padding-top: 10px;'>💡 최종 자산 중 <b>약 {gen_val_manwon:,.0f}만원</b>은 ISA 한도 초과로 인해<br>일반 계좌(15.4% 과세)로 운용된 결과입니다.</div>"
-
-            # --- [수정] 1. 최종 결과값 계산 (NameError 방지용 필수 부품) ---
-            final_row = df_sim_chart.iloc[-1]
-            final_asset = (isa_bal + general_bal)
-            final_principal = (isa_principal + general_principal)
-            profit_isa = isa_bal - isa_principal
-            monthly_div_final = final_row['실제월배당']
-
-            if is_isa_mode:
-                taxable_isa = max(0, profit_isa - (isa_exempt * 10000))
-                tax_isa = taxable_isa * 0.099
-                real_money = final_asset - tax_isa
-                tax_msg = f"예상 세금 {tax_isa/10000:,.0f}만원 (9.9% 분리과세)"
-                monthly_pocket = monthly_div_final
-            else:
-                real_money = final_asset
-                tax_msg = f"기납부 세금 {total_tax_paid_general/10000:,.0f}만원 (15.4% 원천징수)"
-                monthly_pocket = monthly_div_final * 0.846
-
-            # --- [수정] 2. 안내 문구 및 비유 아이템 준비 ---
+            # 물가상승률 반영 문구
             inflation_msg_money = ""
+            inflation_msg_monthly = ""
             if apply_inflation:
                 discount_rate = (1.025) ** years_sim 
                 pv_money = real_money / discount_rate
+                pv_monthly = monthly_pocket / discount_rate
                 inflation_msg_money = f"<br><span style='font-size:0.6em; color:#ff6b6b;'>(현재가치: 약 {pv_money/10000:,.0f}만원)</span>"
+                inflation_msg_monthly = f"<span style='font-size:0.7em; color:#ff6b6b;'>(현재가치: {pv_monthly/10000:,.1f}만원)</span>"
+
+            # 생활비 비유 아이템 선정 로직 (selected_item NameError 방지)
+            analogy_items = [
+                {"name": "스타벅스", "unit": "잔", "price": 4500, "emoji": "☕"},
+                {"name": "뜨끈한 국밥", "unit": "그릇", "price": 10000, "emoji": "🍲"},
+                {"name": "넷플릭스 구독", "unit": "개월", "price": 17000, "emoji": "📺"},
+                {"name": "치킨", "unit": "마리", "price": 23000, "emoji": "🍗"},
+                {"name": "제주도 항공권", "unit": "장", "price": 60000, "emoji": "✈️"},
+                {"name": "특급호텔 숙박", "unit": "박", "price": 200000, "emoji": "🏨"},
+                {"name": "최신 아이폰", "unit": "대", "price": 1500000, "emoji": "📱"}
+            ]
+            affordable_items = [item for item in analogy_items if monthly_pocket >= item['price']]
+            if not affordable_items:
+                selected_item = analogy_items[0]
+                msg_count = f"{monthly_pocket / selected_item['price']:.1f}"
+            else:
+                selected_item = random.choice(affordable_items)
+                item_count = int(monthly_pocket // selected_item['price'])
+                msg_count = f"{item_count:,}"
 
             # 일반계좌 운용 안내 문구
             general_ratio_msg = ""
@@ -721,14 +720,14 @@ def render_calculator_page(df):
                 gen_val_manwon = general_bal / 10000
                 general_ratio_msg = f"<div style='color: #6c757d; font-size: 0.85em; margin-top: 15px; border-top: 1px dashed #d0e8ff; padding-top: 10px;'>💡 최종 자산 중 <b>약 {gen_val_manwon:,.0f}만원</b>은 ISA 한도 초과로 인해<br>일반 계좌(15.4% 과세)로 운용된 결과입니다.</div>"
 
-            # --- [수정] 3. 결과 박스 출력 (왼쪽 벽면에 밀착된 구조) ---
+            # [핵심] 결과 박스 출력 - 찌꺼기 제거를 위해 왼쪽 벽에 바짝 붙임
             st.markdown(f"""
 <div style="background-color: #e7f3ff; border: 1.5px solid #d0e8ff; border-radius: 16px; padding: 25px; text-align: center; box-shadow: 0 4px 10px rgba(0,104,201,0.05);">
     <p style="color: #666; font-size: 0.95em; margin: 0 0 8px 0;">{years_sim}년 뒤 모이는 돈 (세후)</p>
     <h2 style="color: #0068c9; font-size: 2.2em; margin: 0; font-weight: 800; line-height: 1.2;">약 {real_money/10000:,.0f}만원{inflation_msg_money}</h2>
     <p style="color: #777; font-size: 0.9em; margin: 8px 0 0 0;">(투자원금 {final_principal/10000:,.0f}만원 / {tax_msg})</p>
     <div style="height: 1px; background-color: #d0e8ff; margin: 25px auto; width: 85%;"></div>
-    <p style="color: #0068c9; font-weight: bold; font-size: 1.1em; margin: 0 0 12px 0;">📅 월 예상 배당금: {monthly_pocket/10000:,.1f}만원</p>
+    <p style="color: #0068c9; font-weight: bold; font-size: 1.1em; margin: 0 0 12px 0;">📅 월 예상 배당금: {monthly_pocket/10000:,.1f}만원 {inflation_msg_monthly}</p>
     <div style="background-color: rgba(255,255,255,0.5); padding: 15px; border-radius: 12px; display: inline-block; min-width: 80%;">
         <p style="color: #333; font-size: 1.1em; margin: 0; line-height: 1.6;">
             매달 <b>{selected_item['emoji']} {selected_item['name']} {msg_count}{selected_item['unit']}</b><br>
@@ -737,6 +736,7 @@ def render_calculator_page(df):
     </div>
 </div>
 """, unsafe_allow_html=True)
+            # [수정 끝] 여기서부터는 기존의 연간 배당금 경고 로직이 이어집니다.
             
             annual_div_income = monthly_div_final * 12
             if annual_div_income > 20000000: st.warning(f"🚨 **주의:** {years_sim}년 뒤 연간 배당금이 2,000만원을 초과하여 금융소득종합과세 대상이 될 수 있습니다.")
