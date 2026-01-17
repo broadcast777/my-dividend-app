@@ -315,9 +315,10 @@ def render_admin_tools(df_raw):
             st.button("🚀 깃허브에 영구 저장", disabled=True, use_container_width=True)
 
 
+
 def render_calculator_page(df):
-    """💰 배당금 계산기 페이지 렌더링"""
-    # [Level 1] 변수 초기화 위치 최상단 배치 (IndentationError 방지)
+       """💰 배당금 계산기 페이지 렌더링"""
+
     all_data = []
 
     # 6-1. AI 로보어드바이저
@@ -342,7 +343,8 @@ def render_calculator_page(df):
 
         if st.session_state.get("ai_modal_open", False):
             recommendation.show_wizard()
-    
+
+            
     st.markdown("---")
 
     # 6-2. 포트폴리오 시뮬레이션
@@ -353,17 +355,17 @@ def render_calculator_page(df):
         st.session_state.total_invest = invest_input * 10000
         total_invest = st.session_state.total_invest 
 
-    # --- 여기부터 expander 내부 ---
+        # --- 검색 옵션 생성 함수 ---
         def clean_label(row):
             code = str(row.get('종목코드', '')).strip()
             if '.' in code and code.replace('.', '').isdigit():
                 code = code.split('.')[0]
             name = str(row.get('종목명', '')).strip()
             return [f"{code} {name}", code]  # 코드+이름, 코드 단독
-    
+
         # 옵션 생성 (flatten + 중복 제거)
         search_options = list(set([item for sublist in df.apply(clean_label, axis=1).tolist() for item in sublist]))
-    
+
         # 이름 매핑 (UI 표시용)
         label_map = {}
         for opt in search_options:
@@ -375,14 +377,15 @@ def render_calculator_page(df):
                     label_map[opt] = match.iloc[0]['종목명']
                 else:
                     label_map[opt] = opt
-    
+
         # 기본 선택 복원
         default_selected = []
         if st.session_state.get('selected_stocks'):
             for s_name in st.session_state.selected_stocks:
                 match = [opt for opt in search_options if opt.endswith(s_name)]
-                if match: default_selected.append(match[0])
-    
+                if match:
+                    default_selected.append(match[0])
+
         # 멀티셀렉트
         selected_search = col2.multiselect(
             "📊 종목 선택 (이름 또는 코드로 검색)", 
@@ -391,10 +394,12 @@ def render_calculator_page(df):
             format_func=lambda x: label_map.get(x, x),
             help="종목코드 숫자(예: 476800)나 종목명을 입력해 보세요!"
         )
-    
+
         # 선택 결과 → 종목명만 추출
         selected = [label_map.get(opt, opt) for opt in selected_search]
         st.session_state.selected_stocks = selected
+
+
 
 
         if selected:
