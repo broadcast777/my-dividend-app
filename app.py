@@ -317,7 +317,7 @@ def render_admin_tools(df_raw):
 
 def render_calculator_page(df):
     """💰 배당금 계산기 페이지 렌더링"""
-    # [수정] 변수 초기화 위치 최상단으로 이동하여 IndentationError 방지
+    # [Level 1] 변수 초기화 위치 최상단 배치 (IndentationError 방지)
     all_data = []
 
     # 6-1. AI 로보어드바이저
@@ -353,19 +353,19 @@ def render_calculator_page(df):
         st.session_state.total_invest = invest_input * 10000
         total_invest = st.session_state.total_invest 
 
-        # --- [수정] 종목 검색 기능 (No Results 방탄 로직) ---
+        # --- [수정] 종목 검색 기능 (데이터 형식 무관하게 No Results 해결) ---
         def clean_label(row):
-            code_raw = str(row.get('종목코드') or row.get('코드') or '').strip()
-            if '.' in code_raw: code_raw = code_raw.split('.')[0]
-            if code_raw.isdigit() and len(code_raw) < 6: code_raw = code_raw.zfill(6)
+            code_val = str(row.get('종목코드') or row.get('코드') or '').strip()
+            if '.' in code_val: code_val = code_val.split('.')[0]
+            if code_val.isdigit() and len(code_val) < 6: code_val = code_val.zfill(6)
             
-            name = str(row.get('pure_name') or row.get('종목명') or '').strip()
-            return f"{code_raw} {name}"
+            name_val = str(row.get('종목명') or row.get('pure_name') or '').strip()
+            return f"{code_val} {name_val}"
 
-        # 검색용 옵션 리스트 생성 및 정렬
+        # 검색 옵션 생성 (중복 제거 및 정렬)
         search_options = sorted(list(set(df.apply(clean_label, axis=1).tolist())))
         
-        # 이름-옵션 매핑 딕셔너리 (format_func 최적화)
+        # 이름 기반 매핑 딕셔너리 생성 (검색 성능 최적화)
         label_map = {opt: opt.split(" ", 1)[-1] if " " in opt else opt for opt in search_options}
 
         default_selected = []
@@ -551,6 +551,7 @@ def render_calculator_page(df):
             if total_y_div > 20000000:
                 st.warning(f"🚨 **주의:** 연간 예상 배당금이 **{total_y_div/10000:,.0f}만원**입니다. 금융소득종합과세 대상에 해당될 수 있습니다.")
 
+    # 6-7. 심층 분석
     df_ana = pd.DataFrame(all_data)
     if not df_ana.empty:
         st.write("")
@@ -900,13 +901,13 @@ def render_stocklist_page(df):
 def main():
     inject_ga()
     
-    # 1. 안전 장치 및 로깅
-    # [수정] COPPA 기능 비활성화
+    # [수정] 1. 안전 장치 (COPPA 비활성화)
     # check_coppa_compliance() 
     
     logger.info("🚀 배당팽이 메인 엔진 가동")
     db.cleanup_old_tokens()
 
+    # 2. 관리자 인증
     is_admin = False
     if st.query_params.get("admin", "false").lower() == "true":
         ADMIN_HASH = st.secrets["ADMIN_PASSWORD_HASH"]
