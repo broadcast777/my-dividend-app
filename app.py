@@ -347,11 +347,11 @@ def render_calculator_page(df):
 
     # 6-2. 포트폴리오 시뮬레이션
     with st.expander("🧮 나만의 배당 포트폴리오 시뮬레이션", expanded=True):
-    col1, col2 = st.columns([1, 2])
-    current_invest_val = int(st.session_state.total_invest / 10000)
-    invest_input = col1.number_input("💰 총 투자 금액 (만원)", min_value=100, value=current_invest_val, step=100)
-    st.session_state.total_invest = invest_input * 10000
-    total_invest = st.session_state.total_invest 
+        col1, col2 = st.columns([1, 2])
+        current_invest_val = int(st.session_state.total_invest / 10000)
+        invest_input = col1.number_input("💰 총 투자 금액 (만원)", min_value=100, value=current_invest_val, step=100)
+        st.session_state.total_invest = invest_input * 10000
+        total_invest = st.session_state.total_invest 
 
     # --- 여기부터 expander 내부 ---
     def clean_label(row):
