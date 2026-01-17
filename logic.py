@@ -270,7 +270,8 @@ def load_and_process_data(df_raw, is_admin=False):
                 '캘린더링크': calculate_google_calendar_url(display_name, str(row.get('배당락일', '-'))),
                 'pure_name': name.replace("🚫 ", "").replace(" (필터대상)", ""), 
                 '신규상장개월수': months,
-                '배당기록': str(row.get('배당기록', ''))
+                '배당기록': str(row.get('배당기록', '')),
+                '검색라벨': str(row.get('검색라벨', f"[{code}] {display_name}"))
             }
         except:
             return idx, None
