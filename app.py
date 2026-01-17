@@ -785,7 +785,7 @@ def render_calculator_page(df):
                     min_value=10, value=166, step=10, 
                     key="target_monthly_goal_input"
                 ) * 10000
-                st.caption(f"💡 월 166.5만원 설정 시 연간 약 1,998만원으로 절세가 가능합니다.")
+                st.caption(f"💡 '세후' 월 141만원 설정 시 연간 세전 약 2,000만원 이내로 절세가 가능합니다.")
                 
                 use_start_money = st.checkbox(
                     "현재 설정된 초기 자산을 포함하여 계산", 
