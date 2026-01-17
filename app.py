@@ -11,7 +11,7 @@ import hashlib
 import time
 import random
 from streamlit.runtime.scriptrunner import get_script_run_ctx
-from logger import logger 
+from logger import logger
 from analytics import inject_ga
 
 # [필수] 날짜 및 URL 라이브러리
@@ -19,7 +19,7 @@ from datetime import datetime, timedelta
 import urllib.parse
 
 # [모듈화] 기능을 분리한 커스텀 파일들을 불러옵니다
-import logic 
+import logic
 import ui
 import db
 import recommendation
@@ -200,7 +200,6 @@ def render_sidebar_footer():
     
 
 
-
 # ==========================================
 # [SECTION 4] 페이지별 렌더링 함수 (부품화)
 # ==========================================
@@ -271,6 +270,8 @@ def render_admin_tools(df_raw):
                 status_text = st.empty()
                 updated_count = 0
                 skipped_count = 0
+                fail_list = []  # 1. 실패 노트 준비
+                
                 total_stocks = len(df_raw)
                 df_temp = df_raw.copy()
                 
@@ -282,18 +283,36 @@ def render_admin_tools(df_raw):
                     if 0 < months < 12:
                         skipped_count += 1
                         continue
+                    
                     code = str(row['종목코드']).strip()
                     cat = str(row.get('분류', '국내')).strip()
+                    
                     # 배당'률'을 계산해주는 똑똑한 함수로 교체
                     y_val, src = logic.fetch_dividend_yield_hybrid(code, cat) 
+                    
                     if y_val > 0:
                         df_temp.at[i, '연배당률_크롤링'] = y_val # ← 이제 진짜 %가 들어갑니다
                         updated_count += 1
                     else:
-                        st.warning(f"⚠️ {row['종목명']}({code}) 실패 -> 원인: {src}")
+                        # 3. 실패 시 명단 작성
+                        fail_msg = f"{row['종목명']}({code}) - {src}"
+                        fail_list.append(fail_msg)
+                        logger.error(f"업데이트 실패: {fail_msg}")
+                    
+                    time.sleep(0.1)
                         
+                progress_bar.empty()
                 status_text.text("완료!")
-                st.success(f"✅ {updated_count}개 금액 갱신 완료 / 🛡️ {skipped_count}개 신규주 보호됨")
+                
+                # 4. 결과 리포트 (성공은 초록색, 실패는 빨간색 박스)
+                st.success(f"✅ {updated_count}개 갱신 성공 / 🛡️ {skipped_count}개 보호됨")
+
+                if fail_list:
+                    st.error(f"🚨 {len(fail_list)}개 업데이트 실패")
+                    with st.expander("🔍 실패 원인 명단 보기"):
+                        for f in fail_list:
+                            st.write(f"- {f}")
+                            
                 st.session_state.df_dirty = df_temp
 
         st.markdown("---")
@@ -807,7 +826,7 @@ def render_calculator_page(df):
             tax_factor = 0.846
             monthly_yld = avg_y / 100 / 12  
             months_passed = 0
-            max_months = 720               
+            max_months = 720                
             
             # 목표 자산(고정값) 계산
             if avg_y > 0:
@@ -867,10 +886,10 @@ def render_calculator_page(df):
                 
             # [수정] 들여쓰기 제거하여 글자 크기 정상화
             st.error("""
-                        **⚠️ 시뮬레이션 활용 시 유의사항**
-                        1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 단순 결과입니다.
-                        2. 재투자가 매월 이루어진다는 가정하에 계산된 복리 결과입니다.
-                        """)
+                    **⚠️ 시뮬레이션 활용 시 유의사항**
+                    1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 단순 결과입니다.
+                    2. 재투자가 매월 이루어진다는 가정하에 계산된 복리 결과입니다.
+                    """)
 
             
 def render_roadmap_page(df):
