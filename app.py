@@ -802,7 +802,7 @@ def main():
     # 2. 관리자 인증
     is_admin = False
     if st.query_params.get("admin", "false").lower() == "true":
-        ADMIN_HASH = "c41b0bb392db368a44ce374151794850417b56c9786e3c482f825327c7153182"
+        ADMIN_HASH = st.secrets["ADMIN_PASSWORD_HASH"]
         with st.expander("🔐 관리자 접속 (Admin)", expanded=False):
             password_input = st.text_input("비밀번호 입력", type="password")
             if password_input:
