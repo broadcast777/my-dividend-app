@@ -284,9 +284,10 @@ def render_admin_tools(df_raw):
                         continue
                     code = str(row['종목코드']).strip()
                     cat = str(row.get('분류', '국내')).strip()
-                    amt, src = logic.fetch_dividend_amount_hybrid(code, cat)
-                    if amt > 0:
-                        df_temp.at[i, '연배당률_크롤링'] = amt
+                    # 배당'률'을 계산해주는 똑똑한 함수로 교체
+                    y_val, src = logic.fetch_dividend_yield_hybrid(code, cat) 
+                    if y_val > 0:
+                        df_temp.at[i, '연배당률_크롤링'] = y_val # ← 이제 진짜 %가 들어갑니다
                         updated_count += 1
                     else:
                         st.warning(f"⚠️ {row['종목명']}({code}) 실패 -> 원인: {src}")
