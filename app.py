@@ -101,7 +101,7 @@ def check_auth_status():
             if session and session.user:
                 st.session_state.is_logged_in = True
                 st.session_state.user_info = session.user
-                logger.info(f"👤 사용자 로그인 성공: {session.user.email}") 
+                logger.info(f"👤 사용자 로그인 성공: {session.user.email}") # [3과제] 로깅 추가
             
             # 인증 성공 후 깨끗한 URL로 새로고침
             st.query_params.clear()
@@ -111,7 +111,7 @@ def check_auth_status():
         except Exception as e:
             # [자동 복구 로직] verifier 오류(새로고침 시 발생 등) 시 파라미터 리셋 후 재시도
             err_msg = str(e).lower()
-            logger.error(f"🔴 인증 과정 중 오류 발생: {err_msg}") 
+            logger.error(f"🔴 인증 과정 중 오류 발생: {err_msg}") # [3과제] 로깅 추가
             if "verifier" in err_msg or "non-empty" in err_msg:
                 st.warning("🔄 보안 토큰 갱신 중... 잠시만 기다려주세요.")
                 st.query_params.clear()
@@ -145,7 +145,7 @@ def render_login_ui():
             
             # 로그아웃 버튼 클릭 시 세션 초기화 및 새로고침
             if st.button("🚪 로그아웃", key="logout_btn_sidebar", use_container_width=True):
-                logger.info(f"🚪 사용자 로그아웃: {email}") 
+                logger.info(f"🚪 사용자 로그아웃: {email}") # [3과제] 로깅 추가
                 supabase.auth.sign_out()
                 st.session_state.is_logged_in = False
                 st.session_state.user_info = None
@@ -318,7 +318,7 @@ def render_admin_tools(df_raw):
 
 def render_calculator_page(df):
     """💰 배당금 계산기 페이지 렌더링"""
-    # [Level 1] 변수 초기화 위치 최상단 배치
+    # [Level 1] 변수 가출 방지를 위해 함수 시작과 동시에 빈 바구니 생성
     all_data = []
 
     # 6-1. AI 로보어드바이저
@@ -354,40 +354,43 @@ def render_calculator_page(df):
         st.session_state.total_invest = invest_input * 10000
         total_invest = st.session_state.total_invest 
 
-        # --- [최종 수정] CSV의 '검색라벨' 열을 직접 사용하는 방탄 로직 ---
-        # 1. '검색라벨' 컬럼이 있으면 그걸 쓰고, 없으면 비상용으로 생성
-        if '검색라벨' in df.columns:
-            search_options = sorted(list(set(df['검색라벨'].astype(str).tolist())))
-        else:
-            # 안전장치: 혹시라도 옛날 CSV가 들어올 경우 대비
-            def temp_label(row):
-                c = str(row['종목코드']).split('.')[0].strip()
-                if c.isdigit(): c = c.zfill(6)
-                n = str(row['종목명']).strip()
-                return f"[{c}] {n}"
-            search_options = sorted(list(set(df.apply(temp_label, axis=1).tolist())))
+        # --- [원복] "이름 (코드)" 방식으로 무조건 뜨게 만들기 ---
+        code_col_name = next((c for c in df.columns if '코드' in c), '종목코드')
+        name_col_name = next((c for c in df.columns if 'pure' in c or '명' in c), '종목명')
 
-        # 2. 기존 세션 복원 (이름 기준)
+        def clean_label(row):
+            c = str(row.get(code_col_name, '')).strip()
+            # 소수점 제거 및 6자리 보정 (이건 무조건 해야 검색이 됨)
+            if '.' in c: c = c.split('.')[0]
+            if c.isdigit() and len(c) < 6: c = c.zfill(6)
+            
+            n = str(row.get(name_col_name, '')).strip()
+            # 아까 잘 됐던 그 형식: "이름 (코드)"
+            return f"{n} ({c})"
+
+        # 검색 리스트 생성
+        search_options = sorted(list(set(df.apply(clean_label, axis=1).tolist())))
+        
+        # 기존 세션 복원
         default_selected = []
         if st.session_state.get('selected_stocks'):
-            saved_names = set(st.session_state.selected_stocks)
-            # "[코드] 이름" 에서 "이름"만 떼서 비교
-            default_selected = [opt for opt in search_options if opt.split('] ')[1] in saved_names]
+            for s_name in st.session_state.selected_stocks:
+                match = [opt for opt in search_options if opt.startswith(f"{s_name} (")]
+                if match: default_selected.append(match[0])
 
-        # 3. 멀티셀렉트 (검색은 [코드], 화면 표시는 이름)
         selected_search = col2.multiselect(
             "📊 종목 선택 (이름 또는 코드로 검색)", 
             options=search_options, 
             default=default_selected,
-            # [핵심] 화면에는 ']' 뒤의 이름만 보여줍니다.
-            format_func=lambda x: x.split('] ')[1] if '] ' in x else x,
+            # [중요] format_func를 제거하거나 단순화해서 괄호가 보이게 둠
+            # 그래야 검색할 때 "476" 쳤을 때 "(476..."이 보여서 매칭됨
             help="종목코드(숫자)나 종목명을 입력해 보세요!"
         )
 
-        # 4. 엔진에는 '순수 이름'만 전달
-        selected = [opt.split('] ')[1] if '] ' in opt else opt for opt in selected_search]
+        # 선택된 값에서 이름만 추출해서 저장
+        selected = [opt.split(' (')[0] if ' (' in opt else opt for opt in selected_search]
         st.session_state.selected_stocks = selected
-        # --- [수정 끝] ---
+        # --- [원복 끝] ---
 
         if selected:
             has_foreign_stock = any(df[df['pure_name'] == s_name].iloc[0]['분류'] == '해외' for s_name in selected)
@@ -924,9 +927,6 @@ def main():
                 else:
                     st.error("비밀번호 불일치")
 
-    # ---------------------------------------------------------
-    # 3. [긴급 추가] 필수 세션 변수 초기화 (연료 주입)
-    # ---------------------------------------------------------
     if "total_invest" not in st.session_state:
         st.session_state.total_invest = 30000000 
     if "selected_stocks" not in st.session_state:
