@@ -766,117 +766,194 @@ def render_calculator_page(df):
             st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**\n1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 결과입니다.\n2. ISA 계좌의 비과세 한도 및 세율은 세법 개정에 따라 달라질 수 있습니다.\n3. 과거의 데이터를 기반으로 한 단순 시뮬레이션이며, 실제 투자 수익을 보장하지 않습니다.""")
         
         with tab_goal:
-            st.subheader("🎯 목표 배당금 역산기 (은퇴 시뮬레이터)")
-            st.caption("내가 원하는 월급을 받기 위해 얼마를 더 모아야 할지 정밀하게 계산합니다.")
+           def render_analysis_page(df):
+    """📊 심층 분석 리포트 (탭 방식 복귀 + 기능 업그레이드)"""
+    st.header("📊 포트폴리오 심층 분석 리포트")
+    
+    selected = st.session_state.get('selected_stocks', [])
+    if not selected:
+        st.warning("⚠️ **'💰 배당금 계산기'** 메뉴에서 먼저 종목을 선택해 주세요!")
+        return
 
-            with st.container(border=True):
-                col_info1, col_info2, col_info3 = st.columns(3)
-                col_info1.metric("📊 평균 연배당률", f"{avg_y:.2f}%")
-                col_info2.metric("💰 매월 추가적립", f"{monthly_input/10000:,.0f}만원")
-                col_info3.metric("📦 선택 종목 수", f"{len(selected)}개")
-                st.caption(f"🔎 **적용 종목:** {', '.join(selected)}")
+    # 기본 데이터 세팅
+    total_invest = st.session_state.total_invest
+    weights = {stock: st.session_state.get(f"s_{i}", 100 // len(selected)) for i, stock in enumerate(selected)}
+    
+    # 탭 생성
+    tab1, tab2, tab3 = st.tabs(["💎 자산 구성", "💰 미래 예상", "🎯 목표 달성(은퇴)"])
 
-            st.write("")
+    # 공통 데이터 계산
+    all_data = []
+    avg_y = 0
+    if selected:
+        avg_y = sum([(df[df['pure_name']==n].iloc[0]['연배당률'] * (weights[n]/100)) for n in selected])
+        for stock in selected:
+            row = df[df['pure_name'] == stock].iloc[0]
+            amt = total_invest * (weights[stock] / 100)
+            all_data.append({
+                '종목': stock, '비중': weights[stock], '자산유형': row['자산유형'], 
+                '투자금액_만원': amt / 10000, '분류': row.get('분류', '국내'), '환구분': row.get('환구분', '-')
+            })
+    df_ana = pd.DataFrame(all_data)
 
-            col_g1, col_g2 = st.columns(2)
-            with col_g1:
-                target_monthly_goal = st.number_input(
-                    "목표 월 배당금 (만원, 세후)", 
-                    min_value=10, value=166, step=10, 
-                    key="target_monthly_goal_input"
-                ) * 10000
-                st.caption(f"💡 '세후' 월 141만원 설정 시 연간 세전 약 2,000만원 이내로 절세가 가능합니다.")
-                
-                use_start_money = st.checkbox(
-                    "현재 설정된 초기 자산을 포함하여 계산", 
-                    value=True, 
-                    help="체크 해제 시 '0원'에서 시작하는 제로베이스 시뮬레이션이 진행됩니다.",
-                    key="use_start_money_chk"
+    # -------------------------------------------------------
+    # [탭 1] 자산 구성
+    # -------------------------------------------------------
+    with tab1:
+        st.subheader("💎 자산 구성 상세 분석")
+        if not df_ana.empty:
+            c1, c2 = st.columns([1.2, 1])
+            
+            # 통화 분류 로직
+            def classify_currency(row):
+                try:
+                    if row['분류'] == "해외" or "(해외)" in row['종목'] or "환노출" in row['환구분']: return "🇺🇸 달러 자산"
+                    return "🇰🇷 원화 자산"
+                except: return "🇰🇷 원화 자산"
+            df_ana['통화'] = df_ana.apply(classify_currency, axis=1)
+            
+            # 차트
+            with c1:
+                asset_sum = df_ana.groupby('자산유형').agg({'비중': 'sum'}).reset_index()
+                chart = alt.Chart(asset_sum).mark_arc(innerRadius=60).encode(
+                    theta=alt.Theta("비중:Q"), 
+                    color=alt.Color("자산유형:N"),
+                    tooltip=["자산유형", "비중"]
+                ).properties(height=300)
+                st.altair_chart(chart, use_container_width=True)
+            
+            # 테이블
+            with c2:
+                st.dataframe(
+                    asset_sum.sort_values('비중', ascending=False), 
+                    column_config={"비중": st.column_config.NumberColumn(format="%d%%")},
+                    hide_index=True, use_container_width=True
                 )
-            
-            with col_g2:
-                apply_inflation_goal = st.toggle(
-                    "🛡️ 내 돈의 가치 지키기 (권장)", 
-                    value=False, 
-                    help="미래의 물가 상승을 고려하여 목표치를 자동으로 상향 조정하는 안전 모드입니다.",
-                    key="inflation_goal_toggle"
-                )
-                st.info("상단 제원표의 배당률과 적립금을 바탕으로 목표 달성 시점을 계산합니다.")
+                usd_ratio = df_ana[df_ana['통화'] == "🇺🇸 달러 자산"]['비중'].sum()
+                st.caption(f"🌐 달러 자산 비중: {usd_ratio:.1f}%")
+                st.progress(usd_ratio/100)
 
-            current_bal_goal = total_invest if use_start_money else 0
-            actual_start_bal = current_bal_goal 
-            
-            tax_factor = 0.846
-            monthly_yld = avg_y / 100 / 12  
-            months_passed = 0
-            max_months = 720               
-            
-            while months_passed < max_months:
-                if apply_inflation_goal:
-                    adjusted_target = target_monthly_goal * ((1.025) ** (months_passed / 12))
-                else:
-                    adjusted_target = target_monthly_goal
-                
-                required_asset_at_time = (adjusted_target / tax_factor) / (avg_y / 100) * 12
-                
-                if current_bal_goal >= required_asset_at_time:
-                    break
-                    
-                div_reinvest = current_bal_goal * monthly_yld * tax_factor
-                current_bal_goal += monthly_input + div_reinvest
-                months_passed += 1
+            ui.render_custom_table(df_ana)
 
-            st.markdown("---")
-            # ... (위쪽 while 루프는 그대로 두세요) ...
+    # -------------------------------------------------------
+    # [탭 2] 미래 자산 시뮬레이션
+    # -------------------------------------------------------
+    with tab2:
+        st.subheader("💰 10년 뒤 자산 미리보기")
+        c_sim1, c_sim2 = st.columns([1.5, 1])
+        with c_sim1:
+            st.info(f"🏁 시작 자산: **{total_invest/10000:,.0f}만원**")
+        with c_sim2:
+            years = st.slider("투자 기간 (년)", 3, 30, 10)
+        
+        # 월 적립금 입력 (탭2 전용)
+        monthly_add = st.number_input("➕ 매월 추가 적립 (만원)", 0, 5000, 150) * 10000
+        
+        # 간단 시뮬레이션 로직
+        final_money = total_invest
+        total_principal = total_invest
+        months = years * 12
+        monthly_rate = avg_y / 100 / 12 * 0.846 # 세후 월복리 가정
+        
+        # 차트용 데이터
+        chart_data = []
+        for m in range(months + 1):
+            if m > 0:
+                final_money += monthly_add
+                final_money *= (1 + monthly_rate)
+                total_principal += monthly_add
+            if m % 12 == 0:
+                chart_data.append({"년차": m//12, "자산": final_money/10000, "원금": total_principal/10000})
+        
+        # 결과 표시
+        sim_df = pd.DataFrame(chart_data)
+        st.area_chart(sim_df.set_index("년차")[["자산", "원금"]], color=["#0068c9", "#ff9f43"])
+        
+        profit = final_money - total_principal
+        st.metric(f"{years}년 뒤 예상 자산 (세후)", f"{final_money/10000:,.0f}만원", delta=f"+{profit/10000:,.0f}만원 이익")
+        st.caption("⚠️ 현재 배당률 유지 및 배당금 100% 재투자 가정")
 
-            st.markdown("---")
+    # -------------------------------------------------------
+    # [탭 3] 목표 달성 (여기가 사장님이 원하시던 그 기능!)
+    # -------------------------------------------------------
+    with tab3:
+        st.subheader("🎯 목표 배당금 역산기")
+        
+        # [입력 1] 목표 금액 설정
+        col_g1, col_g2 = st.columns([1.5, 1])
+        with col_g1:
+            target_monthly_goal = st.number_input("목표 월 배당금 (만원, 세후)", 10, 5000, 166, step=10) * 10000
+            st.caption("💡 '세후' 141만원 설정 시 연간 2,000만원(세전) 이내로 절세 가능")
+        with col_g2:
+            monthly_input_goal = st.number_input("매월 적립할 돈 (만원)", 0, 5000, 150, key="goal_monthly_input") * 10000
+            use_start = st.checkbox("현재 보유 자산 포함", value=True)
 
-            # [수정] 진행률 및 차감 금액 계산
-            gap_money = max(0, required_asset_at_time - actual_start_bal)
-            progress_rate = (actual_start_bal / required_asset_at_time) if required_asset_at_time > 0 else 0
+        # [정보 요약 박스] - 사장님 픽!
+        with st.container(border=True):
+            ci1, ci2, ci3 = st.columns(3)
+            ci1.metric("📊 평균 연배당률", f"{avg_y:.2f}%")
+            ci2.metric("💰 매월 추가적립", f"{monthly_input_goal/10000:,.0f}만원")
+            ci3.metric("📦 선택 종목 수", f"{len(selected)}개")
+            st.caption(f"🔎 **적용 종목:** {', '.join(selected)}")
 
-            # 1. 진행률 시각화
-            st.write(f"📊 **목표 달성 진행률: {min(progress_rate * 100, 100):.1f}%**")
-            st.progress(min(progress_rate, 1.0))
+        st.markdown("---")
+
+        # [계산 로직]
+        current_bal = total_invest if use_start else 0
+        start_bal_static = current_bal
+        tax_factor = 0.846
+        
+        # 필요 자산(Goal) 계산
+        if avg_y > 0:
+            required_asset = (target_monthly_goal / tax_factor) * 12 / (avg_y / 100)
+        else:
+            required_asset = 0
             
-            # 2. 3단 결과 표시 (최종 / 남은금액 / 기간)
-            c_res1, c_res2, c_res3 = st.columns(3)
-            
-            if months_passed >= max_months:
-                st.error("⚠️ 현재 적립액으로는 60년 내 달성이 어렵습니다. 적립금을 높여주세요.")
+        # 시뮬레이션
+        months_passed = 0
+        while months_passed < 720: # 60년 제한
+            if current_bal >= required_asset: break
+            # 월 배당 + 적립
+            div = current_bal * (avg_y / 100 / 12) * tax_factor
+            current_bal += monthly_input_goal + div
+            months_passed += 1
+
+        # [결과 시각화] - 초록색 차감 표시 적용
+        gap = max(0, required_asset - start_bal_static)
+        prog = (start_bal_static / required_asset) * 100 if required_asset > 0 else 0
+        
+        st.write(f"📊 **목표 달성 진행률: {min(prog, 100):.1f}%**")
+        st.progress(min(prog/100, 1.0))
+        
+        res1, res2, res3 = st.columns(3)
+        with res1:
+            st.metric("필요한 총 자산", f"{required_asset/100000000:,.2f} 억원")
+            st.caption("배당으로만 살기 위해 필요한 돈")
+        
+        with res2:
+            if gap > 0:
+                # [핵심] 보유 자산을 뺀 금액을 초록색 마이너스로 표시
+                st.metric("앞으로 모을 금액", f"{gap/100000000:,.2f} 억원", 
+                          delta=f"-{start_bal_static/10000:,.0f}만원 (보유)", delta_color="inverse")
             else:
-                with c_res1:
-                    st.metric("최종 필요 자산", f"{required_asset_at_time/100000000:,.2f} 억원")
-                    st.caption("목표 배당을 위한 몸집")
+                st.success("🎉 목표 달성 완료!")
                 
-                with c_res2:
-                    if gap_money > 0:
-                        # 시작 자산을 뺀 나머지 금액을 표시 (마이너스 델타로 차감 효과 강조)
-                        st.metric("앞으로 모을 금액", f"{gap_money/100000000:,.2f} 억원", delta=f"-{actual_start_bal/10000:,.0f}만원 (보유)", delta_color="normal")
-                        st.caption("시작 자산 차감 완료")
-                    else:
-                        st.success("🎉 이미 자산 목표 달성!")
+        with res3:
+            if months_passed >= 720:
+                st.error("60년 이상 소요")
+            else:
+                st.metric("예상 소요 기간", f"{months_passed//12}년 {months_passed%12}개월")
+                st.caption("월 복리 재투자 기준")
                 
-                with c_res3:
-                    st.metric("목표 달성 소요 기간", f"{months_passed // 12}년 {months_passed % 12}개월")
-                    if apply_inflation_goal:
-                        st.caption("🛡️ 물가상승률 반영됨")
-                    else:
-                        st.caption("🚀 현재 가치 기준")
+        # [복구된 주의사항 멘트]
+        st.write("") # 간격 좀 띄우고
+        if (target_monthly_goal * 12 / tax_factor) > 20000000:
+            st.warning(f"🚨 **현실적 조언:** 목표 달성 시 연간 배당소득(세전)이 2,000만원을 초과하여 **금융소득종합과세** 대상이 될 수 있습니다.")
 
-            if apply_inflation_goal and months_passed < max_months:
-                st.info(f"🛡️ **안전 모드 분석:** {months_passed // 12}년 뒤에는 물가 때문에 월 **{adjusted_target/10000:,.0f}만원**을 받아야 지금의 가치가 유지됩니다.")
-            
-            final_annual_income = adjusted_target * 12
-            if (final_annual_income / tax_factor) > 20000000:
-                st.warning(f"🚨 **현실적 조언:** 목표 달성 시 연간 배당소득(세전)이 2,000만원을 초과하여 **금융소득종합과세** 대상이 될 수 있습니다.")
-                
-            st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**
-            
-            1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 단순 결과입니다.
-            2. 재투자가 매월 이루어진다는 가정하에 계산된 복리 결과입니다.
-            """)
-            
+        st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**
+        1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 단순 결과입니다.
+        2. 재투자가 매월 이루어진다는 가정하에 계산된 복리 결과입니다.""")    
+        
 def render_roadmap_page(df):
     """📅 월별 로드맵 페이지 렌더링"""
     st.header("📅 나의 배당 월급 로드맵")
