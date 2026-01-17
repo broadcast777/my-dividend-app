@@ -356,44 +356,51 @@ def render_calculator_page(df):
         total_invest = st.session_state.total_invest 
 
 
-        # --- [수정 시작] 종목명만 표시하면서 코드로 검색 가능한 로직 ---
-        
-        # --- [수정 시작] 종목명만 표시 + 코드로 검색 가능한 초정밀 로직 ---
-        
-        # 1. '코드 + 이름'이 합쳐진 검색용 리스트 생성
-        # 종목코드가 숫자면 005930처럼 6자리로 맞추고(zfill), 문자열로 변환합니다.
-        def make_search_label(row):
-            # 컬럼명이 '종목코드'인지 '코드'인지 확인하여 유연하게 대처
-            code = str(row.get('종목코드') or row.get('코드') or '').strip()
-            
-            # 한국 종목코드(6자리 숫자)의 경우 앞자리 0이 잘리지 않게 보정
-            if code.isdigit() and len(code) < 6:
-                code = code.zfill(6)
-            
-            return f"{code} {row['pure_name']}"
 
-        search_options = df.apply(make_search_label, axis=1).unique().tolist()
+        
+        # --- [수정 시작] 종목명만 표시 + 코드로 검색 가능한 방탄 로직 ---
+        
+        # 1. '코드 + 이름' 결합 리스트 생성 (데이터 정제 강화)
+        search_options = []
+        try:
+            # 데이터프레임의 실제 컬럼명을 확인 (대소문자/공백 방어)
+            col_code = next((c for c in df.columns if '코드' in c), None)
+            
+            if col_code:
+                # [핵심] 모든 데이터를 강제로 깨끗한 문자열로 변환합니다.
+                codes = df[col_code].astype(str).str.strip()
+                # 한국 종목(6자리) 앞자리 0 사라짐 방지
+                codes = codes.apply(lambda x: x.split('.')[0].zfill(6) if x.isdigit() or x.replace('.','',1).isdigit() else x)
+                names = df['pure_name'].astype(str).str.strip()
+                
+                # 검색 엔진이 인식할 수 있게 "코드 종목명" 리스트 생성
+                search_options = [f"{c} {n}" for c, n in zip(codes, names)]
+            else:
+                # 코드가 없는 비상 상황 대비용
+                search_options = df['pure_name'].unique().tolist()
+        except Exception as e:
+            logger.error(f"❌ 검색 옵션 생성 실패: {e}")
+            search_options = df['pure_name'].unique().tolist()
 
-        # 2. 기존 세션에 저장된 종목이 있다면 형식에 맞춰 변환 (불러오기 기능 유지)
+        # 2. 기존 선택값 복원 로직 (불러오기 기능 유지)
         default_selected = []
         if st.session_state.get('selected_stocks'):
             for s_name in st.session_state.selected_stocks:
-                # 저장된 이름(s_name)이 포함된 검색 옵션을 정확히 찾음
                 match = [opt for opt in search_options if opt.endswith(s_name)]
                 if match:
                     default_selected.append(match[0])
 
-        # 3. [핵심] multiselect 실행
+        # 3. [핵심 UI] 멀티셀렉트 실행
         selected_search = col2.multiselect(
             "📊 종목 선택 (이름 또는 코드로 검색)", 
             options=search_options, 
             default=default_selected,
-            # [마법의 한 줄] 화면에는 공백 뒤의 '이름'만 표시
+            # [마법의 한 줄] 검색은 숫자로 되지만, 화면에는 '이름'만 표시
             format_func=lambda x: x.split(" ", 1)[-1] if " " in x else x,
-            help="숫자로 된 종목코드(예: 478700)를 입력해도 종목이 검색됩니다!"
+            help="종목코드(숫자)나 종목명을 입력해 보세요!"
         )
 
-        # 4. 선택 완료 후 다시 '순수 이름'만 추출하여 기존 엔진에 전달
+        # 4. 결과값 정제 후 세션 저장
         selected = [opt.split(" ", 1)[-1] for opt in selected_search]
         st.session_state.selected_stocks = selected
         # --- [수정 끝] ---
