@@ -360,53 +360,47 @@ def render_calculator_page(df):
         
         # --- [수정 시작] 종목명만 표시 + 코드로 검색 가능한 방탄 로직 ---
         
-        # --- [수정 시작] 종목명만 표시 + 코드로 검색 가능한 방탄 로직 ---
-        
-        # 1. '코드 + 이름' 결합 리스트 생성 (데이터 타입 불일치 완벽 방어)
-        search_options = []
-        try:
-            # CSV의 '종목코드'와 'pure_name'을 깨끗한 문자열로 합칩니다.
-            # 종목코드가 476800.0 처럼 소수점이 붙어 나오는 경우를 대비해 .split('.')[0] 처리
-            def clean_label(row):
-                code = str(row.get('종목코드', '')).split('.')[0].strip()
-                name = str(row.get('pure_name', '')).strip()
-                return f"{code} {name}"
+        # --- [최종 정밀 보정 버전] ---
 
-            # 전체 종목 리스트 생성
-            search_options = df.apply(clean_label, axis=1).unique().tolist()
-        except Exception as e:
-            logger.error(f"❌ 검색 리스트 생성 오류: {e}")
-            search_options = df['pure_name'].unique().tolist()
+        # 1. '코드 + 이름' 결합 리스트 생성 (데이터 정제)
+        def clean_label(row):
+            code = str(row.get('종목코드', '')).strip()
+            # float 형태(476800.0) 및 앞자리 0 잘림 방어
+            if '.' in code:
+                code = code.split('.')[0]
+            if code.isdigit() and len(code) < 6:
+                code = code.zfill(6) # 0052D0 등 문자 혼합형은 그대로, 숫자형만 6자리 보정
+                
+            name = str(row.get('종목명', '')).strip()
+            # 코드와 이름 사이에 명확한 '구분자' 한 칸을 둡니다.
+            return f"{code} {name}"
 
-        # 2. 기존 세션에 저장된 '이름'들을 '코드+이름' 형식으로 복원 (불러오기 호환)
+        # 중복 제거 및 리스트화 (순서 유지를 위해 sorted 추천)
+        search_options = sorted(list(set(df.apply(clean_label, axis=1).tolist())))
+
+        # 2. 기존 세션 데이터 복원 (이름 기반 매칭)
         default_selected = []
         if st.session_state.get('selected_stocks'):
             for s_name in st.session_state.selected_stocks:
-                # 리스트 끝부분(이름)이 일치하는 항목을 찾아 기본값으로 설정
-                match = [opt for opt in search_options if opt.endswith(s_name)]
+                # 이름이 정확히 일치하는 옵션을 찾습니다.
+                match = [opt for opt in search_options if opt.split(" ", 1)[-1] == s_name]
                 if match:
                     default_selected.append(match[0])
 
         # 3. [핵심 UI] 멀티셀렉트 실행
-        # options에는 '코드 이름'이 다 들어가서 검색이 되고, format_func로 화면엔 '이름'만 보입니다.
         selected_search = col2.multiselect(
             "📊 종목 선택 (이름 또는 코드로 검색)", 
             options=search_options, 
             default=default_selected,
+            # [안전장치] 공백이 있는 경우에만 잘라내서 이름을 표시
             format_func=lambda x: x.split(" ", 1)[1] if " " in x else x,
             help="종목코드 숫자(예: 476800)나 종목명을 입력해 보세요!"
         )
 
-        # 4. 결과값에서 다시 '순수 이름'만 추출하여 기존 엔진에 전달 (데이터 연동)
-        selected = [opt.split(" ", 1)[1] for opt in selected_search]
+        # 4. 결과값에서 다시 '순수 이름'만 추출하여 엔진에 전달
+        # 리스트 컴프리헨션에도 안전장치를 추가합니다.
+        selected = [opt.split(" ", 1)[1] if " " in opt else opt for opt in selected_search]
         st.session_state.selected_stocks = selected
-        # --- [수정 끝] ---
-  
-
-        
-
-
-        all_data = []
 
         if selected:
             has_foreign_stock = any(df[df['pure_name'] == s_name].iloc[0]['분류'] == '해외' for s_name in selected)
