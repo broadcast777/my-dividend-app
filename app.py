@@ -38,16 +38,16 @@ st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
 # ---------------------------------------------------------
 # 주석 처리를 원하시면 아래 함수 전체를 드래그해서 Ctrl + / 누르시면 됩니다.
 def check_coppa_compliance():
-     """만 13세 이상 이용 확인 (법적 준수 안내판)"""
-     if "age_verified" not in st.session_state:
+    """만 13세 이상 이용 확인 (법적 준수 안내판)"""
+    if "age_verified" not in st.session_state:
         st.warning("📋 **서비스 이용 안내**")
         st.write("본 서비스는 개인정보보호법 및 COPPA 규정에 따라 만 13세 이상 사용자만 이용 가능합니다.")
-      if st.checkbox("나는 만 13세 이상이며, 이용 약관 및 개인정보 처리방침에 동의합니다."):
+        if st.checkbox("나는 만 13세 이상이며, 이용 약관 및 개인정보 처리방침에 동의합니다."):
             st.session_state.age_verified = True
             logger.info("✅ 사용자가 나이 확인 및 약관에 동의함")
             st.rerun()
         else:
-             st.stop()
+            st.stop()
 
 # 세션 상태(Session State) 변수 초기화 로직
 for key in ["is_logged_in", "user_info", "code_processed"]:
