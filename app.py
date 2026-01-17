@@ -363,48 +363,50 @@ def render_calculator_page(df):
         name_col_name = next((c for c in df.columns if 'pure' in c), 
                              next((c for c in df.columns if '명' in c), '종목명'))
 
-        def clean_label(row):
-            c = str(row.get(code_col_name, '')).strip()
-            # float 형태(476800.0) 방어 및 6자리 보정
-            if '.' in c: c = c.split('.')[0]
-            if c.isdigit() and len(c) < 6: c = c.zfill(6)
-            
-            n = str(row.get(name_col_name, '')).strip()
-            # 이모지 제거 (매칭 일관성)
-            n = n.replace(" ⭐", "").replace("⭐", "")
-            return f"{c} {n}"
+        # --- [최종 보강] 검색 엔진용 데이터 정밀 가공 ---
+        def get_clean_search_options(df):
+            options = []
+            for _, row in df.iterrows():
+                # 1. 종목코드 정밀 세척 (소수점 제거 및 문자열 강제 변환)
+                raw_code = str(row.get('종목코드', row.get('코드', ''))).strip()
+                if '.' in raw_code:
+                    raw_code = raw_code.split('.')[0]
+                
+                # 2. 한국 종목코드(숫자 6자리) 0 살리기
+                if raw_code.isdigit() and len(raw_code) < 6:
+                    raw_code = raw_code.zfill(6)
+                
+                # 3. 이름 세척 (순수 이름 우선, 없으면 종목명)
+                raw_name = str(row.get('pure_name', row.get('종목명', ''))).strip()
+                
+                # 4. [중요] 검색용 라벨 생성: "이름 (코드)"
+                # 이렇게 해야 검색창에 이름을 쳐도, 숫자를 쳐도 엔진이 다 찾아냅니다.
+                label = f"{raw_name} ({raw_code})"
+                options.append(label)
+            return sorted(list(set(options)))
 
-        # 검색 리스트 생성 및 정렬
-        search_options = sorted(list(set(df.apply(clean_label, axis=1).tolist())))
+        # 검색 옵션 생성
+        search_options = get_clean_search_options(df)
         
-        # 기존 세션 복원 (이모지 무시)
+        # 기존 세션에 저장된 종목이 있다면 자동 선택 (이름 매칭)
         default_selected = []
         if st.session_state.get('selected_stocks'):
             for s_name in st.session_state.selected_stocks:
-                # 이모지를 제거하고 매칭
-                match = [opt for opt in search_options 
-                        if opt.split(' ', 1)[1] == s_name.replace(" ⭐", "").replace("⭐", "")]
-                if match: 
+                match = [opt for opt in search_options if opt.startswith(s_name)]
+                if match:
                     default_selected.append(match[0])
 
+        # 멀티셀렉트 UI
         selected_search = col2.multiselect(
             "📊 종목 선택 (이름 또는 코드로 검색)", 
             options=search_options, 
             default=default_selected,
-            # 화면에는 이름만 보여주어 시각적 청결함 유지
-            format_func=lambda x: x.split(' ', 1)[1] if ' ' in x else x,
-            help="종목코드 (예: 476800, 0052D0)나 종목명으로 검색하세요!"
+            help="숫자 코드(예: 476800)나 종목명을 입력해 보세요!"
         )
 
-        # 엔진에는 이름만 전달
-        selected = []
-        for opt in selected_search:
-            name = opt.split(' ', 1)[1] if ' ' in opt else opt
-            name = name.replace(" ⭐", "").replace("⭐", "")
-            selected.append(name)
-
+        # 선택된 값에서 다시 '순수 이름'만 추출하여 저장
+        selected = [opt.split(" (")[0] for opt in selected_search]
         st.session_state.selected_stocks = selected
-        # --- [수정 끝] ---
 
         if selected:
             has_foreign_stock = any(df[df['pure_name'] == s_name].iloc[0]['분류'] == '해외' for s_name in selected)
