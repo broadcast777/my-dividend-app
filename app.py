@@ -355,11 +355,38 @@ def render_calculator_page(df):
         st.session_state.total_invest = invest_input * 10000
         total_invest = st.session_state.total_invest 
 
+
+        # --- [수정 시작] 종목명만 표시하면서 코드로 검색 가능한 로직 ---
+        
+        # 1. '코드 + 이름'이 합쳐진 검색용 리스트 생성
+        search_options = df.apply(lambda x: f"{str(x.get('종목코드', '')).strip()} {x['pure_name']}", axis=1).unique()
+
+        # 2. 기존 세션에 저장된 종목이 있다면 형식에 맞춰 변환 (불러오기 기능 유지용)
+        default_selected = []
+        if st.session_state.selected_stocks:
+            for s in st.session_state.selected_stocks:
+                # 저장된 이름(s)이 포함된 검색 옵션을 찾음
+                match = [opt for opt in search_options if opt.endswith(s)]
+                if match:
+                    default_selected.append(match[0])
+
+        # 3. [핵심] format_func를 사용하여 '이름'만 화면에 출력
+        selected_search = col2.multiselect(
+            "📊 종목 선택", 
+            options=search_options, 
+            default=default_selected,
+            format_func=lambda x: x.split(" ", 1)[1] if " " in x else x,
+            help="종목명이나 숫자로 된 종목코드를 입력해 보세요!"
+        )
+
+        # 4. 선택 완료 후 다시 '순수 이름'만 추출하여 기존 로직에 전달
+        selected = [opt.split(" ", 1)[1] for opt in selected_search]
+        st.session_state.selected_stocks = selected
+        # --- [수정 끝] ---
   
 
         
-        selected = col2.multiselect("📊 종목 선택", df['pure_name'].unique(), default=st.session_state.selected_stocks)
-        st.session_state.selected_stocks = selected
+
 
         all_data = []
 
