@@ -690,22 +690,53 @@ def render_calculator_page(df):
                 gen_val_manwon = general_bal / 10000
                 general_ratio_msg = f"<div style='color: #6c757d; font-size: 0.85em; margin-top: 15px; border-top: 1px dashed #d0e8ff; padding-top: 10px;'>💡 최종 자산 중 <b>약 {gen_val_manwon:,.0f}만원</b>은 ISA 한도 초과로 인해<br>일반 계좌(15.4% 과세)로 운용된 결과입니다.</div>"
 
-            # [수정] 결과 요약 박스 (들여쓰기 오류 해결 버전)
+            # --- [수정] 1. 최종 결과값 계산 (NameError 방지용 필수 부품) ---
+            final_row = df_sim_chart.iloc[-1]
+            final_asset = (isa_bal + general_bal)
+            final_principal = (isa_principal + general_principal)
+            profit_isa = isa_bal - isa_principal
+            monthly_div_final = final_row['실제월배당']
+
+            if is_isa_mode:
+                taxable_isa = max(0, profit_isa - (isa_exempt * 10000))
+                tax_isa = taxable_isa * 0.099
+                real_money = final_asset - tax_isa
+                tax_msg = f"예상 세금 {tax_isa/10000:,.0f}만원 (9.9% 분리과세)"
+                monthly_pocket = monthly_div_final
+            else:
+                real_money = final_asset
+                tax_msg = f"기납부 세금 {total_tax_paid_general/10000:,.0f}만원 (15.4% 원천징수)"
+                monthly_pocket = monthly_div_final * 0.846
+
+            # --- [수정] 2. 안내 문구 및 비유 아이템 준비 ---
+            inflation_msg_money = ""
+            if apply_inflation:
+                discount_rate = (1.025) ** years_sim 
+                pv_money = real_money / discount_rate
+                inflation_msg_money = f"<br><span style='font-size:0.6em; color:#ff6b6b;'>(현재가치: 약 {pv_money/10000:,.0f}만원)</span>"
+
+            # 일반계좌 운용 안내 문구
+            general_ratio_msg = ""
+            if is_isa_mode and general_bal > 1:
+                gen_val_manwon = general_bal / 10000
+                general_ratio_msg = f"<div style='color: #6c757d; font-size: 0.85em; margin-top: 15px; border-top: 1px dashed #d0e8ff; padding-top: 10px;'>💡 최종 자산 중 <b>약 {gen_val_manwon:,.0f}만원</b>은 ISA 한도 초과로 인해<br>일반 계좌(15.4% 과세)로 운용된 결과입니다.</div>"
+
+            # --- [수정] 3. 결과 박스 출력 (왼쪽 벽면에 밀착된 구조) ---
             st.markdown(f"""
-                            <div style="background-color: #e7f3ff; border: 1.5px solid #d0e8ff; border-radius: 16px; padding: 25px; text-align: center; box-shadow: 0 4px 10px rgba(0,104,201,0.05);">
-                                <p style="color: #666; font-size: 0.95em; margin: 0 0 8px 0;">{years_sim}년 뒤 모이는 돈 (세후)</p>
-                                <h2 style="color: #0068c9; font-size: 2.2em; margin: 0; font-weight: 800; line-height: 1.2;">약 {real_money/10000:,.0f}만원{inflation_msg_money}</h2>
-                                <p style="color: #777; font-size: 0.9em; margin: 8px 0 0 0;">(투자원금 {final_principal/10000:,.0f}만원 / {tax_msg})</p>
-                                <div style="height: 1px; background-color: #d0e8ff; margin: 25px auto; width: 85%;"></div>
-                                <p style="color: #0068c9; font-weight: bold; font-size: 1.1em; margin: 0 0 12px 0;">📅 월 예상 배당금: {monthly_pocket/10000:,.1f}만원 {inflation_msg_monthly}</p>
-                                <div style="background-color: rgba(255,255,255,0.5); padding: 15px; border-radius: 12px; display: inline-block; min-width: 80%;">
-                                    <p style="color: #333; font-size: 1.1em; margin: 0; line-height: 1.6;">
-                                        매달 <b>{selected_item['emoji']} {selected_item['name']} {msg_count}{selected_item['unit']}</b><br>
-                                        마음껏 즐기기 가능! 😋
-                                    </p>{general_ratio_msg}
-                                </div>
-                            </div>
-                            """, unsafe_allow_html=True)
+<div style="background-color: #e7f3ff; border: 1.5px solid #d0e8ff; border-radius: 16px; padding: 25px; text-align: center; box-shadow: 0 4px 10px rgba(0,104,201,0.05);">
+    <p style="color: #666; font-size: 0.95em; margin: 0 0 8px 0;">{years_sim}년 뒤 모이는 돈 (세후)</p>
+    <h2 style="color: #0068c9; font-size: 2.2em; margin: 0; font-weight: 800; line-height: 1.2;">약 {real_money/10000:,.0f}만원{inflation_msg_money}</h2>
+    <p style="color: #777; font-size: 0.9em; margin: 8px 0 0 0;">(투자원금 {final_principal/10000:,.0f}만원 / {tax_msg})</p>
+    <div style="height: 1px; background-color: #d0e8ff; margin: 25px auto; width: 85%;"></div>
+    <p style="color: #0068c9; font-weight: bold; font-size: 1.1em; margin: 0 0 12px 0;">📅 월 예상 배당금: {monthly_pocket/10000:,.1f}만원</p>
+    <div style="background-color: rgba(255,255,255,0.5); padding: 15px; border-radius: 12px; display: inline-block; min-width: 80%;">
+        <p style="color: #333; font-size: 1.1em; margin: 0; line-height: 1.6;">
+            매달 <b>{selected_item['emoji']} {selected_item['name']} {msg_count}{selected_item['unit']}</b><br>
+            마음껏 즐기기 가능! 😋
+        </p>{general_ratio_msg}
+    </div>
+</div>
+""", unsafe_allow_html=True)
             
             annual_div_income = monthly_div_final * 12
             if annual_div_income > 20000000: st.warning(f"🚨 **주의:** {years_sim}년 뒤 연간 배당금이 2,000만원을 초과하여 금융소득종합과세 대상이 될 수 있습니다.")
