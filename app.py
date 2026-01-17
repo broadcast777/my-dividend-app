@@ -961,7 +961,7 @@ def main():
     # 10. 하단 정보 및 방문자 추적
     st.divider()
     st.caption("© 2025 **배당팽이** | 실시간 데이터 기반 배당 대시보드")
-    st.caption("First Released: 2025.12.31 | [📝 배당 투자 일지 구경가기](https://blog.naver.com/dividenpange) | [💌 앱 개선 의견 남기기](https://blog.naver.com/guestbook/dividenpange)")
+    st.caption("First Released: 2025.12.31 | [📝 배당 투자 일지 구경가기](https://blog.naver.com/dividenpange) | [💌 앱 개선 의견 남기기](https://blog.naver.com/guestbook/List.naver?blogId=dividenpange)")
 
     
 
