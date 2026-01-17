@@ -389,6 +389,12 @@ def render_calculator_page(df):
             help="종목코드 숫자(예: 476800)나 종목명을 입력해 보세요!"
         )
 
+                    # 추가해서 실행해보세요
+            st.write("🔍 컬럼명:", df.columns.tolist())
+            st.write("📋 샘플 라벨 5개:", search_options[:5])
+            st.write("✅ 선택됨:", st.session_state.selected_stocks)
+
+
         # 엔진에는 다시 이름만 전달
         selected = [opt.split('] ')[1] if '] ' in opt else opt for opt in selected_search]
         st.session_state.selected_stocks = selected
