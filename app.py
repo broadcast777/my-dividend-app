@@ -959,10 +959,11 @@ def main():
         render_stocklist_page(df)
 
     # 10. 하단 정보 및 방문자 추적
+    # 10. 하단 정보 및 소통 창구 (이메일 버전)
+    # 10. 하단 정보 및 소통 창구
     st.divider()
-    st.caption("© 2025 **배당팽이** | 실시간 데이터 기반 배당 대시보드")
-    # 아래 주소 중 '1번'을 강력 추천합니다.
-    st.caption("First Released: 2025.12.31 | [📝 투자 일지](https://blog.naver.com/dividenpange) | [💌 앱 개선 의견 남기기](https://blog.naver.com/dividenpange?Redirect=Guestbook)")
+    st.caption("© 2025 **배당 팽이** | 실시간 데이터 기반 배당 대시보드")
+    st.caption("First Released: 2025.12.31 | [📝 배당팽이 투자 일지 ](https://blog.naver.com/dividenpange) | [💌 앱 개선 의견 남기기](https://docs.google.com/forms/d/e/1FAIpQLSdEJWd4sYx-09wZk7gl86Sf7bMliT4X9R0eWTAqxjv_Mal8Jg/viewform?usp=header)")
 
     
 
