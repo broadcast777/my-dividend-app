@@ -11,7 +11,7 @@ import hashlib
 import time
 import random
 from streamlit.runtime.scriptrunner import get_script_run_ctx
-from logger import logger  # [추가] 블랙박스 배선 연결
+from logger import logger  
 from analytics import inject_ga
 
 # [필수] 날짜 및 URL 라이브러리
@@ -36,7 +36,6 @@ st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
 # ---------------------------------------------------------
 # [추가 과제] 4과제: COPPA 나이 확인 (안전 장치)
 # ---------------------------------------------------------
-# 주석 처리를 원하시면 아래 함수 전체를 드래그해서 Ctrl + / 누르시면 됩니다.
 def check_coppa_compliance():
     """만 13세 이상 이용 확인 (법적 준수 안내판)"""
     if "age_verified" not in st.session_state:
@@ -101,7 +100,7 @@ def check_auth_status():
             if session and session.user:
                 st.session_state.is_logged_in = True
                 st.session_state.user_info = session.user
-                logger.info(f"👤 사용자 로그인 성공: {session.user.email}") # [3과제] 로깅 추가
+                logger.info(f"👤 사용자 로그인 성공: {session.user.email}") 
             
             # 인증 성공 후 깨끗한 URL로 새로고침
             st.query_params.clear()
@@ -111,7 +110,7 @@ def check_auth_status():
         except Exception as e:
             # [자동 복구 로직] verifier 오류(새로고침 시 발생 등) 시 파라미터 리셋 후 재시도
             err_msg = str(e).lower()
-            logger.error(f"🔴 인증 과정 중 오류 발생: {err_msg}") # [3과제] 로깅 추가
+            logger.error(f"🔴 인증 과정 중 오류 발생: {err_msg}") 
             if "verifier" in err_msg or "non-empty" in err_msg:
                 st.warning("🔄 보안 토큰 갱신 중... 잠시만 기다려주세요.")
                 st.query_params.clear()
@@ -145,7 +144,7 @@ def render_login_ui():
             
             # 로그아웃 버튼 클릭 시 세션 초기화 및 새로고침
             if st.button("🚪 로그아웃", key="logout_btn_sidebar", use_container_width=True):
-                logger.info(f"🚪 사용자 로그아웃: {email}") # [3과제] 로깅 추가
+                logger.info(f"🚪 사용자 로그아웃: {email}") 
                 supabase.auth.sign_out()
                 st.session_state.is_logged_in = False
                 st.session_state.user_info = None
@@ -159,7 +158,7 @@ def render_sidebar_footer():
     """사이드바 최하단 후원 버튼 및 저작권 정보"""
     bmc_url = "https://www.buymeacoffee.com/dividenpange"
 
-    st.sidebar.markdown("---") # 구분선
+    st.sidebar.markdown("---") 
     
     st.sidebar.markdown(f"""
         <style>
@@ -322,7 +321,7 @@ def render_admin_tools(df_raw):
 
 def render_calculator_page(df):
     """💰 배당금 계산기 페이지 렌더링"""
-    # [중요] 변수 가출 방지를 위해 함수 시작과 동시에 빈 바구니 생성 (에러 원천 차단)
+    # [Level 1] 변수 가출 방지를 위해 함수 시작과 동시에 빈 바구니 생성
     all_data = []
 
     # 6-1. AI 로보어드바이저
@@ -358,52 +357,37 @@ def render_calculator_page(df):
         st.session_state.total_invest = invest_input * 10000
         total_invest = st.session_state.total_invest 
 
-        # --- [수정] 자료형 유격 없이 무조건 검색되는 '방탄' 로직 ---
-        
-        # 1. 컬럼명 찾기 (종목코드 또는 코드)
-        code_col = next((c for c in df.columns if '코드' in c), '종목코드')
-        name_col = next((c for c in df.columns if 'pure' in c or '명' in c), '종목명')
+        # --- [최종 해결책] CSV에 박아넣은 '검색라벨' 컬럼 활용 ---
+        # 1. 만약 '검색라벨' 열이 없다면 비상용으로 만든다 (안전장치)
+        if '검색라벨' not in df.columns:
+            def make_temp_label(row):
+                c = str(row.get('종목코드', row.get('코드', ''))).split('.')[0].strip()
+                if c.isdigit(): c = c.zfill(6)
+                n = str(row.get('종목명', row.get('pure_name', ''))).strip()
+                return f"[{c}] {n}"
+            df['검색라벨'] = df.apply(make_temp_label, axis=1)
 
-        def create_clean_search_tag(row):
-            # 1. 데이터를 무조건 문자열로 변환 (476800.0 -> "476800.0")
-            code_str = str(row[code_col]).strip()
-            
-            # 2. 소수점(.0) 제거 ("476800.0" -> "476800")
-            if code_str.endswith('.0'):
-                code_str = code_str[:-2]
-                
-            # 3. 숫자인 경우 6자리 맞춤 (5930 -> 005930)
-            if code_str.isdigit() and len(code_str) < 6:
-                code_str = code_str.zfill(6)
-            
-            # 4. 이름 가져오기
-            name_str = str(row[name_col]).strip()
-            
-            # 5. 검색용 태그 생성: [코드] 종목명
-            # 대괄호([]) 안에 코드를 넣으면 검색 엔진이 더 잘 찾습니다.
-            return f"[{code_str}] {name_str}"
-
-        # 검색 리스트 생성
-        search_options = sorted(list(set(df.apply(create_clean_search_tag, axis=1).tolist())))
+        # 2. 검색 리스트 생성 (단순 호출)
+        search_options = sorted(list(set(df['검색라벨'].astype(str).tolist())))
         
-        # 기존 세션 복원 (이름 기반)
+        # 3. 기존 세션 복원
         default_selected = []
         if st.session_state.get('selected_stocks'):
             saved_names = set(st.session_state.selected_stocks)
-            # "[코드] 이름" 에서 "이름"만 떼서 비교
+            # "[코드] 이름" 에서 "이름" 추출하여 비교
             default_selected = [opt for opt in search_options if opt.split('] ')[1] in saved_names]
 
-        # 멀티셀렉트 실행
+        # 4. 멀티셀렉트 (검색은 [코드] 이름, 표시는 이름만)
         selected_search = col2.multiselect(
             "📊 종목 선택 (이름 또는 코드로 검색)", 
             options=search_options, 
             default=default_selected,
-            # [핵심] 화면에는 ']' 뒤의 이름만 보여줍니다.
+            # [핵심] 사용자의 눈에는 ']' 뒤의 이름만 보여줍니다.
             format_func=lambda x: x.split('] ')[1] if '] ' in x else x,
-            help="종목코드(숫자)나 종목명을 입력해 보세요!"
+            help="종목코드(예: 476800)나 종목명을 입력해 보세요!"
         )
 
-        # 엔진에는 이름만 전달
+        # 5. 내부 엔진에는 다시 '순수 이름'만 전달
         selected = [opt.split('] ')[1] if '] ' in opt else opt for opt in selected_search]
         st.session_state.selected_stocks = selected
         # --- [수정 끝] ---
@@ -577,6 +561,7 @@ def render_calculator_page(df):
                 st.warning(f"🚨 **주의:** 연간 예상 배당금이 **{total_y_div/10000:,.0f}만원**입니다. 금융소득종합과세 대상에 해당될 수 있습니다.")
 
     # 6-7. 심층 분석
+    # [수정] 들여쓰기 교정 완료 (all_data가 비어있어도 에러 안 남)
     df_ana = pd.DataFrame(all_data)
     if not df_ana.empty:
         st.write("")
@@ -783,7 +768,7 @@ def render_calculator_page(df):
             
             annual_div_income = monthly_div_final * 12
             if annual_div_income > 20000000: st.warning(f"🚨 **주의:** {years_sim}년 뒤 연간 배당금이 2,000만원을 초과하여 금융소득종합과세 대상이 될 수 있습니다.")
-            st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**\n1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 단순 결과입니다.\n2. ISA 계좌의 비과세 한도 및 세율은 세법 개정에 따라 달라질 수 있습니다.\n3. 과거의 데이터를 기반으로 한 단순 시뮬레이션이며, 실제 투자 수익을 보장하지 않습니다.""")
+            st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**\n1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 결과입니다.\n2. ISA 계좌의 비과세 한도 및 세율은 세법 개정에 따라 달라질 수 있습니다.\n3. 과거의 데이터를 기반으로 한 단순 시뮬레이션이며, 실제 투자 수익을 보장하지 않습니다.""")
         
         with tab_goal:
             st.subheader("🎯 목표 배당금 역산기 (은퇴 시뮬레이터)")
