@@ -269,7 +269,7 @@ def render_admin_tools(df_raw):
 
         st.write("") 
         with st.expander("⚡ 전체 종목 자동 업데이트 (신규 제외)"):
-            st.caption("신규 상장 종목(⭐)과 배당률 2% 미만은 건너뜁니다.")
+            st.caption("신규 상장 종목(⭐)과 배당률 2% 미만은 건너뜜")
             if st.button("전체 자동 갱신 시작"):
                 progress_bar = st.progress(0)
                 status_text = st.empty()
@@ -322,7 +322,7 @@ def render_admin_tools(df_raw):
 
 def render_calculator_page(df):
     """💰 배당금 계산기 페이지 렌더링"""
-    # [수정] 변수 가출 방지를 위해 함수 시작과 동시에 빈 바구니 생성
+    # [Level 1] 변수 초기화 위치 최상단 배치 (IndentationError 및 변수 가출 방지)
     all_data = []
 
     # 6-1. AI 로보어드바이저
@@ -358,47 +358,51 @@ def render_calculator_page(df):
         st.session_state.total_invest = invest_input * 10000
         total_invest = st.session_state.total_invest 
 
-        # --- [수정] 검색 로직 강화: [코드] 종목명 방식 (No results 해결) ---
-        code_col_name = next((c for c in df.columns if '코드' in c), '종목코드')
-        name_col_name = next((c for c in df.columns if 'pure' in c or '명' in c), '종목명')
+        # --- [수정] 검색 로직 강화: 코드를 맨 앞에 배치하여 숫자 검색 가능 ---
+        code_col_name = next((c for c in df.columns if '코드' in c), '코드')
+        name_col_name = next((c for c in df.columns if 'pure' in c), 
+                             next((c for c in df.columns if '명' in c), '종목명'))
 
         def clean_label(row):
             c = str(row.get(code_col_name, '')).strip()
-            # 소수점 제거 및 6자리 보정
+            # float 형태(476800.0) 방어 및 6자리 보정
             if '.' in c: c = c.split('.')[0]
             if c.isdigit() and len(c) < 6: c = c.zfill(6)
+            
             n = str(row.get(name_col_name, '')).strip()
-            return f"[{c}] {n}"
+            # 이모지 제거 (매칭 일관성)
+            n = n.replace(" ⭐", "").replace("⭐", "")
+            return f"{c} {n}"
 
         # 검색 리스트 생성 및 정렬
         search_options = sorted(list(set(df.apply(clean_label, axis=1).tolist())))
         
-        # 기존 세션 복원
+        # 기존 세션 복원 (이모지 무시)
         default_selected = []
         if st.session_state.get('selected_stocks'):
             for s_name in st.session_state.selected_stocks:
-                match = [opt for opt in search_options if opt.endswith(f"] {s_name}")]
-                if match: default_selected.append(match[0])
+                # 이모지를 제거하고 매칭
+                match = [opt for opt in search_options 
+                        if opt.split(' ', 1)[1] == s_name.replace(" ⭐", "").replace("⭐", "")]
+                if match: 
+                    default_selected.append(match[0])
 
         selected_search = col2.multiselect(
             "📊 종목 선택 (이름 또는 코드로 검색)", 
             options=search_options, 
             default=default_selected,
-            # 화면에는 [코드]를 떼고 이름만 보여줌
-            format_func=lambda x: x.split('] ')[1] if '] ' in x else x,
-            help="종목코드 숫자(예: 476800)나 종목명을 입력해 보세요!"
+            # 화면에는 이름만 보여주어 시각적 청결함 유지
+            format_func=lambda x: x.split(' ', 1)[1] if ' ' in x else x,
+            help="종목코드 (예: 476800, 0052D0)나 종목명으로 검색하세요!"
         )
-                # 🔍 디버그 정보
-        st.write("🔍 컬럼명:", df.columns.tolist())
-        st.write(f"감지된 코드 컬럼: {code_col_name}")
-        st.write(f"감지된 이름 컬럼: {name_col_name}")
-        st.write(f"📋 샘플 라벨 5개:\n{search_options[:5]}")
-        st.write(f"✅ 선택된 종목: {st.session_state.selected_stocks}")
-     
 
+        # 엔진에는 이름만 전달
+        selected = []
+        for opt in selected_search:
+            name = opt.split(' ', 1)[1] if ' ' in opt else opt
+            name = name.replace(" ⭐", "").replace("⭐", "")
+            selected.append(name)
 
-        # 엔진에는 다시 이름만 전달
-        selected = [opt.split('] ')[1] if '] ' in opt else opt for opt in selected_search]
         st.session_state.selected_stocks = selected
         # --- [수정 끝] ---
 
@@ -571,7 +575,6 @@ def render_calculator_page(df):
                 st.warning(f"🚨 **주의:** 연간 예상 배당금이 **{total_y_div/10000:,.0f}만원**입니다. 금융소득종합과세 대상에 해당될 수 있습니다.")
 
     # 6-7. 심층 분석
-    # [수정] 변수가 없어서 터지는 문제를 막기 위해 들여쓰기 교정 완료
     df_ana = pd.DataFrame(all_data)
     if not df_ana.empty:
         st.write("")
@@ -778,7 +781,7 @@ def render_calculator_page(df):
             
             annual_div_income = monthly_div_final * 12
             if annual_div_income > 20000000: st.warning(f"🚨 **주의:** {years_sim}년 뒤 연간 배당금이 2,000만원을 초과하여 금융소득종합과세 대상이 될 수 있습니다.")
-            st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**\n1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 단순 결과입니다.\n2. ISA 계좌의 비과세 한도 및 세율은 세법 개정에 따라 달라질 수 있습니다.\n3. 과거의 데이터를 기반으로 한 단순 시뮬레이션이며, 실제 투자 수익을 보장하지 않습니다.""")
+            st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**\n1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 결과입니다.\n2. ISA 계좌의 비과세 한도 및 세율은 세법 개정에 따라 달라질 수 있습니다.\n3. 과거의 데이터를 기반으로 한 단순 시뮬레이션이며, 실제 투자 수익을 보장하지 않습니다.""")
         
         with tab_goal:
             st.subheader("🎯 목표 배당금 역산기 (은퇴 시뮬레이터)")
