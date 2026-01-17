@@ -880,16 +880,16 @@ def main():
         df = logic.load_and_process_data(df_raw, is_admin=is_admin)
         st.session_state['shared_df'] = df
 
-    # 9. 라우팅 (페이지 전환)
+    # 9. 라우팅 (페이지 전환) 및 사이드바 통합 제어
     with st.sidebar:
         if not st.session_state.is_logged_in: st.markdown("---")
-        menu = st.radio("📂 **메뉴 이동**", ["💰 배당금 계산기", "📅 월별 로드맵", "📃 전체 종목 리스트"], label_visibility="visible")
-
-        # --- 💡 [바로 여기에 아래 코드를 복사해서 붙여넣으세요] ---
-        st.markdown("---")
-        st.subheader("⚙️ 기본 설정")
         
-        # 통합 관리되는 생활비 입력 칸
+        # [1순위] 메뉴 이동
+        menu = st.radio("📂 **메뉴 이동**", ["💰 배당금 계산기", "📅 월별 로드맵", "📃 전체 종목 리스트"], label_visibility="visible")
+        
+        st.markdown("---")
+        
+        # [2순위] 지출 입력 (멘트 제거, 깔끔하게 입력창만 배치)
         expense_input = st.number_input(
             "💸 나의 월평균 지출 (만원)", 
             min_value=10, 
@@ -898,19 +898,11 @@ def main():
             help="이 수치는 배당 방어율 계산의 기준이 됩니다."
         )
         st.session_state.monthly_expense = expense_input
-        
-        # 개인정보 처리방침
+
         st.markdown("---")
-        with st.expander("📄 법적 고지 및 정책"):
-            st.caption("본 서비스는 사용자의 안전한 이용을 위해 아래 정책을 준수합니다.")
-            if st.button("🛡️ 개인정보 처리방침 확인", use_container_width=True):
-                try:
-                    with open("privacy.md", "r", encoding="utf-8") as f: st.markdown(f.read())
-                except: st.error("정책 파일을 찾을 수 없습니다.")
-        
-        # 포트폴리오 불러오기 (사이드바)
-        st.markdown("---")
-        with st.expander("📂 불러오기 / 관리"):
+
+        # [3순위] 포트폴리오 불러오기 / 관리 (위로 배치)
+        with st.expander("📂 불러오기 / 관리", expanded=True):
             if not st.session_state.is_logged_in:
                 st.caption("🔒 상단에서 로그인을 해주세요.")
             else:
@@ -920,6 +912,7 @@ def main():
                     if resp.data:
                         opts = {f"{p.get('name') or '이름없음'} ({p['created_at'][5:10]} {p['created_at'][11:16]})": p for p in resp.data}
                         sel_name = st.selectbox("항목 선택", list(opts.keys()), label_visibility="collapsed")
+                        
                         is_delete_mode = st.toggle("🗑️ 삭제 모드 켜기")
                         if is_delete_mode:
                             if st.button("🚨 영구 삭제", type="primary", use_container_width=True):
@@ -931,16 +924,30 @@ def main():
                         else:
                             if st.button("📂 불러오기", use_container_width=True):
                                 data = opts[sel_name]['ticker_data']
+                                # 저장된 데이터 불러오기 및 세션 동기화
                                 st.session_state.total_invest = int(data.get('total_money', 30000000))
                                 st.session_state.selected_stocks = list(data.get('composition', {}).keys())
                                 st.session_state.monthly_expense = int(data.get('monthly_expense', 200))
+                                
                                 logger.info(f"📂 포트폴리오 로드: {sel_name}")
                                 st.toast("성공적으로 불러왔습니다!", icon="✅")
                                 st.rerun()
-                    else: st.caption("저장된 기록이 없습니다.")
-                except Exception as e: st.error("불러오기 실패")
+                    else: 
+                        st.caption("저장된 기록이 없습니다.")
+                except Exception as e: 
+                    st.error("불러오기 실패")
 
-        # [추가된 부분] 사이드바 하단 후원 버튼 호출 (여기 한 줄만 추가했습니다!)
+        st.markdown("---")
+
+        # [4순위] 법적 고지 및 정책 (최하단으로 이동)
+        with st.expander("📄 법적 고지 및 정책"):
+            st.caption("본 서비스는 사용자의 안전한 이용을 위해 아래 정책을 준수합니다.")
+            if st.button("🛡️ 개인정보 처리방침 확인", use_container_width=True):
+                try:
+                    with open("privacy.md", "r", encoding="utf-8") as f: st.markdown(f.read())
+                except: st.error("정책 파일을 찾을 수 없습니다.")
+
+        # [5순위] 후원 버튼 (최하단 고정)
         render_sidebar_footer()
 
     # [라우팅 실행] 선택된 메뉴에 따라 해당 페이지 렌더링 함수 호출
