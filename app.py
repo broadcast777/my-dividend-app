@@ -394,15 +394,21 @@ def render_calculator_page(df):
                     if not stock_match.empty:
                         s_row = stock_match.iloc[0]
                         cal_link = s_row.get('캘린더링크') 
+                        # --- [수정] 이 부분을 찾아서 아래 코드로 교체하세요 ---
                         ex_date_view = s_row.get('배당락일', '-')
-                        btn_label = f"📅 {ex_date_view} (D-3 알림)" if cal_link else f"🗓️ {ex_date_view}"
-
+                        
                         if cal_link:
-                            if st.session_state.get("is_logged_in", False):
-                                st.link_button(btn_label, cal_link, use_container_width=True)
+                            # [핵심] 종목이 딱 1개일 때만 개별 버튼을 노출하여 모바일 가독성 확보
+                            if len(selected) == 1:
+                                btn_label = f"📅 {ex_date_view} (D-3 알림)"
+                                if st.session_state.get("is_logged_in", False):
+                                    st.link_button(btn_label, cal_link, use_container_width=True)
+                                else:
+                                    if st.button(btn_label, key=f"btn_cal_{i}", use_container_width=True):
+                                        st.toast("🔒 로그인 후 캘린더에 등록할 수 있습니다!", icon="🔒")
                             else:
-                                if st.button(btn_label, key=f"btn_cal_{i}", use_container_width=True):
-                                    st.toast("🔒 로그인 후 캘린더에 등록할 수 있습니다!", icon="🔒")
+                                # [핵심] 종목이 여러 개면 지저분하지 않게 텍스트로만 표시
+                                st.caption(f"🗓️ 배당락일: **{ex_date_view}**")
                         else:
                             st.caption(f"📅 날짜 미정 ({ex_date_view})")
                     
@@ -416,7 +422,19 @@ def render_calculator_page(df):
                             '환구분': s_row.get('환구분', '-'), '배당락일': s_row.get('배당락일', '-')
                         })
             
+      
+            
             timeline.display_sidebar_roadmap(df, weights, total_invest)
+            
+            # --- [추가] 여러 종목 선택 시 하단으로 유도하는 안내창 ---
+            if len(selected) > 1:
+                st.markdown("""
+                    <div style="padding: 12px; border-radius: 8px; background-color: #f0f7ff; border: 1px solid #d0e8ff; margin: 15px 0;">
+                        <small style="color: #0068c9; font-weight: bold;">💡 안내</small><br>
+                        <small style="color: #555;">종목이 많아 가독성을 위해 개별 버튼 대신 배당일만 표시합니다.<br>
+                        모든 일정은 <b>화면 하단의 [📅 캘린더 일괄 등록]</b>에서 한 번에 저장하세요!</small>
+                    </div>
+                """, unsafe_allow_html=True)
             
             # 포트폴리오 결과 분석
             total_y_div = sum([(total_invest * (weights[n]/100) * (df[df['pure_name']==n].iloc[0]['연배당률']/100)) for n in selected])
