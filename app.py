@@ -388,11 +388,13 @@ def render_calculator_page(df):
             format_func=lambda x: x.split('] ')[1] if '] ' in x else x,
             help="종목코드 숫자(예: 476800)나 종목명을 입력해 보세요!"
         )
-
-                    # 추가해서 실행해보세요
-            st.write("🔍 컬럼명:", df.columns.tolist())
-            st.write("📋 샘플 라벨 5개:", search_options[:5])
-            st.write("✅ 선택됨:", st.session_state.selected_stocks)
+                # 🔍 디버그 정보
+        st.write("🔍 컬럼명:", df.columns.tolist())
+        st.write(f"감지된 코드 컬럼: {code_col_name}")
+        st.write(f"감지된 이름 컬럼: {name_col_name}")
+        st.write(f"📋 샘플 라벨 5개:\n{search_options[:5]}")
+        st.write(f"✅ 선택된 종목: {st.session_state.selected_stocks}")
+     
 
 
         # 엔진에는 다시 이름만 전달
