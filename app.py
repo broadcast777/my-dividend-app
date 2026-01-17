@@ -11,7 +11,7 @@ import hashlib
 import time
 import random
 from streamlit.runtime.scriptrunner import get_script_run_ctx
-from logger import logger 
+from logger import logger  # [추가] 블랙박스 배선 연결
 from analytics import inject_ga
 
 # [필수] 날짜 및 URL 라이브러리
@@ -36,6 +36,7 @@ st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
 # ---------------------------------------------------------
 # [추가 과제] 4과제: COPPA 나이 확인 (안전 장치)
 # ---------------------------------------------------------
+# 주석 처리를 원하시면 아래 함수 전체를 드래그해서 Ctrl + / 누르시면 됩니다.
 def check_coppa_compliance():
     """만 13세 이상 이용 확인 (법적 준수 안내판)"""
     if "age_verified" not in st.session_state:
@@ -100,7 +101,7 @@ def check_auth_status():
             if session and session.user:
                 st.session_state.is_logged_in = True
                 st.session_state.user_info = session.user
-                logger.info(f"👤 사용자 로그인 성공: {session.user.email}") 
+                logger.info(f"👤 사용자 로그인 성공: {session.user.email}") # [3과제] 로깅 추가
             
             # 인증 성공 후 깨끗한 URL로 새로고침
             st.query_params.clear()
@@ -110,7 +111,7 @@ def check_auth_status():
         except Exception as e:
             # [자동 복구 로직] verifier 오류(새로고침 시 발생 등) 시 파라미터 리셋 후 재시도
             err_msg = str(e).lower()
-            logger.error(f"🔴 인증 과정 중 오류 발생: {err_msg}") 
+            logger.error(f"🔴 인증 과정 중 오류 발생: {err_msg}") # [3과제] 로깅 추가
             if "verifier" in err_msg or "non-empty" in err_msg:
                 st.warning("🔄 보안 토큰 갱신 중... 잠시만 기다려주세요.")
                 st.query_params.clear()
@@ -144,18 +145,21 @@ def render_login_ui():
             
             # 로그아웃 버튼 클릭 시 세션 초기화 및 새로고침
             if st.button("🚪 로그아웃", key="logout_btn_sidebar", use_container_width=True):
-                logger.info(f"🚪 사용자 로그아웃: {email}") 
+                logger.info(f"🚪 사용자 로그아웃: {email}") # [3과제] 로깅 추가
                 supabase.auth.sign_out()
                 st.session_state.is_logged_in = False
                 st.session_state.user_info = None
                 st.session_state.code_processed = False
                 st.rerun()
 
+# -----------------------------------------------------------
+# [추가됨] 사이드바 하단 커피 후원 버튼 렌더링 함수
+# -----------------------------------------------------------
 def render_sidebar_footer():
     """사이드바 최하단 후원 버튼 및 저작권 정보"""
     bmc_url = "https://www.buymeacoffee.com/dividenpange"
 
-    st.sidebar.markdown("---") 
+    st.sidebar.markdown("---") # 구분선
     
     st.sidebar.markdown(f"""
         <style>
@@ -210,6 +214,7 @@ def render_admin_tools(df_raw):
         st.markdown("---")
         st.subheader("🛠️ 배당금 갱신 도구")
         
+        # [신규 종목 식별] 신규 상장주에 ⭐ 라벨 추가
         stock_options = {}
         for idx, row in df_raw.iterrows():
             name = row['종목명']
@@ -317,7 +322,7 @@ def render_admin_tools(df_raw):
 
 def render_calculator_page(df):
     """💰 배당금 계산기 페이지 렌더링"""
-    # [Level 1] 변수 초기화 위치 최상단 배치 (IndentationError 방지)
+    # [수정] 변수 가출 방지를 위해 함수 시작과 동시에 빈 바구니 생성
     all_data = []
 
     # 6-1. AI 로보어드바이저
@@ -353,36 +358,39 @@ def render_calculator_page(df):
         st.session_state.total_invest = invest_input * 10000
         total_invest = st.session_state.total_invest 
 
-        # --- [수정] 종목 검색 기능 (데이터 형식 무관하게 No Results 해결) ---
-        def clean_label(row):
-            code_val = str(row.get('종목코드') or row.get('코드') or '').strip()
-            if '.' in code_val: code_val = code_val.split('.')[0]
-            if code_val.isdigit() and len(code_val) < 6: code_val = code_val.zfill(6)
-            
-            name_val = str(row.get('종목명') or row.get('pure_name') or '').strip()
-            return f"{code_val} {name_val}"
+        # --- [수정] 검색 로직 강화: [코드] 종목명 방식 (No results 해결) ---
+        code_col_name = next((c for c in df.columns if '코드' in c), '종목코드')
+        name_col_name = next((c for c in df.columns if 'pure' in c or '명' in c), '종목명')
 
-        # 검색 옵션 생성 (중복 제거 및 정렬)
+        def clean_label(row):
+            c = str(row.get(code_col_name, '')).strip()
+            # 소수점 제거 및 6자리 보정
+            if '.' in c: c = c.split('.')[0]
+            if c.isdigit() and len(c) < 6: c = c.zfill(6)
+            n = str(row.get(name_col_name, '')).strip()
+            return f"[{c}] {n}"
+
+        # 검색 리스트 생성 및 정렬
         search_options = sorted(list(set(df.apply(clean_label, axis=1).tolist())))
         
-        # 이름 기반 매핑 딕셔너리 생성 (검색 성능 최적화)
-        label_map = {opt: opt.split(" ", 1)[-1] if " " in opt else opt for opt in search_options}
-
+        # 기존 세션 복원
         default_selected = []
         if st.session_state.get('selected_stocks'):
             for s_name in st.session_state.selected_stocks:
-                match = [opt for opt in search_options if opt.endswith(s_name)]
+                match = [opt for opt in search_options if opt.endswith(f"] {s_name}")]
                 if match: default_selected.append(match[0])
 
         selected_search = col2.multiselect(
             "📊 종목 선택 (이름 또는 코드로 검색)", 
             options=search_options, 
             default=default_selected,
-            format_func=lambda x: label_map.get(x, x),
+            # 화면에는 [코드]를 떼고 이름만 보여줌
+            format_func=lambda x: x.split('] ')[1] if '] ' in x else x,
             help="종목코드 숫자(예: 476800)나 종목명을 입력해 보세요!"
         )
 
-        selected = [label_map.get(opt, opt) for opt in selected_search]
+        # 엔진에는 다시 이름만 전달
+        selected = [opt.split('] ')[1] if '] ' in opt else opt for opt in selected_search]
         st.session_state.selected_stocks = selected
         # --- [수정 끝] ---
 
@@ -453,6 +461,7 @@ def render_calculator_page(df):
                     </div>
                 """, unsafe_allow_html=True)
             
+            # 포트폴리오 결과 분석
             total_y_div = sum([(total_invest * (weights[n]/100) * (df[df['pure_name']==n].iloc[0]['연배당률']/100)) for n in selected])
             total_m = total_y_div / 12
             avg_y = sum([(df[df['pure_name']==n].iloc[0]['연배당률'] * (weights[n]/100)) for n in selected])
@@ -476,6 +485,7 @@ def render_calculator_page(df):
             ).properties(height=220)
             st.altair_chart(chart_compare, use_container_width=True)
 
+            # 캘린더 다운로드
             st.divider()
             ics_data = logic.generate_portfolio_ics(all_data)
             st.subheader("📅 캘린더 일괄 등록")
@@ -500,6 +510,7 @@ def render_calculator_page(df):
                 4. **[추가]** 또는 **[저장]** 버튼만 누르면 끝!
                 """)
 
+            # 포트폴리오 저장
             st.write("") 
             with st.container(border=True):
                 st.write("💾 **포트폴리오 저장 / 수정**")
@@ -552,6 +563,7 @@ def render_calculator_page(df):
                 st.warning(f"🚨 **주의:** 연간 예상 배당금이 **{total_y_div/10000:,.0f}만원**입니다. 금융소득종합과세 대상에 해당될 수 있습니다.")
 
     # 6-7. 심층 분석
+    # [수정] 변수가 없어서 터지는 문제를 막기 위해 들여쓰기 교정 완료
     df_ana = pd.DataFrame(all_data)
     if not df_ana.empty:
         st.write("")
@@ -758,7 +770,7 @@ def render_calculator_page(df):
             
             annual_div_income = monthly_div_final * 12
             if annual_div_income > 20000000: st.warning(f"🚨 **주의:** {years_sim}년 뒤 연간 배당금이 2,000만원을 초과하여 금융소득종합과세 대상이 될 수 있습니다.")
-            st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**\n1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 결과입니다.\n2. ISA 계좌의 비과세 한도 및 세율은 세법 개정에 따라 달라질 수 있습니다.\n3. 과거의 데이터를 기반으로 한 단순 시뮬레이션이며, 실제 투자 수익을 보장하지 않습니다.""")
+            st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**\n1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 단순 결과입니다.\n2. ISA 계좌의 비과세 한도 및 세율은 세법 개정에 따라 달라질 수 있습니다.\n3. 과거의 데이터를 기반으로 한 단순 시뮬레이션이며, 실제 투자 수익을 보장하지 않습니다.""")
         
         with tab_goal:
             st.subheader("🎯 목표 배당금 역산기 (은퇴 시뮬레이터)")
@@ -921,16 +933,24 @@ def main():
                 else:
                     st.error("비밀번호 불일치")
 
+    # ---------------------------------------------------------
+    # 3. [긴급 추가] 필수 세션 변수 초기화 (연료 주입)
+    # ---------------------------------------------------------
     if "total_invest" not in st.session_state:
-        st.session_state.total_invest = 30000000 
+        st.session_state.total_invest = 30000000  # 기본 투자금 3,000만원
     if "selected_stocks" not in st.session_state:
-        st.session_state.selected_stocks = []     
+        st.session_state.selected_stocks = []     # 선택 종목 리스트 초기화
         
+    # --- 💡 [바로 아래에 이 줄을 추가하세요] ---
     if "monthly_expense" not in st.session_state:
-        st.session_state.monthly_expense = 200    
+        st.session_state.monthly_expense = 200    # 기본 지출액 250만원 초기화
 
+
+
+    # 4. 사이드바 UI 및 인증
     render_login_ui()
     
+    # 5. 상단 로그인 버튼 구역
     auth_container = st.container(border=True)
     with auth_container:
         if not st.session_state.get("is_logged_in", False):
@@ -960,29 +980,36 @@ def main():
                                 st.stop()
                         except: pass
         else:
+            # 로그인 완료 메시지
             user = st.session_state.user_info
             nickname = user.email.split("@")[0] if user.email else "User"
             st.success(f"👋 **{nickname}**님, 환영합니다! 모든 기능이 활성화되었습니다.")
 
+    # 6. 데이터 로드
     df_raw = logic.load_stock_data_from_csv()
     if df_raw.empty: 
         logger.error("❌ 데이터 로드 실패: CSV 파일이 비어있음")
         st.stop()
 
+    # 7. 관리자 도구 렌더링
     if is_admin:
         render_admin_tools(df_raw)
 
+    # 8. 데이터 엔진 가동
     with st.spinner('⚙️ 배당 데이터베이스 엔진 가동 중...'):
         df = logic.load_and_process_data(df_raw, is_admin=is_admin)
         st.session_state['shared_df'] = df
 
+    # 9. 라우팅 (페이지 전환) 및 사이드바 통합 제어
     with st.sidebar:
         if not st.session_state.is_logged_in: st.markdown("---")
         
+        # [1순위] 메뉴 이동
         menu = st.radio("📂 **메뉴 이동**", ["💰 배당금 계산기", "📅 월별 로드맵", "📃 전체 종목 리스트"], label_visibility="visible")
         
         st.markdown("---")
         
+        # [2순위] 지출 입력 (멘트 제거, 깔끔하게 입력창만 배치)
         expense_input = st.number_input(
             "💸 나의 월평균 지출 (만원)", 
             min_value=10, 
@@ -994,6 +1021,7 @@ def main():
 
         st.markdown("---")
 
+        # [3순위] 포트폴리오 불러오기 / 관리 (위로 배치)
         with st.expander("📂 불러오기 / 관리", expanded=True):
             if not st.session_state.is_logged_in:
                 st.caption("🔒 상단에서 로그인을 해주세요.")
@@ -1016,6 +1044,7 @@ def main():
                         else:
                             if st.button("📂 불러오기", use_container_width=True):
                                 data = opts[sel_name]['ticker_data']
+                                # 저장된 데이터 불러오기 및 세션 동기화
                                 st.session_state.total_invest = int(data.get('total_money', 30000000))
                                 st.session_state.selected_stocks = list(data.get('composition', {}).keys())
                                 st.session_state.monthly_expense = int(data.get('monthly_expense', 200))
@@ -1030,6 +1059,7 @@ def main():
 
         st.markdown("---")
 
+        # [4순위] 법적 고지 및 정책 (최하단으로 이동)
         with st.expander("📄 법적 고지 및 정책"):
             st.caption("본 서비스는 사용자의 안전한 이용을 위해 아래 정책을 준수합니다.")
             if st.button("🛡️ 개인정보 처리방침 확인", use_container_width=True):
@@ -1037,8 +1067,10 @@ def main():
                     with open("privacy.md", "r", encoding="utf-8") as f: st.markdown(f.read())
                 except: st.error("정책 파일을 찾을 수 없습니다.")
 
+        # [5순위] 후원 버튼 (최하단 고정)
         render_sidebar_footer()
 
+    # [라우팅 실행] 선택된 메뉴에 따라 해당 페이지 렌더링 함수 호출
     if menu == "💰 배당금 계산기":
         render_calculator_page(df)
     elif menu == "📅 월별 로드맵":
@@ -1046,10 +1078,17 @@ def main():
     elif menu == "📃 전체 종목 리스트":
         render_stocklist_page(df)
 
+    # 10. 하단 정보 및 방문자 추적
+    # 10. 하단 정보 및 소통 창구 (이메일 버전)
+    # 10. 하단 정보 및 소통 창구
     st.divider()
     st.caption("© 2025 **배당 팽이** | 실시간 데이터 기반 배당 대시보드")
     st.caption("First Released: 2025.12.31 | [📝 배당팽이 투자 일지 ](https://blog.naver.com/dividenpange) | [💌 앱 개선 의견 남기기](https://docs.google.com/forms/d/e/1FAIpQLSdEJWd4sYx-09wZk7gl86Sf7bMliT4X9R0eWTAqxjv_Mal8Jg/viewform?usp=header)")
 
+    
 
+# ==========================================
+# [ENTRY POINT] 앱 실행 시작점
+# ==========================================
 if __name__ == "__main__":
     main()
