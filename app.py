@@ -360,7 +360,9 @@ def render_calculator_page(df):
         
         # --- [수정 시작] 종목명만 표시 + 코드로 검색 가능한 방탄 로직 ---
         
+def render_calculator_page(df):
         # --- [최종 정밀 보정 버전] ---
+        all_data = []
 
         # 1. '코드 + 이름' 결합 리스트 생성 (데이터 정제)
         def clean_label(row):
@@ -401,6 +403,11 @@ def render_calculator_page(df):
         # 리스트 컴프리헨션에도 안전장치를 추가합니다.
         selected = [opt.split(" ", 1)[1] if " " in opt else opt for opt in selected_search]
         st.session_state.selected_stocks = selected
+  
+
+        
+
+
 
         if selected:
             has_foreign_stock = any(df[df['pure_name'] == s_name].iloc[0]['분류'] == '해외' for s_name in selected)
