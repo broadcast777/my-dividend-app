@@ -13,6 +13,7 @@ import random
 from streamlit.runtime.scriptrunner import get_script_run_ctx
 from logger import logger
 from analytics import inject_ga
+import streamlit.components.v1 as components
 
 # [필수] 날짜 및 URL 라이브러리
 from datetime import datetime, timedelta
