@@ -195,11 +195,41 @@ def calculate_google_calendar_url(ticker_name, pay_date_str):
 @st.cache_data(ttl=1800, show_spinner=False)
 def load_and_process_data(df_raw, is_admin=False):
     """
-    CSV 원본 데이터를 가공하여 실시간 시세와 배당률이 포함된 최종 데이터프레임을 생성합니다.
-    ThreadPoolExecutor를 사용하여 시세 조회를 병렬로 처리합니다.
+    [개선됨] CSV 원본 데이터를 정밀 가공하여 실시간 시세와 배당률이 포함된 최종 데이터프레임을 생성합니다.
+    불순물(오타, 빈칸) 제거 및 병렬 시세 조회를 수행합니다.
     """
     if df_raw.empty: return pd.DataFrame()
-    
+
+    # ---------------------------------------------------
+    # [신규 장착] 1단계: 고성능 연료 필터링 (Data Cleaning)
+    # ---------------------------------------------------
+    try:
+        # A. 수치형 데이터 공차 보정 (문자열 -> 숫자 강제 변환)
+        num_cols = ['연배당금', '연배당률', '현재가', '신규상장개월수', '연배당금_크롤링']
+        for col in num_cols:
+            if col in df_raw.columns:
+                # 오타나 빈칸은 0으로 강제 치환 (시스템 다운 방지)
+                df_raw[col] = pd.to_numeric(df_raw[col], errors='coerce').fillna(0)
+
+        # B. 부품 치수 정밀 가공 (종목코드 6자리 맞춤)
+        if '종목코드' in df_raw.columns:
+            df_raw['종목코드'] = df_raw['종목코드'].astype(str).str.split('.').str[0].str.strip().str.zfill(6)
+
+        # C. 날짜 데이터 표준화
+        if '배당락일' in df_raw.columns:
+            df_raw['배당락일'] = df_raw['배당락일'].astype(str).replace(['nan', 'None', 'nan '], '-')
+
+        # D. 재료 분류 자동화 (누락 방지)
+        if '자산유형' in df_raw.columns:
+            df_raw['자산유형'] = df_raw['자산유형'].fillna('기타')
+        
+    except Exception as e:
+        # 필터링 중 에러가 나도 멈추지 않고 기록만 남김
+        print(f"🚨 [Data Filter Error] 전처리 중 경고: {e}")
+
+    # ---------------------------------------------------
+    # 2단계: 병렬 시세 조회 엔진 (기존 로직 유지)
+    # ---------------------------------------------------
     try:
         broker = mojito.KoreaInvestment(
             api_key=st.secrets["kis"]["app_key"],
@@ -226,8 +256,7 @@ def load_and_process_data(df_raw, is_admin=False):
             crawled_div = float(row.get('연배당금_크롤링', 0))
             manual_div = float(row.get('연배당금', 0))        
             
-            try: months = int(row.get('신규상장개월수', 0))
-            except: months = 0
+            months = int(row.get('신규상장개월수', 0))
 
             # (A) 신규 상장주: 상장 이후 누적 배당금을 개월수로 나누어 연환산 추정
             if 0 < months < 12:
@@ -285,7 +314,6 @@ def load_and_process_data(df_raw, is_admin=False):
 
     final_data = [r for r in results if r is not None]
     return pd.DataFrame(final_data).sort_values('연배당률', ascending=False) if final_data else pd.DataFrame()
-
 
 # -----------------------------------------------------------
 # [SECTION 4] 데이터 파일 관리 (GitHub/CSV)
