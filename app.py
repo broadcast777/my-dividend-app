@@ -1,7 +1,8 @@
 """
-프로젝트: 배당 팽이 (Dividend Top) v2.0
+프로젝트: 배당 팽이 (Dividend Top) v2.2
 파일명: app.py (Phase 2: 통합 관제실 리팩토링 완료)
 설명: 라이브러리 로드, 세션 초기화, 중앙 라우팅 시스템 구축
+      (v2.2 변경점: 계산기 페이지에서 존재하지 않는 종목 참조 시 Index Error 방지 로직 추가)
 """
 
 import streamlit as st
@@ -366,7 +367,7 @@ def render_admin_tools(df_raw):
 # 🚨 [추가된 함수] 삭제 확인 다이얼로그 (Dialog)
 @st.dialog("⚠️ 정말 삭제하시겠습니까?")
 def confirm_delete_dialog(target_names, opts, supabase):
-    st.write(f"선택하신 {len(target_names)}개의 포트폴리오가 영구적으로 삭제됩니다.")
+    st.write(f"선택하신 **{len(target_names)}개**의 포트폴리오가 영구적으로 삭제됩니다.")
     st.warning("이 작업은 되돌릴 수 없습니다.")
     
     col_del1, col_del2 = st.columns(2)
@@ -389,7 +390,7 @@ def confirm_delete_dialog(target_names, opts, supabase):
 @st.dialog("💾 기존 파일 덮어쓰기")
 def confirm_overwrite_dialog(final_name, user_id, user_email, save_data, existing_id, supabase):
     """이미 같은 이름의 포트폴리오가 있을 때 띄우는 팝업"""
-    st.write(f"이미 '{final_name}'이라는 이름의 포트폴리오가 존재합니다.")
+    st.write(f"이미 **'{final_name}'**이라는 이름의 포트폴리오가 존재합니다.")
     st.info("새로운 데이터로 덮어쓰시겠습니까?")
     
     col_ov1, col_ov2 = st.columns(2)
@@ -462,38 +463,65 @@ def render_calculator_page(df):
 
         search_options = sorted(list(set(df.apply(clean_label, axis=1).tolist())))
         
-        # 🚨 [수정됨] 대조 로직 유연화: 로보어드바이저가 준 이름이 옵션에 포함되어 있으면 OK
-        default_selected = []
-        if st.session_state.get('selected_stocks'):
-            for s_name in st.session_state.selected_stocks:
-                # 1차 시도: "종목명 (" 로 시작하는 완벽한 매칭 찾기
-                found = False
-                for opt in search_options:
-                    if opt.startswith(f"{s_name} ("):
-                        default_selected.append(opt)
-                        found = True
-                        break
-                
-                # 2차 시도 (실패 시): 종목명이 문자열 안에 포함되어 있으면 구제 (융통성 발휘)
-                if not found:
-                    for opt in search_options:
-                        if s_name in opt:
-                            default_selected.append(opt)
-                            found = True
-                            break
-
         selected_search = col2.multiselect(
             "📊 종목 선택 (이름 또는 코드로 검색)", 
             options=search_options, 
-            default=default_selected,
+            # default= ... (아래에서 안전하게 처리)
             help="종목코드(숫자)나 종목명을 입력해 보세요!"
         )
 
-        selected = [opt.split(' (')[0] if ' (' in opt else opt for opt in selected_search]
+        # 🚨 [안전 장치 추가]
+        # multiselect에서 선택된 값들을 1차 파싱합니다.
+        raw_selected = [opt.split(' (')[0] if ' (' in opt else opt for opt in selected_search]
+        
+        # 기본 선택값 로직 (저장된 포트폴리오 불러올 때 등)
+        if not raw_selected and st.session_state.get('selected_stocks'):
+            # 저장된 이름이 현재 df에 실제로 존재하는지 확인하여 유효한 것만 default_selected에 넣습니다.
+            saved_stocks = st.session_state.selected_stocks
+            default_selected_opts = []
+            
+            for s_name in saved_stocks:
+                # search_options 안에서 매칭되는 것을 찾음
+                found = False
+                for opt in search_options:
+                    if opt.startswith(f"{s_name} ("):
+                        default_selected_opts.append(opt)
+                        found = True
+                        break
+                if not found:
+                    for opt in search_options:
+                        if s_name in opt:
+                            default_selected_opts.append(opt)
+                            found = True
+                            break
+            
+            # 여기서 바로 multiselect에 default 값을 꽂아주는 게 아니라, 
+            # 스트림릿 특성상 rerun 되면서 반영되기를 기대하거나, 
+            # 아래 로직에서 raw_selected가 비어있을 때 처리를 해야 함.
+            # 하지만 이미 multiselect가 그려진 뒤라 default 값 주입은 까다로움.
+            # (일반적으로 st.session_state로 위젯 키를 제어하지만, 코드가 복잡해짐)
+            
+            # 따라서 "불러오기" 버튼을 누른 직후에는 session_state.selected_stocks가 있고
+            # multiselect는 리셋될 수 있음.
+            # (현재 구조상 selected_search가 비어있으면 session_state 값을 쓰도록 유도)
+            
+            if not selected_search:
+                raw_selected = saved_stocks
+
+        # 🚨 [핵심 수정] 유령 종목 필터링 (Ghost Stock Filtering)
+        # 선택된 이름(raw_selected) 중 현재 데이터프레임(df)에 진짜로 존재하는 것만 남깁니다.
+        selected = []
+        for s in raw_selected:
+            if not df[df['pure_name'] == s].empty:
+                selected.append(s)
+        
+        # 필터링된 진짜 리스트를 세션에 저장
         st.session_state.selected_stocks = selected
 
         if selected:
+            # 🚨 [안전한 검사] 이제 selected에는 무조건 존재하는 종목만 들어있으므로 에러가 나지 않습니다.
             has_foreign_stock = any(df[df['pure_name'] == s_name].iloc[0]['분류'] == '해외' for s_name in selected)
+            
             if has_foreign_stock:
                 st.warning("📢 **잠깐!** 선택하신 종목 중 '해외 상장 ETF'가 포함되어 있습니다. ISA/연금계좌 결과는 참고용으로만 봐주세요.")
 
@@ -519,6 +547,7 @@ def render_calculator_page(df):
                     
                     st.caption(f"💰 투자금: **{amt/10000:,.0f}만원**")
                     
+                    # 🚨 여기도 안전함 (selected가 검증되었으므로)
                     stock_match = df[df['pure_name'] == stock]
                     if not stock_match.empty:
                         s_row = stock_match.iloc[0]
@@ -559,6 +588,7 @@ def render_calculator_page(df):
                     </div>
                 """, unsafe_allow_html=True)
             
+            # 🚨 [안전한 계산] 검증된 selected 리스트만 사용
             total_y_div = sum([(total_invest * (weights[n]/100) * (df[df['pure_name']==n].iloc[0]['연배당률']/100)) for n in selected])
             total_m = total_y_div / 12
             avg_y = sum([(df[df['pure_name']==n].iloc[0]['연배당률'] * (weights[n]/100)) for n in selected])
@@ -1046,6 +1076,57 @@ def render_stocklist_page(df):
 # ==========================================
 # [SECTION 5] 메인 애플리케이션 실행 엔진 (관제실)
 # ==========================================
+
+# 🚨 [추가된 함수] 삭제 확인 다이얼로그 (Dialog)
+@st.dialog("⚠️ 정말 삭제하시겠습니까?")
+def confirm_delete_dialog(target_names, opts, supabase):
+    st.write(f"선택하신 **{len(target_names)}개**의 포트폴리오가 영구적으로 삭제됩니다.")
+    st.warning("이 작업은 되돌릴 수 없습니다.")
+    
+    col_del1, col_del2 = st.columns(2)
+    
+    if col_del1.button("✅ 네, 삭제합니다", type="primary", use_container_width=True):
+        try:
+            target_ids = [opts[name]['id'] for name in target_names]
+            # Supabase 'in' 쿼리로 일괄 삭제
+            supabase.table("portfolios").delete().in_("id", target_ids).execute()
+            
+            logger.info(f"🗑️ 포트폴리오 일괄 삭제: {len(target_ids)}건")
+            st.rerun()
+        except Exception as e:
+            st.error(f"삭제 중 오류 발생: {e}")
+            
+    if col_del2.button("취소", use_container_width=True):
+        st.rerun()
+
+# 💾 [추가된 함수] 덮어쓰기 확인 다이얼로그
+@st.dialog("💾 기존 파일 덮어쓰기")
+def confirm_overwrite_dialog(final_name, user_id, user_email, save_data, existing_id, supabase):
+    """이미 같은 이름의 포트폴리오가 있을 때 띄우는 팝업"""
+    st.write(f"이미 **'{final_name}'**이라는 이름의 포트폴리오가 존재합니다.")
+    st.info("새로운 데이터로 덮어쓰시겠습니까?")
+    
+    col_ov1, col_ov2 = st.columns(2)
+    
+    if col_ov1.button("🎮 네, 덮어씁니다", type="primary", use_container_width=True):
+        try:
+            # 기존 ID를 찾아서 해당 데이터만 업데이트
+            supabase.table("portfolios").update({
+                "ticker_data": save_data, 
+                "created_at": "now()" # 저장 시간 갱신
+            }).eq("id", existing_id).execute()
+            
+            logger.info(f"🔄 기존 포트폴리오 덮어쓰기 완료: {final_name}")
+            st.toast(f"'{final_name}' 파일을 성공적으로 갱신했습니다!", icon="✅")
+            st.balloons()
+            time.sleep(1.0)
+            st.rerun()
+        except Exception as e:
+            st.error(f"저장 중 오류 발생: {e}")
+            
+    if col_ov2.button("아니요, 취소", use_container_width=True):
+        st.rerun()
+
 def main():
     inject_ga()
     
@@ -1054,7 +1135,7 @@ def main():
     ui.load_css() 
     
     # 2. 안전 장치 (COPPA)
-    #check_coppa_compliance() 
+    check_coppa_compliance() 
     
     logger.info("🚀 배당팽이 메인 엔진 가동")
     db.cleanup_old_tokens()
@@ -1128,9 +1209,12 @@ def main():
                     if resp.data:
                         opts = {f"{p.get('name') or '이름없음'} ({p['created_at'][5:10]} {p['created_at'][11:16]})": p for p in resp.data}
                         
+                        # [NEW] 삭제 모드 토글
                         is_delete_mode = st.toggle("🗑️ 포트폴리오 정리(삭제) 모드")
+
                         if is_delete_mode:
                             st.caption("삭제할 포트폴리오를 모두 선택하세요.")
+                            # 다중 선택 박스
                             targets_to_delete = st.multiselect(
                                 "삭제 목록 선택", 
                                 options=list(opts.keys()),
@@ -1140,18 +1224,20 @@ def main():
 
                             if targets_to_delete:
                                 if st.button(f"🚨 선택한 {len(targets_to_delete)}개 영구 삭제", type="primary", use_container_width=True):
+                                    # 다이얼로그 호출
                                     confirm_delete_dialog(targets_to_delete, opts, supabase)
                             else:
                                 st.button("🚨 삭제 버튼 (항목을 먼저 선택하세요)", disabled=True, use_container_width=True)
+
                         else:
+                            # 기존 불러오기 모드
                             sel_name = st.selectbox("항목 선택", list(opts.keys()), label_visibility="collapsed")
-                            
-                            is_overwrite_mode = True # 항상 덮어쓰기 로직 활성화
                             
                             if st.button("📂 불러오기", use_container_width=True):
                                 data = opts[sel_name]['ticker_data']
                                 st.session_state.total_invest = int(data.get('total_money', 30000000))
                                 st.session_state.selected_stocks = list(data.get('composition', {}).keys())
+                                # 저장된 비중 불러오기 (없으면 무시)
                                 saved_weights = data.get('composition', {})
                                 st.session_state.ai_suggested_weights = saved_weights
                                 st.session_state.monthly_expense = int(data.get('monthly_expense', 200))
@@ -1163,7 +1249,7 @@ def main():
                     else: 
                         st.caption("저장된 기록이 없습니다.")
                 except Exception as e: 
-                    st.error("불러오기 실패")
+                    st.error(f"불러오기 실패: {e}")
 
         st.markdown("---")
 
