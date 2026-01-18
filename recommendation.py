@@ -1,7 +1,7 @@
 """
-프로젝트: 배당 팽이 (Dividend Top) v1.9.9
+프로젝트: 배당 팽이 (Dividend Top) v2.0.2
 파일명: recommendation.py
-설명: AI 로보어드바이저 엔진 (모든 유형 쿼터제 유연화 적용 완료)
+설명: AI 로보어드바이저 엔진 (최소 2개 ~ 최대 4개 종목 집중 전략 적용)
 """
 
 import streamlit as st
@@ -110,20 +110,19 @@ def get_smart_recommendation(df, user_choices):
     reit_count = 0 
     
     # [기본 쿼터]
-    MAX_CC = 2
-    MAX_CASH = 1
-    MAX_BOND = 1
-    MAX_REIT = 1
+    MAX_CC = 2      
+    MAX_CASH = 1    
+    MAX_BOND = 1    
+    MAX_REIT = 1    
     
-    # 🚨 [쿼터 긴급 수정] 스타일별 맞춤형 제한 해제 (성장형 추가됨)
+    # [스타일별 예외 허용]
     if style == 'safe':
-        MAX_BOND = wanted_count  # 채권 무제한
+        MAX_BOND = wanted_count  # 안정형은 채권 제한 없음
     elif style == 'flow':
-        MAX_CC = wanted_count    # 커버드콜 무제한
-        MAX_REIT = 3             # 리츠 완화
+        MAX_CC = wanted_count    # 현금흐름형 커버드콜 무제한 (원하는 개수만큼)
+        MAX_REIT = wanted_count  # 리츠도 무제한
     elif style == 'growth':
-        MAX_REIT = 3             # 성장형도 리츠(부동산) 3개까지 허용 (종목 수 확보)
-        # 커버드콜은 성장형에 안 맞으니 2개 유지
+        MAX_REIT = 2             # 성장형은 리츠 2개까지
     
     # (A) 의무 선발
     if style == 'safe':
@@ -155,7 +154,7 @@ def get_smart_recommendation(df, user_choices):
             final_picks.append(best_growth['pure_name'])
             picked_core_names.append(_get_core_index_name(best_growth['pure_name']))
 
-    # (B) 나머지 채우기
+    # (B) 나머지 채우기 (쿼터 적용)
     for idx, row in filtered_pool.iterrows():
         if len(final_picks) >= wanted_count: break
         if row['pure_name'] in final_picks: continue
@@ -169,6 +168,7 @@ def get_smart_recommendation(df, user_choices):
         is_cash = check_is_cash(row)
         is_bond = (cat == '채권') and not is_cash
         
+        # 쿼터 체크
         if is_cc and cc_count >= MAX_CC: continue
         if is_cash and cash_count >= MAX_CASH: continue
         if is_bond and bond_count >= MAX_BOND: continue 
@@ -182,25 +182,21 @@ def get_smart_recommendation(df, user_choices):
         if is_bond: bond_count += 1
         if is_reit: reit_count += 1
         
-    # (C) 모자라면 채우기 (쿼터 적용된 상태 유지하되, 유동적으로)
+    # (C) [안전장치] 쿼터 때문에 모자라면 제한 풀고 채우기
     if len(final_picks) < wanted_count:
         remain_pool = filtered_pool[~filtered_pool['pure_name'].isin(final_picks)].copy()
-        
-        # 쿼터가 찼으면 해당 유형은 제외 (단, 스타일별로 풀린 쿼터는 위에서 이미 반영됨)
-        if cc_count >= MAX_CC: remain_pool = remain_pool[remain_pool['유형'] != '커버드콜']
-        if reit_count >= MAX_REIT: remain_pool = remain_pool[remain_pool['유형'] != '리츠']
-        
         if not remain_pool.empty:
-            final_picks.extend(remain_pool.head(wanted_count - len(final_picks))['pure_name'].tolist())
+            needed = wanted_count - len(final_picks)
+            final_picks.extend(remain_pool.head(needed)['pure_name'].tolist())
 
     selected_pool = filtered_pool[filtered_pool['pure_name'].isin(final_picks)].copy()
 
+    # 4. 비중 최적화 (Min 10% ~ Max 50%)
     if selected_pool.empty: return "종목 선정 실패", [], {}
 
     selected_pool['sort_cat'] = pd.Categorical(selected_pool['pure_name'], categories=final_picks, ordered=True)
     selected_pool = selected_pool.sort_values('sort_cat')
 
-    # 비중 계산 (Min 10% ~ Max 50%)
     yields = selected_pool['연배당률'].values
     scores = 1 / (abs(yields - target_yield) + 1.0)
     weights = (scores / scores.sum()) * 100
@@ -285,9 +281,11 @@ def show_wizard():
         else:
             st.info("💰 **현금 흐름:** 매월 들어오는 **월 배당금**에 집중합니다.")
             if target >= 8.0:
-                st.warning("⚠️ **리스크 관리:** 포트폴리오 균형을 위해 **고위험군(커버드콜)은 최대 2개**로 자동 제한됩니다.")
+                st.warning("⚠️ **리스크 관리:** 포트폴리오 균형을 위해 **고위험군(커버드콜)을 적극 편입**합니다.")
             
-        count = st.slider("📊 종목 개수", 3, 5, 3)
+        # 🚨 [수정] 최소 2개 ~ 최대 4개로 슬라이더 범위 변경
+        count = st.slider("📊 종목 개수", 2, 4, 3)
+        
         if st.button("🚀 결과 확인하기", type="primary", use_container_width=True):
             st.session_state.wiz_data['target_yield'] = target
             st.session_state.wiz_data['count'] = count
