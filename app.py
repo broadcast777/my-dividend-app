@@ -34,24 +34,24 @@ import timeline
 # 앱의 타이틀과 가로 너비를 설정합니다
 st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
 
-# 👇 [1단계] RFID 센서 설치 (여기부터 복사해서 붙여넣으세요)
-# 브라우저에 저장된 '인증 도장(localStorage)'이 있으면, 주소창에 표시를 남겨서 파이썬에게 알려줍니다.
+# 👇 [1단계] RFID 센서 (이 코드를 복사해서 붙여넣으세요)
+# 기능: "어? 너 아까 인증했잖아?" 하고 기억해내는 역할
 st.components.v1.html("""
 <script>
-    // 1. 주머니(로컬스토리지) 확인
-    const ageVerified = localStorage.getItem('age_verified');
-    
-    // 2. 현재 상황 파악 (이미 URL에 표시가 있는지?)
-    const params = new URLSearchParams(window.location.search);
-    
-    // 3. 주머니엔 있는데, 아직 입장권(URL)을 안 보여줬다면? -> 새로고침하며 보여줌
-    if (ageVerified === '1' && !params.has('age_verified')) {
-        params.set('age_verified', '1');
-        window.location.search = params.toString();
+    try {
+        const ageVerified = localStorage.getItem('age_verified');
+        const params = new URLSearchParams(window.parent.location.search);
+        
+        // 로컬스토리지엔 있는데, URL에 표시가 안 되어 있다면? -> URL에 표시하고 조용히 새로고침
+        if (ageVerified === '1' && !params.has('age_verified')) {
+            params.set('age_verified', '1');
+            window.parent.location.search = params.toString();
+        }
+    } catch (e) {
+        console.log("Sensor Error: ", e);
     }
 </script>
 """, height=0)
-# 👆 [1단계 끝]
 
 # ---------------------------------------------------------
 # [추가 과제] 4과제: COPPA 나이 확인 (안전 장치)
