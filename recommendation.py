@@ -1,13 +1,14 @@
 """
-프로젝트: 배당 팽이 (Dividend Top) v1.9.3
+프로젝트: 배당 팽이 (Dividend Top) v1.9.4
 파일명: recommendation.py
-설명: AI 로보어드바이저 엔진 (안전장치 패치 완료)
+설명: AI 로보어드바이저 엔진 (import time 누락 수정 완료)
 """
 
 import streamlit as st
 import pandas as pd
 import re
-import random 
+import random
+import time  # 👈 [범인 검거] 이 줄이 빠져서 에러가 났던 겁니다!
 
 # -----------------------------------------------------------
 # [SECTION 1] 내부 헬퍼 함수
