@@ -1,5 +1,5 @@
 """
-프로젝트: 배당 팽이 (Dividend Top) v1.5
+프로젝트: 배당 팽이 (Dividend Top) v2.0
 파일명: app.py (Phase 2: 통합 관제실 리팩토링 완료)
 설명: 라이브러리 로드, 세션 초기화, 중앙 라우팅 시스템 구축
 """
@@ -359,6 +359,61 @@ def render_admin_tools(df_raw):
             st.button("🚀 깃허브에 영구 저장", disabled=True, use_container_width=True)
 
 
+# ==========================================
+# [SECTION 5] 메인 애플리케이션 실행 엔진 (관제실)
+# ==========================================
+
+# 🚨 [추가된 함수] 삭제 확인 다이얼로그 (Dialog)
+@st.dialog("⚠️ 정말 삭제하시겠습니까?")
+def confirm_delete_dialog(target_names, opts, supabase):
+    st.write(f"선택하신 **{len(target_names)}개**의 포트폴리오가 영구적으로 삭제됩니다.")
+    st.warning("이 작업은 되돌릴 수 없습니다.")
+    
+    col_del1, col_del2 = st.columns(2)
+    
+    if col_del1.button("✅ 네, 삭제합니다", type="primary", use_container_width=True):
+        try:
+            target_ids = [opts[name]['id'] for name in target_names]
+            # Supabase 'in' 쿼리로 일괄 삭제
+            supabase.table("portfolios").delete().in_("id", target_ids).execute()
+            
+            logger.info(f"🗑️ 포트폴리오 일괄 삭제: {len(target_ids)}건")
+            st.rerun()
+        except Exception as e:
+            st.error(f"삭제 중 오류 발생: {e}")
+            
+    if col_del2.button("취소", use_container_width=True):
+        st.rerun()
+
+# 💾 [추가된 함수] 덮어쓰기 확인 다이얼로그
+@st.dialog("💾 기존 파일 덮어쓰기")
+def confirm_overwrite_dialog(final_name, user_id, user_email, save_data, existing_id, supabase):
+    """이미 같은 이름의 포트폴리오가 있을 때 띄우는 팝업"""
+    st.write(f"이미 **'{final_name}'**이라는 이름의 포트폴리오가 존재합니다.")
+    st.info("새로운 데이터로 덮어쓰시겠습니까?")
+    
+    col_ov1, col_ov2 = st.columns(2)
+    
+    if col_ov1.button("🎮 네, 덮어씁니다", type="primary", use_container_width=True):
+        try:
+            # 기존 ID를 찾아서 해당 데이터만 업데이트
+            supabase.table("portfolios").update({
+                "ticker_data": save_data, 
+                "created_at": "now()" # 저장 시간 갱신
+            }).eq("id", existing_id).execute()
+            
+            logger.info(f"🔄 기존 포트폴리오 덮어쓰기 완료: {final_name}")
+            st.toast(f"'{final_name}' 파일을 성공적으로 갱신했습니다!", icon="✅")
+            st.balloons()
+            time.sleep(1.0)
+            st.rerun()
+        except Exception as e:
+            st.error(f"저장 중 오류 발생: {e}")
+            
+    if col_ov2.button("아니요, 취소", use_container_width=True):
+        st.rerun()
+
+
 def render_calculator_page(df):
     """💰 배당금 계산기 페이지 렌더링"""
     all_data = []
@@ -407,7 +462,7 @@ def render_calculator_page(df):
 
         search_options = sorted(list(set(df.apply(clean_label, axis=1).tolist())))
         
-         # 🚨 [수정됨] 대조 로직 유연화: 로보어드바이저가 준 이름이 옵션에 포함되어 있으면 OK
+        # 🚨 [수정됨] 대조 로직 유연화: 로보어드바이저가 준 이름이 옵션에 포함되어 있으면 OK
         default_selected = []
         if st.session_state.get('selected_stocks'):
             for s_name in st.session_state.selected_stocks:
@@ -566,19 +621,34 @@ def render_calculator_page(df):
                         if save_mode == "✨ 새로 만들기":
                             c_new1, c_new2 = st.columns([2, 1])
                             p_name = c_new1.text_input("새 이름 입력", placeholder="비워두면 자동 이름", label_visibility="collapsed")
+                            
                             if c_new2.button("새로 저장", type="primary", use_container_width=True):
                                 final_name = p_name.strip()
                                 if not final_name:
                                     cnt_res = supabase.table("portfolios").select("id", count="exact").eq("user_id", user.id).execute()
                                     next_num = (cnt_res.count or 0) + 1
                                     final_name = f"포트폴리오 {next_num}"
-                                supabase.table("portfolios").insert({"user_id": user.id, "user_email": user.email, "name": final_name, "ticker_data": save_data}).execute()
-                                logger.info(f"💾 새 포트폴리오 저장: {final_name}")
-                                st.success(f"[{final_name}] 저장 완료!")
-                                st.balloons()
-                                time.sleep(1.0)
-                                st.rerun()
-                        else: 
+                                
+                                # 🚨 [안전장치 1] 중복 체크
+                                check_res = supabase.table("portfolios").select("id").eq("user_id", user.id).eq("name", final_name).execute()
+                                
+                                if check_res.data:
+                                    # 중복 발생 -> 팝업 신호 보내기
+                                    st.session_state.show_overwrite_dialog = {
+                                        "name": final_name,
+                                        "id": check_res.data[0]['id'],
+                                        "data": save_data
+                                    }
+                                else:
+                                    # 중복 없음 -> 바로 저장
+                                    supabase.table("portfolios").insert({"user_id": user.id, "user_email": user.email, "name": final_name, "ticker_data": save_data}).execute()
+                                    logger.info(f"💾 새 포트폴리오 저장: {final_name}")
+                                    st.success(f"[{final_name}] 저장 완료!")
+                                    st.balloons()
+                                    time.sleep(1.0)
+                                    st.rerun()
+
+                        else: # [🔄 기존 파일 수정 모드]
                             exist_res = supabase.table("portfolios").select("id, name, created_at").eq("user_id", user.id).order("created_at", desc=True).execute()
                             if not exist_res.data:
                                 st.warning("수정할 포트폴리오가 없습니다. 새로 만들어주세요.")
@@ -587,13 +657,24 @@ def render_calculator_page(df):
                                 c_up1, c_up2 = st.columns([2, 1])
                                 selected_label = c_up1.selectbox("수정할 파일 선택", list(exist_opts.keys()), label_visibility="collapsed")
                                 target_id = exist_opts[selected_label]
+                                
+                                # 선택된 이름 찾기 (팝업 표시용)
+                                target_name = selected_label.split(" (")[0]
+
                                 if c_up2.button("덮어쓰기", type="primary", use_container_width=True):
-                                    supabase.table("portfolios").update({"ticker_data": save_data, "created_at": "now()"}).eq("id", target_id).execute()
-                                    logger.info(f"🔄 기존 포트폴리오 업데이트: {target_id}")
-                                    st.success("수정 완료! 내용이 업데이트되었습니다.")
-                                    st.balloons()
-                                    time.sleep(1.0)
-                                    st.rerun()
+                                    # [안전장치 2] 기존 수정 시에도 팝업 띄우기 (일관성)
+                                    st.session_state.show_overwrite_dialog = {
+                                        "name": target_name,
+                                        "id": target_id,
+                                        "data": save_data
+                                    }
+
+                        # 🚨 [공통 안전 호출 구역] 다이얼로그 실행
+                        if "show_overwrite_dialog" in st.session_state:
+                            info = st.session_state.show_overwrite_dialog
+                            del st.session_state.show_overwrite_dialog
+                            confirm_overwrite_dialog(info["name"], user.id, user.email, info["data"], info["id"], supabase)
+
                     except Exception as e:
                         st.error(f"오류 발생: {e}")
             
@@ -965,57 +1046,6 @@ def render_stocklist_page(df):
 # ==========================================
 # [SECTION 5] 메인 애플리케이션 실행 엔진 (관제실)
 # ==========================================
-
-# 🚨 [추가된 함수] 삭제 확인 다이얼로그 (Dialog)
-@st.dialog("⚠️ 정말 삭제하시겠습니까?")
-def confirm_delete_dialog(target_names, opts, supabase):
-    st.write(f"선택하신 **{len(target_names)}개**의 포트폴리오가 영구적으로 삭제됩니다.")
-    st.warning("이 작업은 되돌릴 수 없습니다.")
-    
-    col_del1, col_del2 = st.columns(2)
-    
-    if col_del1.button("✅ 네, 삭제합니다", type="primary", use_container_width=True):
-        try:
-            target_ids = [opts[name]['id'] for name in target_names]
-            # Supabase 'in' 쿼리로 일괄 삭제
-            supabase.table("portfolios").delete().in_("id", target_ids).execute()
-            
-            logger.info(f"🗑️ 포트폴리오 일괄 삭제: {len(target_ids)}건")
-            st.rerun()
-        except Exception as e:
-            st.error(f"삭제 중 오류 발생: {e}")
-            
-    if col_del2.button("취소", use_container_width=True):
-        st.rerun()
-
-# 💾 [추가된 함수] 덮어쓰기 확인 다이얼로그
-@st.dialog("💾 기존 파일 덮어쓰기")
-def confirm_overwrite_dialog(final_name, user_id, user_email, save_data, existing_id, supabase):
-    """이미 같은 이름의 포트폴리오가 있을 때 띄우는 팝업"""
-    st.write(f"이미 **'{final_name}'**이라는 이름의 포트폴리오가 존재합니다.")
-    st.info("새로운 데이터로 덮어쓰시겠습니까?")
-    
-    col_ov1, col_ov2 = st.columns(2)
-    
-    if col_ov1.button("🎮 네, 덮어씁니다", type="primary", use_container_width=True):
-        try:
-            # 기존 ID를 찾아서 해당 데이터만 업데이트
-            supabase.table("portfolios").update({
-                "ticker_data": save_data, 
-                "created_at": "now()" # 저장 시간 갱신
-            }).eq("id", existing_id).execute()
-            
-            logger.info(f"🔄 기존 포트폴리오 덮어쓰기 완료: {final_name}")
-            st.toast(f"'{final_name}' 파일을 성공적으로 갱신했습니다!", icon="✅")
-            st.balloons()
-            time.sleep(1.0)
-            st.rerun()
-        except Exception as e:
-            st.error(f"저장 중 오류 발생: {e}")
-            
-    if col_ov2.button("아니요, 취소", use_container_width=True):
-        st.rerun()
-
 def main():
     inject_ga()
     
@@ -1024,7 +1054,7 @@ def main():
     ui.load_css() 
     
     # 2. 안전 장치 (COPPA)
-    check_coppa_compliance() 
+    #check_coppa_compliance() 
     
     logger.info("🚀 배당팽이 메인 엔진 가동")
     db.cleanup_old_tokens()
@@ -1098,12 +1128,9 @@ def main():
                     if resp.data:
                         opts = {f"{p.get('name') or '이름없음'} ({p['created_at'][5:10]} {p['created_at'][11:16]})": p for p in resp.data}
                         
-                        # [NEW] 삭제 모드 토글
                         is_delete_mode = st.toggle("🗑️ 포트폴리오 정리(삭제) 모드")
-
                         if is_delete_mode:
                             st.caption("삭제할 포트폴리오를 모두 선택하세요.")
-                            # 다중 선택 박스
                             targets_to_delete = st.multiselect(
                                 "삭제 목록 선택", 
                                 options=list(opts.keys()),
@@ -1113,20 +1140,18 @@ def main():
 
                             if targets_to_delete:
                                 if st.button(f"🚨 선택한 {len(targets_to_delete)}개 영구 삭제", type="primary", use_container_width=True):
-                                    # 다이얼로그 호출
                                     confirm_delete_dialog(targets_to_delete, opts, supabase)
                             else:
                                 st.button("🚨 삭제 버튼 (항목을 먼저 선택하세요)", disabled=True, use_container_width=True)
-
                         else:
-                            # 기존 불러오기 모드
                             sel_name = st.selectbox("항목 선택", list(opts.keys()), label_visibility="collapsed")
+                            
+                            is_overwrite_mode = True # 항상 덮어쓰기 로직 활성화
                             
                             if st.button("📂 불러오기", use_container_width=True):
                                 data = opts[sel_name]['ticker_data']
                                 st.session_state.total_invest = int(data.get('total_money', 30000000))
                                 st.session_state.selected_stocks = list(data.get('composition', {}).keys())
-                                # 저장된 비중 불러오기 (없으면 무시)
                                 saved_weights = data.get('composition', {})
                                 st.session_state.ai_suggested_weights = saved_weights
                                 st.session_state.monthly_expense = int(data.get('monthly_expense', 200))
@@ -1138,7 +1163,7 @@ def main():
                     else: 
                         st.caption("저장된 기록이 없습니다.")
                 except Exception as e: 
-                    st.error(f"불러오기 실패: {e}")
+                    st.error("불러오기 실패")
 
         st.markdown("---")
 
