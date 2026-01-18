@@ -58,15 +58,20 @@ st.components.v1.html("""
 # [추가 과제] 4과제: COPPA 나이 확인 (안전 장치)
 # ---------------------------------------------------------
 # [2단계] 검문소 로직 (새로고침 없이 자연스럽게 통과)
+# 👇 [2단계] 검문소 로직 (로그인 시 프리패스 추가)
 def check_coppa_compliance():
-    """만 13세 이상 이용 확인 (타이밍 이슈 해결 버전)"""
+    """만 13세 이상 이용 확인 (로그인 유저 프리패스 버전)"""
     
-    # 1. [프리패스] 세션이나 URL에 인증 흔적이 있으면 통과
-    if st.session_state.get("age_verified") or st.query_params.get("age_verified") == "1":
-        st.session_state.age_verified = True 
+    # 1. [프리패스] 이미 세션, URL에 흔적이 있거나 "로그인 된 상태"면 바로 통과!
+    # (st.session_state.get("is_logged_in") <- 이게 핵심입니다!)
+    if (st.session_state.get("age_verified") or 
+        st.query_params.get("age_verified") == "1" or 
+        st.session_state.get("is_logged_in")): 
+        
+        st.session_state.age_verified = True # 세션에 확실히 박아두기
         return
 
-    # 2. [검문] 체크박스 표시
+    # 2. [검문] 아무 기록도 없으면 체크박스 표시
     with st.expander("📋 서비스 이용 안내 (필수)", expanded=True):
         st.warning("본 서비스는 만 13세 이상 사용자만 이용 가능합니다.")
         
@@ -75,17 +80,18 @@ def check_coppa_compliance():
             # (1) 세션 통과 처리
             st.session_state.age_verified = True
             
-            # (2) [핵심] 파이썬이 주소창에 직접 도장 쾅! (새로고침 없이도 URL이 바뀜)
+            # (2) 파이썬이 주소창에 도장 쾅! (즉시 반영)
             st.query_params["age_verified"] = "1"
             
-            # (3) 브라우저 주머니에도 도장 저장 (자바스크립트 실행 시간 확보됨)
+            # (3) 브라우저 주머니에도 저장 (다음에 왔을 때 기억하기 위해)
             st.components.v1.html("""
                 <script>
                     localStorage.setItem('age_verified', '1');
                 </script>
             """, height=0)
             
-            # (4) st.rerun() 제거 -> 자연스럽게 아래 코드(메인 화면)가 실행됨!
+            # (4) 통과했으니 바로 재실행
+            st.rerun()
         else:
             # 체크 안 하면 여기서 멈춤
             st.stop()
