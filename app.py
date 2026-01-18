@@ -36,14 +36,16 @@ st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
 
 # 👇 [1단계] RFID 센서 (이 코드를 복사해서 붙여넣으세요)
 # 기능: "어? 너 아까 인증했잖아?" 하고 기억해내는 역할
+# [1단계] RFID 센서 (기존 것 지우고 이걸로 교체)
 st.components.v1.html("""
 <script>
     try {
         const ageVerified = localStorage.getItem('age_verified');
         const params = new URLSearchParams(window.parent.location.search);
         
-        // 로컬스토리지엔 있는데, URL에 표시가 안 되어 있다면? -> URL에 표시하고 조용히 새로고침
+        // 주머니(로컬스토리지)에 도장이 있는데, 주소창(URL)에 없다면?
         if (ageVerified === '1' && !params.has('age_verified')) {
+            // 주소창에 도장 쾅 찍고 새로고침!
             params.set('age_verified', '1');
             window.parent.location.search = params.toString();
         }
@@ -52,39 +54,40 @@ st.components.v1.html("""
     }
 </script>
 """, height=0)
-
 # ---------------------------------------------------------
 # [추가 과제] 4과제: COPPA 나이 확인 (안전 장치)
 # ---------------------------------------------------------
-# 👇 [2단계] 검문소 로직 (안전한 버전)
+# [2단계] 검문소 로직 (새로고침 없이 자연스럽게 통과)
 def check_coppa_compliance():
-    """만 13세 이상 이용 확인 (무한 로딩 해결 버전)"""
+    """만 13세 이상 이용 확인 (타이밍 이슈 해결 버전)"""
     
-    # 1. [프리패스] 이미 세션(단기 기억)이나 URL(장기 기억)에 인증 흔적이 있으면 바로 통과!
-    if st.session_state.get("age_verified") or "age_verified" in st.query_params:
-        st.session_state.age_verified = True # 세션에 확실히 박아두기
+    # 1. [프리패스] 세션이나 URL에 인증 흔적이 있으면 통과
+    if st.session_state.get("age_verified") or st.query_params.get("age_verified") == "1":
+        st.session_state.age_verified = True 
         return
 
-    # 2. [검문] 아무 기록도 없으면 체크박스 표시
+    # 2. [검문] 체크박스 표시
     with st.expander("📋 서비스 이용 안내 (필수)", expanded=True):
         st.warning("본 서비스는 만 13세 이상 사용자만 이용 가능합니다.")
         
         # 체크박스를 누르면?
         if st.checkbox("나는 만 13세 이상이며, 이용 약관에 동의합니다."):
-            # (1) 즉시 통과 처리
+            # (1) 세션 통과 처리
             st.session_state.age_verified = True
             
-            # (2) 브라우저에 "나 인증했음" 도장 쾅! (자바스크립트)
+            # (2) [핵심] 파이썬이 주소창에 직접 도장 쾅! (새로고침 없이도 URL이 바뀜)
+            st.query_params["age_verified"] = "1"
+            
+            # (3) 브라우저 주머니에도 도장 저장 (자바스크립트 실행 시간 확보됨)
             st.components.v1.html("""
                 <script>
                     localStorage.setItem('age_verified', '1');
                 </script>
             """, height=0)
             
-            # (3) 기분 좋게 새로고침 (st.stop 대신 rerun 사용)
-            st.rerun()
+            # (4) st.rerun() 제거 -> 자연스럽게 아래 코드(메인 화면)가 실행됨!
         else:
-            # 체크 안 하면 여기서 멈춤 (화면 하단 로딩 방지)
+            # 체크 안 하면 여기서 멈춤
             st.stop()
 
 # 세션 상태(Session State) 변수 초기화 로직
