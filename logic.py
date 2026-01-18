@@ -208,7 +208,10 @@ def load_and_process_data(df_raw, is_admin=False):
             
             # [시세 조회]
             price = get_safe_price(broker, code, category)
-            if not price: return idx, None
+            # 🚨 [긴급수정 1] 가격 조회가 실패해도 데이터를 버리지 않고 0으로 처리합니다.
+            if not price: 
+                price = 0 
+                # return idx, None (이 코드가 범인이었습니다)
 
             # [배당금 결정]
             crawled_div = float(row.get('연배당금_크롤링', 0))
@@ -222,9 +225,15 @@ def load_and_process_data(df_raw, is_admin=False):
                 target_div = crawled_div if crawled_div > 0 else manual_div
                 display_name = name
 
-            yield_val = (target_div / price) * 100
+            if price > 0:
+                yield_val = (target_div / price) * 100
+            else:
+                yield_val = 0
 
-            if not is_admin and (yield_val < 2.0 or yield_val > 25.0): return idx, None
+            # 🚨 [긴급수정 2] 배당률 필터링(2% 미만 삭제)을 잠시 비활성화합니다.
+            # 데이터가 0이어도 일단 화면에는 나와야 합니다.
+            # if not is_admin and (yield_val < 2.0 or yield_val > 25.0): return idx, None
+            
             if is_admin and (yield_val < 2.0 or yield_val > 25.0): display_name = f"🚫 {display_name}"
 
             price_fmt = f"{int(price):,}원" if category == '국내' else f"${price:.2f}"
