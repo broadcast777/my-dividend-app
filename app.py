@@ -13,7 +13,7 @@ import random
 from streamlit.runtime.scriptrunner import get_script_run_ctx
 from logger import logger
 from analytics import inject_ga
-import streamlit.components.v1 as components # 👈 [필수] RFID 센서용
+import streamlit.components.v1 as components  # 👈 [필수] RFID 센서용
 
 # [필수] 날짜 및 URL 라이브러리
 from datetime import datetime, timedelta
@@ -34,54 +34,45 @@ import timeline
 # 앱의 타이틀과 가로 너비를 설정합니다
 st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
 
-# 👇 [1단계] RFID 센서 (이 코드를 복사해서 붙여넣으세요)
-# 기능: "어? 너 아까 인증했잖아?" 하고 기억해내는 역할
-# [1단계] RFID 센서 (기존 것 지우고 이걸로 교체)
-st.components.v1.html("""
+# 📡 [RFID 센서] 브라우저 저장소(localStorage)와 URL 동기화
+# 이 코드가 있어야 로그아웃 후 새로고침 시에도 나이 인증을 기억합니다.
+components.html("""
 <script>
     try {
         const ageVerified = localStorage.getItem('age_verified');
         const params = new URLSearchParams(window.parent.location.search);
-        
-        // 주머니(로컬스토리지)에 도장이 있는데, 주소창(URL)에 없다면?
+        // 로컬스토리지엔 있는데 URL엔 없다면? -> 도장 찍고 새로고침
         if (ageVerified === '1' && !params.has('age_verified')) {
-            // 주소창에 도장 쾅 찍고 새로고침!
             params.set('age_verified', '1');
             window.parent.location.search = params.toString();
         }
-    } catch (e) {
-        console.log("Sensor Error: ", e);
-    }
+    } catch (e) { console.log("Sensor Error: ", e); }
 </script>
 """, height=0)
+
 # ---------------------------------------------------------
 # [추가 과제] 4과제: COPPA 나이 확인 (안전 장치)
 # ---------------------------------------------------------
 def check_coppa_compliance():
-    # 1. 프리패스 조건
+    """만 13세 이상 이용 확인 (localStorage 및 URL 연동 버전)"""
+    # 1. 프리패스 조건: 세션, URL 파라미터, 혹은 로그인 상태 중 하나라도 만족 시 통과
     if (st.session_state.get("age_verified") or 
         st.query_params.get("age_verified") == "1" or 
         st.session_state.get("is_logged_in")):
-        
-        # 세션이 풀렸더라도 URL이나 로그인 정보가 있으면 세션에 다시 등록
         st.session_state.age_verified = True
         return
 
-    # 2. 검문소 UI
+    # 2. 동의 안내창 표시
     with st.expander("📋 서비스 이용 안내 (필수)", expanded=True):
         st.warning("본 서비스는 만 13세 이상 사용자만 이용 가능합니다.")
-        if st.checkbox("나는 만 13세 이상이며, 이용 약관에 동의합니다."):
+        if st.checkbox("나는 만 13세 이상이며, 이용 약관 및 개인정보 처리방침에 동의합니다."):
             st.session_state.age_verified = True
             
-            # ✅ URL에 도장 쾅! (이게 있어야 F5 눌러도 안 뜸)
-            st.query_params["age_verified"] = "1"
+            # 브라우저에 영구 도장 찍기
+            st.components.v1.html("<script>localStorage.setItem('age_verified','1');</script>", height=0)
             
-            # ✅ 브라우저 저장소에도 문신 쾅!
-            st.components.v1.html("""
-                <script>
-                    localStorage.setItem('age_verified', '1');
-                </script>
-            """, height=0)
+            # 주소창에 즉시 도장 찍기 (F5 대비)
+            st.query_params["age_verified"] = "1"
             
             time.sleep(0.5) # 도장 찍힐 시간 확보
             st.rerun()
@@ -175,6 +166,7 @@ def check_auth_status():
 
 check_auth_status()
 
+
 # ==========================================
 # [SECTION 3] UI 컴포넌트 (사이드바 및 공통 요소)
 # ==========================================
@@ -185,17 +177,18 @@ def render_login_ui():
     is_logged_in = st.session_state.get("is_logged_in", False)
     user_info = st.session_state.get("user_info", None)
     
-  
-    ...
     if is_logged_in and user_info:
-        nickname = user_info.email.split("@")[0]
+        # 이메일 앞부분을 닉네임으로 활용
+        email = user_info.email if user_info.email else "User"
+        nickname = email.split("@")[0]
         
         with st.sidebar:
             st.markdown("---")
             st.success(f"👋 반가워요! **{nickname}**님")
             
+            # 로그아웃 버튼 클릭 시 세션 초기화 및 새로고침
             if st.button("🚪 로그아웃", key="logout_btn_sidebar", use_container_width=True):
-                logger.info(f"🚪 사용자 로그아웃")
+                logger.info(f"🚪 사용자 로그아웃: {email}") # [3과제] 로깅 추가
                 supabase.auth.sign_out()
                 st.session_state.is_logged_in = False
                 st.session_state.user_info = None
@@ -248,7 +241,6 @@ def render_sidebar_footer():
             </a>
         </div>
     """, unsafe_allow_html=True)
-    
 
 
 # ==========================================
@@ -1142,14 +1134,15 @@ def main():
 
     render_login_ui()
     
+    # [수정됨] 이제 복잡한 코드는 다 지우고, 아까 만든 함수만 부르면 됩니다!
     auth_container = st.container(border=True)
     with auth_container:
         if not st.session_state.get("is_logged_in", False):
             if "code" in st.query_params:
                  st.info("🔄 로그인 확인 중입니다... 잠시만 기다려주세요.")
             else:
-                # [수정] 길게 늘어진 코드 다 지우고, 위에서 만든 함수 딱 한 줄 호출!
-                render_login_buttons(key_suffix="top_main") 
+                # 여기서 아까 만든 '예쁜 가로형 버튼' 함수 호출!
+                render_login_buttons(key_suffix="top_main")
         else:
             user = st.session_state.user_info
             nickname = user.email.split("@")[0] if user.email else "User"
