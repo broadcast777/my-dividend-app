@@ -1,8 +1,7 @@
 """
-프로젝트: 배당 팽이 (Dividend Top) v2.2
-파일명: app.py (Phase 2: 통합 관제실 리팩토링 완료)
-설명: 라이브러리 로드, 세션 초기화, 중앙 라우팅 시스템 구축
-      (v2.2 변경점: 계산기 페이지에서 존재하지 않는 종목 참조 시 Index Error 방지 로직 추가)
+프로젝트: 배당 팽이 (Dividend Top) v2.3
+파일명: app.py
+설명: 포트폴리오 로드 시 Multiselect에 선택된 종목(빨간 태그)이 안 뜨는 버그 수정 완료
 """
 
 import streamlit as st
@@ -173,7 +172,6 @@ def render_sidebar_footer():
     """사이드바 하단 후원 버튼 (CSS 분리 적용됨)"""
     bmc_url = "https://www.buymeacoffee.com/dividenpange"
     st.sidebar.markdown("---") 
-    # [수정] style.css의 .bmc-button 클래스를 사용하여 코드가 매우 깔끔해졌습니다.
     st.sidebar.markdown(f"""
         <div class="bmc-container">
             <a class="bmc-button" href="{bmc_url}" target="_blank">
@@ -202,7 +200,6 @@ def render_login_buttons(key_suffix="default"):
         try:
             res_kakao = supabase.auth.sign_in_with_oauth({"provider": "kakao", "options": {"redirect_to": redirect_url, "skip_browser_redirect": True}})
             if res_kakao.url:
-                # [수정] 인라인 스타일 제거하고 class="kakao-login-btn" 사용
                 st.markdown(f'''<a href="{res_kakao.url}" target="_blank" class="kakao-login-btn">💬 카카오로 3초 만에 시작</a>''', unsafe_allow_html=True)
         except: st.error("Kakao 오류")
     with col2:
@@ -463,53 +460,35 @@ def render_calculator_page(df):
 
         search_options = sorted(list(set(df.apply(clean_label, axis=1).tolist())))
         
+        # 🚨 [수정된 부분] 안전하게 'default' 값을 계산해서 위젯에 다시 넣어줍니다.
+        default_selected_opts = []
+        if st.session_state.get('selected_stocks'):
+            saved_stocks = st.session_state.selected_stocks
+            # session_state에 있는 이름이 search_options에 실제 존재하는지 확인하고,
+            # '이름 (코드)' 형태의 풀 네임을 찾아서 리스트에 담습니다.
+            for s_name in saved_stocks:
+                for opt in search_options:
+                    # 1. '이름 (' 로 시작하는 완벽한 매칭 (예: 삼성전자 (005930))
+                    if opt.startswith(f"{s_name} ("):
+                        default_selected_opts.append(opt)
+                        break
+                    # 2. 이름만 있는 경우 (해외주식 등 예외 처리)
+                    elif s_name == opt.split(' (')[0]:
+                        default_selected_opts.append(opt)
+                        break
+
         selected_search = col2.multiselect(
             "📊 종목 선택 (이름 또는 코드로 검색)", 
             options=search_options, 
-            # default= ... (아래에서 안전하게 처리)
+            default=default_selected_opts, # 👈 여기가 핵심입니다! (초기값 복구)
             help="종목코드(숫자)나 종목명을 입력해 보세요!"
         )
 
-        # 🚨 [안전 장치 추가]
-        # multiselect에서 선택된 값들을 1차 파싱합니다.
+        # 위젯에서 선택된 값들을 1차 파싱
         raw_selected = [opt.split(' (')[0] if ' (' in opt else opt for opt in selected_search]
         
-        # 기본 선택값 로직 (저장된 포트폴리오 불러올 때 등)
-        if not raw_selected and st.session_state.get('selected_stocks'):
-            # 저장된 이름이 현재 df에 실제로 존재하는지 확인하여 유효한 것만 default_selected에 넣습니다.
-            saved_stocks = st.session_state.selected_stocks
-            default_selected_opts = []
-            
-            for s_name in saved_stocks:
-                # search_options 안에서 매칭되는 것을 찾음
-                found = False
-                for opt in search_options:
-                    if opt.startswith(f"{s_name} ("):
-                        default_selected_opts.append(opt)
-                        found = True
-                        break
-                if not found:
-                    for opt in search_options:
-                        if s_name in opt:
-                            default_selected_opts.append(opt)
-                            found = True
-                            break
-            
-            # 여기서 바로 multiselect에 default 값을 꽂아주는 게 아니라, 
-            # 스트림릿 특성상 rerun 되면서 반영되기를 기대하거나, 
-            # 아래 로직에서 raw_selected가 비어있을 때 처리를 해야 함.
-            # 하지만 이미 multiselect가 그려진 뒤라 default 값 주입은 까다로움.
-            # (일반적으로 st.session_state로 위젯 키를 제어하지만, 코드가 복잡해짐)
-            
-            # 따라서 "불러오기" 버튼을 누른 직후에는 session_state.selected_stocks가 있고
-            # multiselect는 리셋될 수 있음.
-            # (현재 구조상 selected_search가 비어있으면 session_state 값을 쓰도록 유도)
-            
-            if not selected_search:
-                raw_selected = saved_stocks
-
-        # 🚨 [핵심 수정] 유령 종목 필터링 (Ghost Stock Filtering)
-        # 선택된 이름(raw_selected) 중 현재 데이터프레임(df)에 진짜로 존재하는 것만 남깁니다.
+        # 🚨 [유령 종목 필터링]
+        # 선택된 이름 중 현재 데이터프레임(df)에 진짜로 존재하는 것만 남깁니다.
         selected = []
         for s in raw_selected:
             if not df[df['pure_name'] == s].empty:
@@ -519,7 +498,7 @@ def render_calculator_page(df):
         st.session_state.selected_stocks = selected
 
         if selected:
-            # 🚨 [안전한 검사] 이제 selected에는 무조건 존재하는 종목만 들어있으므로 에러가 나지 않습니다.
+            # 🚨 [안전한 검사]
             has_foreign_stock = any(df[df['pure_name'] == s_name].iloc[0]['분류'] == '해외' for s_name in selected)
             
             if has_foreign_stock:
@@ -547,7 +526,6 @@ def render_calculator_page(df):
                     
                     st.caption(f"💰 투자금: **{amt/10000:,.0f}만원**")
                     
-                    # 🚨 여기도 안전함 (selected가 검증되었으므로)
                     stock_match = df[df['pure_name'] == stock]
                     if not stock_match.empty:
                         s_row = stock_match.iloc[0]
@@ -588,7 +566,6 @@ def render_calculator_page(df):
                     </div>
                 """, unsafe_allow_html=True)
             
-            # 🚨 [안전한 계산] 검증된 selected 리스트만 사용
             total_y_div = sum([(total_invest * (weights[n]/100) * (df[df['pure_name']==n].iloc[0]['연배당률']/100)) for n in selected])
             total_m = total_y_div / 12
             avg_y = sum([(df[df['pure_name']==n].iloc[0]['연배당률'] * (weights[n]/100)) for n in selected])
