@@ -1,7 +1,7 @@
 """
-프로젝트: 배당 팽이 (Dividend Top) v1.9.2
+프로젝트: 배당 팽이 (Dividend Top) v1.9.3
 파일명: recommendation.py
-설명: AI 로보어드바이저 엔진 (유형 기반 정밀 분류 + 셔플 + 쿼터제 + 지수 중복 방지)
+설명: AI 로보어드바이저 엔진 (안전장치 패치 완료)
 """
 
 import streamlit as st
@@ -33,7 +33,6 @@ def _check_timing_match(row_date, user_timing):
     elif user_timing == 'end': return cat == 'end' or cat == 'early'
     return True
 
-# [추가] 지수 중복 확인을 위한 알맹이 이름 추출기
 def _get_core_index_name(name):
     managers = ['ACE', 'TIGER', 'KODEX', 'SOL', 'RISE', 'PLUS', 'TIMEFOLIO', 'ARIRANG', 'HANARO', 'KBSTAR']
     core = name.upper()
@@ -46,21 +45,14 @@ def _get_core_index_name(name):
 # -----------------------------------------------------------
 
 def get_smart_recommendation(df, user_choices):
-    """
-    사용자 입력 분석 및 포트폴리오 최적화
-    (업데이트: '고배당주' vs '배당성장' 구분 로직 + 셔플 + 쿼터제)
-    """
-    
     target_yield = user_choices.get('target_yield', 7.0)
     style = user_choices.get('style', 'balance')
     wanted_count = user_choices.get('count', 3)
     timing = user_choices.get('timing', 'mix')
     
-    # 데이터 준비
     pool = df[df['연배당률'] > 0].copy()
     pool['temp_date_str'] = pool['배당락일'].fillna('').astype(str)
     
-    # 1. 필터링
     filtered_pool = pd.DataFrame()
     filter_stage = "strict" 
     
@@ -79,56 +71,36 @@ def get_smart_recommendation(df, user_choices):
         
     if filtered_pool.empty: return "조건에 맞는 종목 없음", [], {}
 
-    # 현금성 자산 식별 함수
     cash_keywords = ['shv', 'bil', 'sgov', 'cd', 'kofr', '파킹', '단기채', '초단기']
     def check_is_cash(row):
         is_bond = (row.get('유형') == '채권')
         text = (str(row['종목명']) + " " + str(row.get('pure_name', ''))).lower()
         return is_bond and any(k in text for k in cash_keywords)
 
-    # 2. 점수 산정 (Scoring)
     filtered_pool['yield_diff'] = abs(filtered_pool['연배당률'] - target_yield)
     filtered_pool['score'] = 100 - (filtered_pool['yield_diff'] * 10)
     
-    # [가산점 로직]
     for idx, row in filtered_pool.iterrows():
-        cat = row.get('유형', '') # 배당성장, 고배당주, 리츠, 커버드콜, 채권
-        
+        cat = row.get('유형', '')
         if style == 'growth':
-            # 성장형: 배당성장 1순위, 고배당주 2순위
-            if cat == '배당성장': 
-                filtered_pool.at[idx, 'score'] += 50 
-            elif cat == '고배당주':
-                filtered_pool.at[idx, 'score'] += 20
-            elif cat == '채권': 
-                filtered_pool.at[idx, 'score'] -= 30
-
+            if cat == '배당성장': filtered_pool.at[idx, 'score'] += 50 
+            elif cat == '고배당주': filtered_pool.at[idx, 'score'] += 20
+            elif cat == '채권': filtered_pool.at[idx, 'score'] -= 30
         elif style == 'safe':
-            # 안정형: 채권/혼합 1순위
-            if cat == '채권' or cat == '혼합':
-                filtered_pool.at[idx, 'score'] += 100
-            elif cat == '배당성장':
-                filtered_pool.at[idx, 'score'] += 30
-
+            if cat == '채권' or cat == '혼합': filtered_pool.at[idx, 'score'] += 100
+            elif cat == '배당성장': filtered_pool.at[idx, 'score'] += 30
         elif style == 'flow':
-            # 현금흐름형: 커버드콜 1순위, 고배당주 2순위
             filtered_pool.at[idx, 'score'] += (row['연배당률'] * 2)
-            if cat == '커버드콜':
-                filtered_pool.at[idx, 'score'] += 15
-            elif cat == '고배당주':
-                filtered_pool.at[idx, 'score'] += 20
-            elif cat == '리츠':
-                filtered_pool.at[idx, 'score'] += 10
+            if cat == '커버드콜': filtered_pool.at[idx, 'score'] += 15
+            elif cat == '고배당주': filtered_pool.at[idx, 'score'] += 20
+            elif cat == '리츠': filtered_pool.at[idx, 'score'] += 10
 
-    # [셔플] 랜덤 노이즈 추가
     filtered_pool['random_luck'] = [random.uniform(0, 15) for _ in range(len(filtered_pool))]
     filtered_pool['score'] += filtered_pool['random_luck']
-
     filtered_pool = filtered_pool.sort_values('score', ascending=False)
 
-    # 3. 선발 로직 (쿼터제)
     final_picks = []
-    picked_core_names = [] # [추가] 지수 중복 체크용 장부
+    picked_core_names = []
     
     cc_count = 0
     cash_count = 0 
@@ -138,15 +110,14 @@ def get_smart_recommendation(df, user_choices):
     MAX_CC = 2
     MAX_CASH = 1
     MAX_BOND = 1
-    MAX_REIT = 1 # 리츠 1개 제한
+    MAX_REIT = 1
     
-    # (A) 의무 선발
     if style == 'safe':
         safe_candidates = filtered_pool[filtered_pool['유형'] == '채권']
         if not safe_candidates.empty:
             best_safe = safe_candidates.iloc[0]
             final_picks.append(best_safe['pure_name'])
-            picked_core_names.append(_get_core_index_name(best_safe['pure_name'])) # 장부 기록
+            picked_core_names.append(_get_core_index_name(best_safe['pure_name']))
             if check_is_cash(best_safe): cash_count += 1
             else: bond_count += 1
             
@@ -156,7 +127,6 @@ def get_smart_recommendation(df, user_choices):
              
         growth_candidates = growth_candidates[~growth_candidates['pure_name'].isin(final_picks)]
         
-        # [수정] 중복 지수 필터링 추가
         for _, g_row in growth_candidates.iterrows():
             core = _get_core_index_name(g_row['pure_name'])
             if core not in picked_core_names:
@@ -171,17 +141,14 @@ def get_smart_recommendation(df, user_choices):
             final_picks.append(best_growth['pure_name'])
             picked_core_names.append(_get_core_index_name(best_growth['pure_name']))
 
-    # (B) 나머지 채우기
     for idx, row in filtered_pool.iterrows():
         if len(final_picks) >= wanted_count: break
         if row['pure_name'] in final_picks: continue
             
-        # [추가] 동일 지수 중복 검사
         core_name = _get_core_index_name(row['pure_name'])
         if core_name in picked_core_names: continue
             
         cat = row.get('유형', '')
-        
         is_cc = (cat == '커버드콜')
         is_reit = (cat == '리츠')
         is_cash = check_is_cash(row)
@@ -200,10 +167,8 @@ def get_smart_recommendation(df, user_choices):
         if is_bond: bond_count += 1
         if is_reit: reit_count += 1
         
-    # (C) 모자라면 채우기 (중복 방어선 해제하여 개수 맞춤)
     if len(final_picks) < wanted_count:
         remain_pool = filtered_pool[~filtered_pool['pure_name'].isin(final_picks)].copy()
-        
         if cc_count >= MAX_CC: remain_pool = remain_pool[remain_pool['유형'] != '커버드콜']
         if reit_count >= MAX_REIT: remain_pool = remain_pool[remain_pool['유형'] != '리츠']
         
@@ -212,7 +177,6 @@ def get_smart_recommendation(df, user_choices):
 
     selected_pool = filtered_pool[filtered_pool['pure_name'].isin(final_picks)].copy()
 
-    # 4. 비중 최적화
     if selected_pool.empty: return "종목 선정 실패", [], {}
 
     selected_pool['sort_cat'] = pd.Categorical(selected_pool['pure_name'], categories=final_picks, ordered=True)
@@ -245,7 +209,7 @@ def get_smart_recommendation(df, user_choices):
 
 
 # -----------------------------------------------------------
-# [SECTION 3] 화면 전환 도우미 (생략 - 기존과 동일)
+# [SECTION 3] 화면 전환 도우미
 # -----------------------------------------------------------
 def go_next_step(next_step_num, key=None, value=None):
     st.session_state.wiz_step = next_step_num
@@ -260,15 +224,15 @@ def reset_wizard():
 
 
 # -----------------------------------------------------------
-# [SECTION 4] UI 위자드
+# [SECTION 4] UI 위자드 (안전장치 추가됨)
 # -----------------------------------------------------------
 
 @st.dialog("🕵️ AI 포트폴리오 설계", width="small")
 def show_wizard():
-    
+    # [안전장치] 데이터가 준비되지 않았으면 에러 대신 안내 메시지
     df = st.session_state.get('shared_df')
-    if df is None:
-        st.error("데이터 로딩 중입니다. 잠시 후 다시 시도해주세요.")
+    if df is None or df.empty:
+        st.warning("⏳ 데이터 로딩 중입니다. 잠시 후 다시 시도해주세요.")
         return
 
     if "wiz_step" not in st.session_state: st.session_state.wiz_step = 1
@@ -299,24 +263,15 @@ def show_wizard():
         if current_style == 'safe':
             st.info("🛡️ **안정 추구:** 변동성이 낮은 채권 위주로 구성되나, **원금 손실 가능성은 여전히 존재**합니다.")
             if target > 5.0:
-                st.warning(
-                    "⚠️ **수익률 제한:** 안전 자산 비중이 높아 목표 수익률 달성이 어려울 수 있습니다.\n\n"
-                    "💡 **Tip:** 더 높은 배당을 원하시면, 결과를 **[담기]** 한 뒤 리츠나 고배당주를 **직접 추가**해보세요."
-                )
+                st.warning("⚠️ **수익률 제한:** 안전 자산 비중이 높아 목표 수익률 달성이 어려울 수 있습니다.")
         elif current_style == 'growth':
-            st.info("📈 **성장 집중:** 당장의 배당금보다 **미래 주가 상승**을 위한 종목(SCHD, 테크 등)이 의무 포함됩니다.")
+            st.info("📈 **성장 집중:** 당장의 배당금보다 **미래 주가 상승**을 위한 종목이 의무 포함됩니다.")
             if target >= 7.0:
-                st.warning(
-                    f"⚠️ **배당률 괴리:** 성장주 비중(30%↑) 확보로 인해 **실제 배당률은 목표({target}%)보다 낮을 수 있습니다.**\n\n"
-                    "💡 **Tip:** 부족한 현금 흐름은 결과를 **[담기]** 한 뒤, 커버드콜을 소량 **직접 추가**하여 보완할 수 있습니다."
-                )
+                st.warning(f"⚠️ **배당률 괴리:** 성장주 비중 확보로 인해 **실제 배당률은 목표({target}%)보다 낮을 수 있습니다.**")
         else: # flow
             st.info("💰 **현금 흐름:** 매월 들어오는 **월 배당금**에 집중합니다.")
             if target >= 8.0:
-                st.warning(
-                    "⚠️ **리스크 관리:** 포트폴리오 균형을 위해 **고위험군(커버드콜)은 최대 2개**로 자동 제한됩니다.\n\n"
-                    "💡 **Tip:** 더 공격적인 투자를 원하시면, 결과를 **[담기]** 한 뒤 메인 화면에서 종목을 **직접 추가**하실 수 있습니다."
-                )
+                st.warning("⚠️ **리스크 관리:** 포트폴리오 균형을 위해 **고위험군(커버드콜)은 최대 2개**로 자동 제한됩니다.")
             
         count = st.slider("📊 종목 개수", 3, 5, 3)
         if st.button("🚀 결과 확인하기", type="primary", use_container_width=True):
@@ -325,15 +280,25 @@ def show_wizard():
             st.session_state.wiz_step = 4
             st.rerun()
 
-    # [STEP 4] 결과
+    # [STEP 4] 결과 (캐시 안전장치 추가)
     elif step == 4:
-        if "ai_result_cache" not in st.session_state:
+        # 캐시가 없으면(None) 분석 다시 돌리기
+        if "ai_result_cache" not in st.session_state or st.session_state.ai_result_cache is None:
             with st.spinner("🎲 최적 조합 찾는 중..."):
                 t_res, p_res, w_res = get_smart_recommendation(df, st.session_state.wiz_data)
                 st.session_state.ai_result_cache = {"title": t_res, "picks": p_res, "weights": w_res}
         
         cached = st.session_state.ai_result_cache
-        title, picks, weights = cached["title"], cached["picks"], cached["weights"]
+        
+        # [안전장치] 캐시 구조가 깨졌을 경우 방어
+        if not isinstance(cached, dict):
+            st.error("데이터 처리 중 오류가 발생했습니다. 처음부터 다시 시도해주세요.")
+            st.button("처음으로", on_click=reset_wizard)
+            return
+
+        title = cached.get("title", "결과 없음")
+        picks = cached.get("picks", [])
+        weights = cached.get("weights", {})
 
         if not picks or title == "조건에 맞는 종목 없음":
             st.error("❌ 조건에 맞는 종목을 찾지 못했습니다.")
@@ -352,11 +317,7 @@ def show_wizard():
                 st.caption(f"    └ 💰 연 {row['연배당률']:.2f}% | 📅 {row.get('배당락일', '-')} | 🔖 {row.get('유형', '-')}")
 
         st.write("") 
-        st.warning("""⚠️ **투자 유의사항**
-                   
-1. 본 결과는 과거 데이터를 기반으로 한 단순 시뮬레이션이며, 종목의 매수/매도 추천이 아닙니다.
-2. 모든 투자의 책임은 투자자 본인에게 있습니다.
-3. '안정성'을 추구하는 포트폴리오라 할지라도 원금 손실이 발생할 수 있습니다.""")
+        st.warning("""⚠️ **투자 유의사항**\n1. 본 결과는 과거 데이터를 기반으로 한 단순 시뮬레이션입니다.\n2. 모든 투자의 책임은 투자자 본인에게 있습니다.""")
 
         st.divider()
         
@@ -377,9 +338,7 @@ def show_wizard():
             st.session_state.ai_modal_open = False
             if "ai_result_cache" in st.session_state: del st.session_state.ai_result_cache
             
-            u_bk = st.session_state.get("user_info")
-            l_bk = st.session_state.get("is_logged_in")
+            # 토스트 메시지 후 리런 (안전하게)
             st.toast("장바구니에 담았습니다! 🛒", icon="✅")
-            st.session_state.user_info = u_bk
-            st.session_state.is_logged_in = l_bk
+            time.sleep(0.5)
             st.rerun()
