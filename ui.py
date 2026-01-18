@@ -3,8 +3,16 @@ import html
 import re
 
 # ---------------------------------------------------------
-# [SECTION] UI 렌더링 모듈 (보안 강화 버전)
+# [SECTION] UI 렌더링 모듈 (인테리어 연결 및 보안 강화)
 # ---------------------------------------------------------
+
+def load_css():
+    """[신규] 외부 배전함(style.css)을 시스템에 연결합니다."""
+    try:
+        with open("style.css", "r", encoding="utf-8") as f:
+            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+    except FileNotFoundError:
+        pass # 파일이 없으면 기본 디자인으로 출력됨
 
 def sanitize_url(url):
     """[보안] 안전한 링크만 허용하는 검문소"""
@@ -14,12 +22,11 @@ def sanitize_url(url):
     return "#"
 
 def render_custom_table(data_frame):
-    """데이터프레임을 보안 HTML 테이블로 변환"""
-    
+    """데이터프레임을 보안 HTML 테이블로 변환 (디자인은 style.css 참고)"""
     html_rows = []
     
     for _, row in data_frame.iterrows():
-        # 1. 데이터 보안 처리 (필터링)
+        # 1. 데이터 보안 처리
         safe_code = html.escape(str(row.get('코드', '')))
         safe_name = html.escape(str(row.get('종목명', '')))
         safe_price = html.escape(str(row.get('현재가', '0')))
@@ -48,21 +55,10 @@ def render_custom_table(data_frame):
         
         f_link = f"<a href='{safe_finance_url}' target='_blank' rel='noopener noreferrer' style='color:#0068c9; text-decoration:none;'>🔗정보</a>"
         
-        # 행 추가
         html_rows.append(f"<tr><td>{b_link}</td><td class='name-cell'>{stock_name_html}</td><td>{safe_price}</td><td>{yield_display}</td><td>{safe_exch}</td><td>{safe_ex_date}</td><td>{f_link}</td></tr>")
 
-    # [핵심] 4. 테이블 전체 렌더링 (디자인 보존)
-    # 반드시 unsafe_allow_html=True 가 마지막에 있어야 글자로 안 나오고 표로 나옵니다!
+    # 4. 테이블 전체 렌더링 (디자인 코드는 style.css에서 자동으로 가져옴)
     st.markdown(f"""
-    <style>
-        .table-container {{ overflow-x: auto; white-space: nowrap; margin-bottom: 20px; border: 1px solid #eee; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }}
-        table {{ width: 100%; border-collapse: collapse; font-size: 14px; min-width: 600px; }}
-        th {{ background: #f8f9fb; padding: 12px 8px; border-bottom: 2px solid #ddd; text-align: center; color: #555; }}
-        td {{ padding: 10px 8px; border-bottom: 1px solid #eee; text-align: center; background: white; }}
-        .name-cell {{ text-align: left !important; min-width: 140px; position: sticky; left: 0; background: #fff; z-index: 1; border-right: 2px solid #f0f0f0; }}
-        tr:hover td {{ background-color: #fcfcfc; }}
-    </style>
-    
     <div class="table-container">
         <table>
             <thead>
