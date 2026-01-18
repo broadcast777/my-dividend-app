@@ -1,7 +1,7 @@
 """
-프로젝트: 배당 팽이 (Dividend Top) v1.9.6
+프로젝트: 배당 팽이 (Dividend Top) v2.1
 파일명: logic.py
-설명: 금융 API 연동 및 데이터 자동 보정 (하이일드/채권 자동 분류 추가)
+설명: 금융 API 연동 및 데이터 자동 보정 (해외 티커 00붙임 현상 수정 완료)
 """
 
 import streamlit as st
@@ -177,8 +177,15 @@ def load_and_process_data(df_raw, is_admin=False):
             if col in df_raw.columns:
                 df_raw[col] = pd.to_numeric(df_raw[col], errors='coerce').fillna(0)
 
+        # 🚨 [수정 완료] 숫자인 경우에만 0을 채우고(한국), 문자는 그대로 둡니다(미국).
+        # 기존: .str.zfill(6) -> 무조건 6자리로 만듦 (JEPI -> 00JEPI 오류 발생)
         if '종목코드' in df_raw.columns:
-            df_raw['종목코드'] = df_raw['종목코드'].astype(str).str.split('.').str[0].str.strip().str.zfill(6)
+            def clean_ticker(x):
+                s = str(x).split('.')[0].strip()
+                if s.isdigit(): return s.zfill(6) # 숫자면 한국 주식 (005930)
+                return s.upper() # 문자면 미국 주식 (JEPI)
+            
+            df_raw['종목코드'] = df_raw['종목코드'].apply(clean_ticker)
 
         if '배당락일' in df_raw.columns:
             df_raw['배당락일'] = df_raw['배당락일'].astype(str).replace(['nan', 'None', 'nan '], '-')
@@ -208,10 +215,7 @@ def load_and_process_data(df_raw, is_admin=False):
             
             # [시세 조회]
             price = get_safe_price(broker, code, category)
-            # 🚨 [긴급수정 1] 가격 조회가 실패해도 데이터를 버리지 않고 0으로 처리합니다.
-            if not price: 
-                price = 0 
-                # return idx, None (이 코드가 범인이었습니다)
+            if not price: price = 0 
 
             # [배당금 결정]
             crawled_div = float(row.get('연배당금_크롤링', 0))
@@ -230,18 +234,14 @@ def load_and_process_data(df_raw, is_admin=False):
             else:
                 yield_val = 0
 
-            # 🚨 [긴급수정 2] 배당률 필터링(2% 미만 삭제)을 잠시 비활성화합니다.
-            # 데이터가 0이어도 일단 화면에는 나와야 합니다.
-            # if not is_admin and (yield_val < 2.0 or yield_val > 25.0): return idx, None
-            
+            # 🚨 [필터링 해제 상태]
             if is_admin and (yield_val < 2.0 or yield_val > 25.0): display_name = f"🚫 {display_name}"
 
             price_fmt = f"{int(price):,}원" if category == '국내' else f"${price:.2f}"
             
             # 🚨 [핵심 업데이트] 자동 분류 보정 (Auto-Correction)
-            # CSV에 뭐라고 써있든, 이름에 명확한 키워드가 있으면 덮어씁니다.
             csv_type = str(row.get('유형', '-'))
-            auto_asset_type = classify_asset(row) # 이모지 포함된 문자열 (예: 🏦 채권형)
+            auto_asset_type = classify_asset(row) 
             
             final_type = csv_type
             if '채권' in auto_asset_type: final_type = '채권'
@@ -258,7 +258,7 @@ def load_and_process_data(df_raw, is_admin=False):
                 '환구분': get_hedge_status(name, category),
                 '배당락일': str(row.get('배당락일', '-')), 
                 '분류': category,
-                '유형': final_type,  # 👈 보정된 유형 적용!
+                '유형': final_type, 
                 '자산유형': auto_asset_type,
                 '캘린더링크': calculate_google_calendar_url(display_name, str(row.get('배당락일', '-'))),
                 'pure_name': name.replace("🚫 ", "").replace(" (필터대상)", ""), 
