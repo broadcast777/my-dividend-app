@@ -1,25 +1,65 @@
-/* style.css - 앱 전체 인테리어 및 테이블 배선함 */
+/* style.css - 디자인 강제 적용 및 아이콘 크기 고정 */
 
-/* 1. 후원 버튼 스타일 */
+/* 1. 후원 버튼 (왕커진 아이콘 축소) */
 .bmc-button {
-    display: flex; align-items: center; justify-content: center;
-    background-color: #FFDD00; color: #000000 !important;
-    padding: 10px 15px; border-radius: 10px; text-decoration: none;
-    font-weight: bold; font-size: 14px; width: 100%;
-    box-shadow: 0 4px 8px rgba(0,0,0,0.1); transition: transform 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #FFDD00;
+    color: #000000 !important;
+    padding: 10px 15px;
+    border-radius: 10px;
+    text-decoration: none !important;
+    font-weight: bold;
+    font-size: 14px;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    transition: transform 0.2s;
+    width: 100%;
 }
-.bmc-button:hover { transform: translateY(-2px); background-color: #FADA00; }
 
-/* 2. 카카오 로그인 버튼 스타일 */
+.bmc-button:hover {
+    transform: translateY(-2px);
+    background-color: #FADA00;
+    text-decoration: none !important;
+    color: #000000 !important;
+}
+
+/* 🚨 [핵심] 아이콘 크기 강제 고정 (이게 없어서 엄청 커진 겁니다) */
+.bmc-logo {
+    width: 20px !important;
+    height: 20px !important;
+    margin-right: 8px;
+    margin-bottom: 0px !important;
+    vertical-align: middle;
+}
+
+/* 2. 카카오 로그인 버튼 (파란 글씨/밑줄 제거) */
 .kakao-login-btn {
-    display: inline-flex; justify-content: center; align-items: center;
-    width: 100%; background-color: #FEE500; color: #000000; 
-    border: 1px solid rgba(0,0,0,0.05); padding: 0.5rem; 
-    border-radius: 0.5rem; text-decoration: none; font-weight: bold; 
-    font-size: 1rem; box-shadow: 0 1px 2px rgba(0,0,0,0.1); height: 2.6rem;
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+    width: 100%;
+    background-color: #FEE500;
+    
+    /* !important로 브라우저 기본 스타일 찍어 누르기 */
+    color: #000000 !important;
+    text-decoration: none !important;
+    
+    border: 1px solid rgba(0,0,0,0.05);
+    padding: 0.5rem;
+    border-radius: 0.5rem;
+    font-weight: bold;
+    font-size: 1rem;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    height: 2.6rem;
 }
 
-/* 3. 종목 리스트 테이블 스타일 (ui.py에서 이사 옴) */
+.kakao-login-btn:hover {
+    color: #000000 !important;
+    text-decoration: none !important;
+}
+
+/* 3. 테이블 스타일 */
 .table-container { overflow-x: auto; white-space: nowrap; margin-bottom: 20px; border: 1px solid #eee; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
 table { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 600px; }
 th { background: #f8f9fb; padding: 12px 8px; border-bottom: 2px solid #ddd; text-align: center; color: #555; }
