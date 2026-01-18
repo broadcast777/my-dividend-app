@@ -965,15 +965,39 @@ def render_stocklist_page(df):
 # ==========================================
 # [SECTION 5] 메인 애플리케이션 실행 엔진 (관제실)
 # ==========================================
+
+# 🚨 [추가된 함수] 삭제 확인 다이얼로그 (Dialog)
+@st.dialog("⚠️ 정말 삭제하시겠습니까?")
+def confirm_delete_dialog(target_names, opts, supabase):
+    st.write(f"선택하신 **{len(target_names)}개**의 포트폴리오가 영구적으로 삭제됩니다.")
+    st.warning("이 작업은 되돌릴 수 없습니다.")
+    
+    col_del1, col_del2 = st.columns(2)
+    
+    if col_del1.button("✅ 네, 삭제합니다", type="primary", use_container_width=True):
+        try:
+            target_ids = [opts[name]['id'] for name in target_names]
+            # Supabase 'in' 쿼리로 일괄 삭제
+            supabase.table("portfolios").delete().in_("id", target_ids).execute()
+            
+            logger.info(f"🗑️ 포트폴리오 일괄 삭제: {len(target_ids)}건")
+            st.rerun()
+        except Exception as e:
+            st.error(f"삭제 중 오류 발생: {e}")
+            
+    if col_del2.button("취소", use_container_width=True):
+        st.rerun()
+
+
 def main():
     inject_ga()
     
     # 1. 초기화 (세션 설정 + CSS 배전함 연결)
     init_session_state() 
-    ui.load_css() # 👈 외부 CSS 파일을 여기서 로드합니다
+    ui.load_css() 
     
     # 2. 안전 장치 (COPPA)
-    #check_coppa_compliance() 
+    check_coppa_compliance() 
     
     logger.info("🚀 배당팽이 메인 엔진 가동")
     db.cleanup_old_tokens()
@@ -1046,30 +1070,48 @@ def main():
                     resp = supabase.table("portfolios").select("*").eq("user_id", uid).order("created_at", desc=True).execute()
                     if resp.data:
                         opts = {f"{p.get('name') or '이름없음'} ({p['created_at'][5:10]} {p['created_at'][11:16]})": p for p in resp.data}
-                        sel_name = st.selectbox("항목 선택", list(opts.keys()), label_visibility="collapsed")
                         
-                        is_delete_mode = st.toggle("🗑️ 삭제 모드 켜기")
+                        # [NEW] 삭제 모드 토글
+                        is_delete_mode = st.toggle("🗑️ 포트폴리오 정리(삭제) 모드")
+
                         if is_delete_mode:
-                            if st.button("🚨 영구 삭제", type="primary", use_container_width=True):
-                                target_id = opts[sel_name]['id']
-                                supabase.table("portfolios").delete().eq("id", target_id).execute()
-                                logger.info(f"🗑️ 포트폴리오 삭제: {target_id}")
-                                st.toast("삭제되었습니다.", icon="🗑️")
-                                st.rerun()
+                            st.caption("삭제할 포트폴리오를 모두 선택하세요.")
+                            # 다중 선택 박스
+                            targets_to_delete = st.multiselect(
+                                "삭제 목록 선택", 
+                                options=list(opts.keys()),
+                                placeholder="지울 항목들을 선택하세요",
+                                label_visibility="collapsed"
+                            )
+
+                            if targets_to_delete:
+                                if st.button(f"🚨 선택한 {len(targets_to_delete)}개 영구 삭제", type="primary", use_container_width=True):
+                                    # 다이얼로그 호출
+                                    confirm_delete_dialog(targets_to_delete, opts, supabase)
+                            else:
+                                st.button("🚨 삭제 버튼 (항목을 먼저 선택하세요)", disabled=True, use_container_width=True)
+
                         else:
+                            # 기존 불러오기 모드
+                            sel_name = st.selectbox("항목 선택", list(opts.keys()), label_visibility="collapsed")
+                            
                             if st.button("📂 불러오기", use_container_width=True):
                                 data = opts[sel_name]['ticker_data']
                                 st.session_state.total_invest = int(data.get('total_money', 30000000))
                                 st.session_state.selected_stocks = list(data.get('composition', {}).keys())
+                                # 저장된 비중 불러오기 (없으면 무시)
+                                saved_weights = data.get('composition', {})
+                                st.session_state.ai_suggested_weights = saved_weights
                                 st.session_state.monthly_expense = int(data.get('monthly_expense', 200))
                                 
                                 logger.info(f"📂 포트폴리오 로드: {sel_name}")
                                 st.toast("성공적으로 불러왔습니다!", icon="✅")
+                                time.sleep(0.5)
                                 st.rerun()
                     else: 
                         st.caption("저장된 기록이 없습니다.")
                 except Exception as e: 
-                    st.error("불러오기 실패")
+                    st.error(f"불러오기 실패: {e}")
 
         st.markdown("---")
 
