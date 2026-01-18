@@ -48,7 +48,7 @@ components.html("""
 </script>
 """, height=0)
 
-# [리팩토링 1] 세션 상태 초기화 함수 (중복 코드 제거 및 중앙 관리)
+# [리팩토링 1] 세션 상태 초기화 함수
 def init_session_state():
     """앱 전반에서 사용하는 모든 세션 변수를 안전하게 초기화합니다."""
     defaults = {
@@ -57,21 +57,21 @@ def init_session_state():
         "code_processed": False,
         "ai_modal_open": False,
         "age_verified": False,
-        "total_invest": 30000000,  # 초기 자산: 3천만원
+        "total_invest": 30000000, 
         "selected_stocks": [],
-        "monthly_expense": 200,    # 월 지출: 200만원
-        "ai_result_cache": None    # AI 결과 캐싱
+        "monthly_expense": 200, 
+        "ai_result_cache": None,
+        "show_ai_login": False
     }
-    
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
 
 # ---------------------------------------------------------
-# [추가 과제] 4과제: COPPA 나이 확인 (안전 장치)
+# [추가 과제] 4과제: COPPA 나이 확인
 # ---------------------------------------------------------
 def check_coppa_compliance():
-    """만 13세 이상 이용 확인 (localStorage 및 URL 연동 버전)"""
+    """만 13세 이상 이용 확인"""
     if (st.session_state.get("age_verified") or 
         st.query_params.get("age_verified") == "1" or 
         st.session_state.get("is_logged_in")):
@@ -98,35 +98,27 @@ supabase = db.init_supabase()
 # ==========================================
 
 def check_auth_status():
-    """
-    사용자의 로그인 상태를 확인하고, 카카오/구글 로그인 후 
-    돌아오는 콜백(auth code)을 처리하여 세션을 확정합니다.
-    """
+    """로그인 상태 확인 및 콜백 처리"""
     if not supabase: return
 
-    # 1. [기존 세션 확인]
     try:
         session = supabase.auth.get_session()
         if session and session.user:
             st.session_state.is_logged_in = True
             st.session_state.user_info = session.user
-            # 로그인 관련 파라미터만 정리 (age_verified 보존)
             for key in ["code", "old_id"]:
                 if key in st.query_params: del st.query_params[key]
             return 
     except Exception:
         pass
 
-    # 2. [로그인 콜백 처리]
     query_params = st.query_params
     if "code" in query_params and not st.session_state.get("code_processed", False):
         st.session_state.code_processed = True
-        
         try:
             auth_code = query_params["code"]
             auth_response = supabase.auth.exchange_code_for_session({"auth_code": auth_code})
             session = auth_response.session
-            
             if session and session.user:
                 st.session_state.is_logged_in = True
                 st.session_state.user_info = session.user
@@ -135,11 +127,8 @@ def check_auth_status():
             if "code" in st.query_params: del st.query_params["code"]
             st.success("✅ 로그인되었습니다!")
             st.rerun()
-            
         except Exception as e:
-            # [리팩토링 2] 에러 로그 강화 (상세 원인 기록)
             logger.error(f"🚨 [Auth Error] 인증 프로세스 중 예외 발생: {str(e)}", exc_info=True)
-            
             err_msg = str(e).lower()
             if "verifier" in err_msg or "non-empty" in err_msg:
                 st.warning("🔄 보안 토큰 갱신 중... 잠시만 기다려주세요.")
@@ -159,7 +148,7 @@ check_auth_status()
 # ==========================================
 
 def render_login_ui():
-    """사이드바 상단에 로그인 유저 정보 표시 및 로그아웃"""
+    """사이드바 상단 로그인 정보"""
     if not supabase: return
     is_logged_in = st.session_state.get("is_logged_in", False)
     user_info = st.session_state.get("user_info", None)
@@ -177,25 +166,14 @@ def render_login_ui():
                 st.session_state.is_logged_in = False
                 st.session_state.user_info = None
                 st.session_state.code_processed = False
-                # age_verified는 유지 (편의성)
                 st.rerun()
 
 def render_sidebar_footer():
-    """사이드바 최하단 후원 버튼"""
+    """사이드바 하단 후원 버튼 (CSS 분리 적용됨)"""
     bmc_url = "https://www.buymeacoffee.com/dividenpange"
     st.sidebar.markdown("---") 
+    # [수정] style.css의 .bmc-button 클래스를 사용하여 코드가 매우 깔끔해졌습니다.
     st.sidebar.markdown(f"""
-        <style>
-        .bmc-button {{
-            display: flex; align-items: center; justify-content: center;
-            background-color: #FFDD00; color: #000000 !important;
-            padding: 10px 15px; border-radius: 10px; text-decoration: none;
-            font-weight: bold; font-size: 14px; width: 100%;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.1); transition: transform 0.2s;
-        }}
-        .bmc-button:hover {{ transform: translateY(-2px); background-color: #FADA00; }}
-        .bmc-logo {{ height: 18px; margin-right: 8px; }}
-        </style>
         <div class="bmc-container">
             <a class="bmc-button" href="{bmc_url}" target="_blank">
                 <img src="https://cdn.buymeacoffee.com/buttons/bmc-new-btn-logo.svg" alt="BMC logo" class="bmc-logo">
@@ -210,7 +188,7 @@ def render_sidebar_footer():
 # ==========================================
 
 def render_login_buttons(key_suffix="default"):
-    """예쁜 디자인의 가로형 로그인 버튼 세트"""
+    """예쁜 디자인의 로그인 버튼 세트 (CSS 분리 적용됨)"""
     try:
         ctx = get_script_run_ctx()
         current_session_id = ctx.session_id
@@ -223,7 +201,8 @@ def render_login_buttons(key_suffix="default"):
         try:
             res_kakao = supabase.auth.sign_in_with_oauth({"provider": "kakao", "options": {"redirect_to": redirect_url, "skip_browser_redirect": True}})
             if res_kakao.url:
-                st.markdown(f'''<a href="{res_kakao.url}" target="_blank" style="display: inline-flex; justify-content: center; align-items: center; width: 100%; background-color: #FEE500; color: #000000; border: 1px solid rgba(0,0,0,0.05); padding: 0.5rem; border-radius: 0.5rem; text-decoration: none; font-weight: bold; font-size: 1rem; box-shadow: 0 1px 2px rgba(0,0,0,0.1); height: 2.6rem;">💬 카카오로 3초 만에 시작</a>''', unsafe_allow_html=True)
+                # [수정] 인라인 스타일 제거하고 class="kakao-login-btn" 사용
+                st.markdown(f'''<a href="{res_kakao.url}" target="_blank" class="kakao-login-btn">💬 카카오로 3초 만에 시작</a>''', unsafe_allow_html=True)
         except: st.error("Kakao 오류")
     with col2:
         if st.button("🔵 Google로 시작하기", key=f"btn_google_{key_suffix}", use_container_width=True):
@@ -235,7 +214,7 @@ def render_login_buttons(key_suffix="default"):
             except: pass
 
 def render_admin_tools(df_raw):
-    """관리자 전용 도구 렌더링"""
+    """관리자 전용 도구"""
     with st.sidebar:
         st.markdown("---")
         st.subheader("🛠️ 배당금 갱신 도구")
@@ -400,7 +379,6 @@ def render_calculator_page(df):
                 if "ai_result_cache" in st.session_state:
                     del st.session_state.ai_result_cache
             else:
-                # ✅ [수정 완료] 로그인 버튼 대신 심플한 경고 메시지만 표시
                 st.error("🔒 로그인이 필요한 기능입니다. 페이지 최상단에서 로그인을 먼저 해주세요!")
                 st.toast("위에서 로그인을 해주세요!", icon="👆")
 
@@ -898,7 +876,6 @@ def render_calculator_page(df):
                 
                 with c_res2:
                     if gap_money > 0:
-                        # [핵심 수정] delta_color="normal" (초록색) + 체크 이모지로 긍정적 표현
                         st.metric(
                             "앞으로 모을 금액", 
                             f"{gap_money/100000000:,.2f} 억원", 
@@ -918,7 +895,6 @@ def render_calculator_page(df):
             if (final_annual_income / tax_factor) > 20000000:
                 st.warning(f"🚨 **현실적 조언:** 목표 달성 시 연간 배당소득(세전)이 2,000만원을 초과하여 **금융소득종합과세** 대상이 될 수 있습니다.")
                 
-            # [수정] 들여쓰기 제거하여 글자 크기 정상화
             st.error("""
                     **⚠️ 시뮬레이션 활용 시 유의사항**
                     1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 단순 결과입니다.
@@ -978,9 +954,12 @@ def render_stocklist_page(df):
 def main():
     inject_ga()
     
-    # 1. 초기화 및 검문 (세션 초기화 함수 적용)
+    # 1. 초기화 (세션 설정 + CSS 배전함 연결)
     init_session_state() 
-    #check_coppa_compliance() 
+    ui.load_css() # 👈 외부 CSS 파일을 여기서 로드합니다
+    
+    # 2. 안전 장치 (COPPA)
+    check_coppa_compliance() 
     
     logger.info("🚀 배당팽이 메인 엔진 가동")
     db.cleanup_old_tokens()
@@ -1001,13 +980,14 @@ def main():
 
     render_login_ui()
     
+    # 상단 로그인 안내 박스
     auth_container = st.container(border=True)
     with auth_container:
         if not st.session_state.get("is_logged_in", False):
             if "code" in st.query_params:
                  st.info("🔄 로그인 확인 중입니다... 잠시만 기다려주세요.")
             else:
-                render_login_buttons(key_suffix="top_main") 
+                render_login_buttons(key_suffix="top_main")
         else:
             user = st.session_state.user_info
             nickname = user.email.split("@")[0] if user.email else "User"
