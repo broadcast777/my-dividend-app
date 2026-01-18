@@ -574,12 +574,21 @@ def render_calculator_page(df):
             with st.container(border=True):
                 st.write("💾 **포트폴리오 저장 / 수정**")
                 
-                # [변경] 저장 기능에 로그인 락(Lock) 걸기 (안내판 띄우기)
+                # [수정] 저장 기능도 버튼을 눌러야 로그인 창이 뜨도록 변경 (화면 깔끔하게)
                 if not st.session_state.get('is_logged_in', False):
-                    st.warning("⚠️ **로그인이 필요합니다.**")
-                    st.markdown("""나만의 포트폴리오를 저장하고 관리하시려면 로그인이 필요합니다.""")
-                    # 여기서 로그인 버튼 표시 (키 충돌 방지: save)
-                    render_login_buttons(key_suffix="save")
+                    st.caption("나만의 포트폴리오를 저장하고 관리하시려면 로그인이 필요합니다.")
+                    
+                    # 1. 로그인 열기 버튼
+                    if st.button("🔐 로그인하고 저장하기", key="btn_show_save_login", use_container_width=True):
+                        st.session_state.show_save_login_area = True
+                    
+                    # 2. 버튼 누르면 로그인 창 표시
+                    if st.session_state.get("show_save_login_area", False):
+                        st.markdown("---")
+                        render_login_buttons(key_suffix="save")
+                        if st.button("닫기", key="close_save_login"):
+                            st.session_state.show_save_login_area = False
+                            st.rerun()
                 else:
                     try:
                         user = st.session_state.user_info
