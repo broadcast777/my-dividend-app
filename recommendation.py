@@ -1,7 +1,7 @@
 """
-프로젝트: 배당 팽이 (Dividend Top) v1.9.5
+프로젝트: 배당 팽이 (Dividend Top) v1.9.9
 파일명: recommendation.py
-설명: AI 로보어드바이저 엔진 (비중 상한 50% / 하한 10% 제한 장치 적용)
+설명: AI 로보어드바이저 엔진 (모든 유형 쿼터제 유연화 적용 완료)
 """
 
 import streamlit as st
@@ -9,7 +9,7 @@ import pandas as pd
 import re
 import random
 import time
-import numpy as np # 계산을 위해 numpy 추가
+import numpy as np
 
 # -----------------------------------------------------------
 # [SECTION 1] 내부 헬퍼 함수
@@ -109,11 +109,23 @@ def get_smart_recommendation(df, user_choices):
     bond_count = 0 
     reit_count = 0 
     
+    # [기본 쿼터]
     MAX_CC = 2
     MAX_CASH = 1
     MAX_BOND = 1
     MAX_REIT = 1
     
+    # 🚨 [쿼터 긴급 수정] 스타일별 맞춤형 제한 해제 (성장형 추가됨)
+    if style == 'safe':
+        MAX_BOND = wanted_count  # 채권 무제한
+    elif style == 'flow':
+        MAX_CC = wanted_count    # 커버드콜 무제한
+        MAX_REIT = 3             # 리츠 완화
+    elif style == 'growth':
+        MAX_REIT = 3             # 성장형도 리츠(부동산) 3개까지 허용 (종목 수 확보)
+        # 커버드콜은 성장형에 안 맞으니 2개 유지
+    
+    # (A) 의무 선발
     if style == 'safe':
         safe_candidates = filtered_pool[filtered_pool['유형'] == '채권']
         if not safe_candidates.empty:
@@ -143,6 +155,7 @@ def get_smart_recommendation(df, user_choices):
             final_picks.append(best_growth['pure_name'])
             picked_core_names.append(_get_core_index_name(best_growth['pure_name']))
 
+    # (B) 나머지 채우기
     for idx, row in filtered_pool.iterrows():
         if len(final_picks) >= wanted_count: break
         if row['pure_name'] in final_picks: continue
@@ -169,8 +182,11 @@ def get_smart_recommendation(df, user_choices):
         if is_bond: bond_count += 1
         if is_reit: reit_count += 1
         
+    # (C) 모자라면 채우기 (쿼터 적용된 상태 유지하되, 유동적으로)
     if len(final_picks) < wanted_count:
         remain_pool = filtered_pool[~filtered_pool['pure_name'].isin(final_picks)].copy()
+        
+        # 쿼터가 찼으면 해당 유형은 제외 (단, 스타일별로 풀린 쿼터는 위에서 이미 반영됨)
         if cc_count >= MAX_CC: remain_pool = remain_pool[remain_pool['유형'] != '커버드콜']
         if reit_count >= MAX_REIT: remain_pool = remain_pool[remain_pool['유형'] != '리츠']
         
@@ -179,35 +195,25 @@ def get_smart_recommendation(df, user_choices):
 
     selected_pool = filtered_pool[filtered_pool['pure_name'].isin(final_picks)].copy()
 
-    # 4. 비중 최적화 (안전장치 적용: Min 10% ~ Max 50%)
     if selected_pool.empty: return "종목 선정 실패", [], {}
 
     selected_pool['sort_cat'] = pd.Categorical(selected_pool['pure_name'], categories=final_picks, ordered=True)
     selected_pool = selected_pool.sort_values('sort_cat')
 
-    # [수정된 비중 계산 로직]
-    # 1. 목표 배당률과의 거리에 따른 기본 점수 배점
+    # 비중 계산 (Min 10% ~ Max 50%)
     yields = selected_pool['연배당률'].values
-    scores = 1 / (abs(yields - target_yield) + 1.0) # +1.0으로 분모 0 방지 및 격차 완화
-    
-    # 2. 1차 정규화
+    scores = 1 / (abs(yields - target_yield) + 1.0)
     weights = (scores / scores.sum()) * 100
     
-    # 3. [핵심] 상/하한선 클리핑 (Min 10%, Max 50%)
-    # 단순히 clip만 하면 합계가 100이 안되므로, 합계가 100이 될 때까지 반복해서 맞춥니다.
     MAX_CAP = 50.0
     MIN_FLOOR = 10.0
     
-    # 3번 정도 반복하면 수렴합니다.
     for _ in range(3):
         weights = weights.clip(MIN_FLOOR, MAX_CAP)
         weights = (weights / weights.sum()) * 100
     
-    # 4. 정수화 및 자투리 보정
     weights = weights.round().astype(int)
     diff = 100 - weights.sum()
-    
-    # 남는/모자란 비중은 가장 비중이 큰 종목(1순위)에 가감
     max_idx = weights.argmax()
     weights[max_idx] += diff
     
@@ -241,7 +247,6 @@ def reset_wizard():
 
 @st.dialog("🕵️ AI 포트폴리오 설계", width="small")
 def show_wizard():
-    # [안전장치] 데이터가 준비되지 않았으면 에러 대신 안내 메시지
     df = st.session_state.get('shared_df')
     if df is None or df.empty:
         st.warning("⏳ 데이터 로딩 중입니다. 잠시 후 다시 시도해주세요.")
@@ -252,21 +257,18 @@ def show_wizard():
 
     step = st.session_state.wiz_step
 
-    # [STEP 1]
     if step == 1:
         st.subheader("Q1. 어떤 투자를 원하세요?")
         st.button("📈 성장 추구 (주가 상승 + 배당)", use_container_width=True, on_click=go_next_step, args=(2, 'style', 'growth'))
         st.button("💰 현금 흐름 (월 배당금 극대화)", use_container_width=True, on_click=go_next_step, args=(2, 'style', 'flow'))
         st.button("🛡️ 안정성 (원금 방어 최우선)", use_container_width=True, on_click=go_next_step, args=(2, 'style', 'safe'))
 
-    # [STEP 2]
     elif step == 2:
         st.subheader("Q2. 선호하는 배당 날짜는요?")
         st.button("🗓️ 월중 (매월 15일 경)", use_container_width=True, on_click=go_next_step, args=(3, 'timing', 'mid'))
         st.button("🔚 월말/월초 (월급날 전후)", use_container_width=True, on_click=go_next_step, args=(3, 'timing', 'end'))
         st.button("🔄 상관없음 (섞어서 2주마다 받기)", use_container_width=True, on_click=go_next_step, args=(3, 'timing', 'mix'))
 
-    # [STEP 3]
     elif step == 3:
         st.subheader("Q3. 구체적인 목표를 정해주세요")
         target = st.slider("💰 목표 연배당률 (%)", 3.0, 20.0, 7.0, 0.5)
@@ -280,7 +282,7 @@ def show_wizard():
             st.info("📈 **성장 집중:** 당장의 배당금보다 **미래 주가 상승**을 위한 종목이 의무 포함됩니다.")
             if target >= 7.0:
                 st.warning(f"⚠️ **배당률 괴리:** 성장주 비중 확보로 인해 **실제 배당률은 목표({target}%)보다 낮을 수 있습니다.**")
-        else: # flow
+        else:
             st.info("💰 **현금 흐름:** 매월 들어오는 **월 배당금**에 집중합니다.")
             if target >= 8.0:
                 st.warning("⚠️ **리스크 관리:** 포트폴리오 균형을 위해 **고위험군(커버드콜)은 최대 2개**로 자동 제한됩니다.")
@@ -292,19 +294,15 @@ def show_wizard():
             st.session_state.wiz_step = 4
             st.rerun()
 
-    # [STEP 4] 결과
     elif step == 4:
-        # 캐시가 없으면(None) 분석 다시 돌리기
         if "ai_result_cache" not in st.session_state or st.session_state.ai_result_cache is None:
             with st.spinner("🎲 최적 조합 찾는 중..."):
                 t_res, p_res, w_res = get_smart_recommendation(df, st.session_state.wiz_data)
                 st.session_state.ai_result_cache = {"title": t_res, "picks": p_res, "weights": w_res}
         
         cached = st.session_state.ai_result_cache
-        
-        # [안전장치] 캐시 구조가 깨졌을 경우 방어
         if not isinstance(cached, dict):
-            st.error("데이터 처리 중 오류가 발생했습니다. 처음부터 다시 시도해주세요.")
+            st.error("오류 발생. 처음부터 다시 시도해주세요.")
             st.button("처음으로", on_click=reset_wizard)
             return
 
@@ -332,25 +330,19 @@ def show_wizard():
         st.warning("""⚠️ **투자 유의사항**\n1. 본 결과는 과거 데이터를 기반으로 한 단순 시뮬레이션입니다.\n2. 모든 투자의 책임은 투자자 본인에게 있습니다.""")
 
         st.divider()
-        
         c1, c2 = st.columns(2)
-        
         if c1.button("🎲 다른 조합", use_container_width=True):
             del st.session_state.ai_result_cache
             st.rerun()
-
         if c2.button("🔄 처음부터", on_click=reset_wizard, use_container_width=True):
             st.rerun()
             
         st.write("") 
-        
         if st.button("✅ 이대로 담기", type="primary", use_container_width=True):
             st.session_state.selected_stocks = picks
             st.session_state.ai_suggested_weights = weights
             st.session_state.ai_modal_open = False
             if "ai_result_cache" in st.session_state: del st.session_state.ai_result_cache
-            
-            # 토스트 메시지 후 리런 (안전하게)
             st.toast("장바구니에 담았습니다! 🛒", icon="✅")
             time.sleep(0.5)
             st.rerun()
