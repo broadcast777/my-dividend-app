@@ -199,10 +199,34 @@ def render_sidebar_footer():
     """, unsafe_allow_html=True)
     
 
-
 # ==========================================
 # [SECTION 4] 페이지별 렌더링 함수 (부품화)
 # ==========================================
+
+# [NEW] 로그인 버튼을 함수로 분리 (필요할 때 호출하기 위해)
+def render_login_buttons():
+    """로그인이 필요할 때 보여줄 로그인 버튼 세트"""
+    try:
+        ctx = get_script_run_ctx()
+        current_session_id = ctx.session_id
+    except: current_session_id = "unknown"
+    redirect_url = f"https://dividend-pange.streamlit.app?old_id={current_session_id}"
+
+    col_l, col_r = st.columns(2)
+    with col_l:
+        try:
+            res_kakao = supabase.auth.sign_in_with_oauth({"provider": "kakao", "options": {"redirect_to": redirect_url, "skip_browser_redirect": True}})
+            if res_kakao.url:
+                st.markdown(f'''<a href="{res_kakao.url}" target="_blank" style="display: inline-flex; justify-content: center; align-items: center; width: 100%; background-color: #FEE500; color: #000000; border: 1px solid rgba(0,0,0,0.05); padding: 0.8rem; border-radius: 0.5rem; text-decoration: none; font-weight: bold; font-size: 1.1em; box-shadow: 0 1px 2px rgba(0,0,0,0.1); margin-bottom: 10px;">💬 Kakao로 3초 만에 시작하기</a>''', unsafe_allow_html=True)
+        except: pass
+    with col_r:
+        if st.button("🔵 Google로 시작하기(pc/크롬 권장)", use_container_width=True, key="func_google_btn"):
+            try:
+                res_google = supabase.auth.sign_in_with_oauth({"provider": "google", "options": {"redirect_to": redirect_url, "queryParams": {"access_type": "offline", "prompt": "consent"}, "skip_browser_redirect": False}})
+                if res_google.url:
+                    st.markdown(f'<meta http-equiv="refresh" content="0;url={res_google.url}">', unsafe_allow_html=True)
+                    st.stop()
+            except: pass
 
 def render_admin_tools(df_raw):
     """관리자 전용 도구 렌더링"""
@@ -244,13 +268,12 @@ def render_admin_tools(df_raw):
                             st.caption(f"원인: {src}")
                             
             st.divider()
-            # [새로 붙여넣을 코드 시작] =================================
+            
             st.caption("👇 배당금 업데이트 모드 선택")
             new_div = st.number_input("이번 달 확정 배당금 (또는 월평균)", value=0, step=10)
             
             col_btn1, col_btn2 = st.columns(2)
             
-            # [버튼 1] 일반적인 1개월 추가 (Rolling)
             # [버튼 1] 1개월 추가 (Rolling)
             if col_btn1.button("💾 1개월 추가", help="기존 기록 맨 뒤에 이번 달 금액만 추가합니다.", use_container_width=True):
                 new_total, new_hist = logic.update_dividend_rolling(cur_hist, new_div)
@@ -293,9 +316,6 @@ def render_admin_tools(df_raw):
                     st.success(f"⚡ 1년치 강제 적용 완료! ({new_total}원 / {new_yield}%)")
                 
                 st.session_state.df_dirty = df_raw
-
-     
-            # [새로 붙여넣을 코드 끝] ===================================
 
         st.markdown("---")
         st.subheader("💾 데이터 저장 및 백업")
@@ -388,32 +408,7 @@ def render_calculator_page(df):
     # [Level 1] 변수 가출 방지를 위해 함수 시작과 동시에 빈 바구니 생성
     all_data = []
 
-    # 6-1. AI 로보어드바이저
-    st.write("")
-    col_rec1, col_rec2 = st.columns([2, 1])
-    with col_rec1:
-        st.info("🤔 **어떤 종목을 담아야 할지 막막하신가요?**\n\nAI가 성향을 분석해 최적의 포트폴리오를 제안합니다.")
-    with col_rec2:
-        st.write("") 
-        if st.button("🕵️ AI 로보어드바이저 실행", use_container_width=True, type="primary"):
-            if st.session_state.get("is_logged_in"):
-                logger.info("🤖 AI 로보어드바이저 세션 시작")
-                st.session_state.ai_modal_open = True
-                st.session_state.wiz_step = 1
-                st.session_state.wiz_data = {}
-                if "ai_result_cache" in st.session_state:
-                    del st.session_state.ai_result_cache
-            else:
-                st.error("🔒 로그인이 필요한 기능입니다. 페이지 최상단에서 로그인을 먼저 해주세요!")
-                st.toast("위에서 로그인을 해주세요!", icon="👆")
-                st.session_state.ai_modal_open = False
-
-        if st.session_state.get("ai_modal_open", False):
-            recommendation.show_wizard()
-    
-    st.markdown("---")
-
-    # 6-2. 포트폴리오 시뮬레이션
+    # [변경] 1. 시뮬레이션 섹션을 최상단으로 이동 (로그인 없이 바로 체험 가능)
     with st.expander("🧮 나만의 배당 포트폴리오 시뮬레이션", expanded=True):
         col1, col2 = st.columns([1, 2])
         current_invest_val = int(st.session_state.total_invest / 10000)
@@ -562,7 +557,7 @@ def render_calculator_page(df):
                 else:
                     if st.button("📥 전체 일정 파일 받기 (.ics)", key="ics_lock_btn", use_container_width=True):
                         st.error("🔒 로그인 회원 전용 기능입니다. 로그인을 완료해 주세요!")
-                        st.toast("맨 위로 올라가서 로그인을 해주세요!", icon="👆")
+                        st.toast("로그인이 필요합니다!", icon="🔒")
 
             with st.expander("❓ 다운로드 받은 파일은 어떻게 쓰나요? (사용법 보기)"):
                 st.markdown("""
@@ -576,9 +571,13 @@ def render_calculator_page(df):
             st.write("") 
             with st.container(border=True):
                 st.write("💾 **포트폴리오 저장 / 수정**")
+                
+                # [변경] 저장 기능에 로그인 락(Lock) 걸기 (안내판 띄우기)
                 if not st.session_state.get('is_logged_in', False):
                     st.warning("⚠️ **로그인이 필요합니다.**")
-                    st.markdown("""나만의 포트폴리오를 저장하고 관리하시려면 페이지 최상단(맨 위)에 있는 로그인을 이용해 주세요.""")
+                    st.markdown("""나만의 포트폴리오를 저장하고 관리하시려면 로그인이 필요합니다.""")
+                    # 여기서 로그인 버튼 표시
+                    render_login_buttons()
                 else:
                     try:
                         user = st.session_state.user_info
@@ -623,6 +622,39 @@ def render_calculator_page(df):
             st.info("""📢 **찾으시는 종목이 안 보이나요?**\n왼쪽 상단(모바일은 ↖ 메뉴 버튼)의 '📂 메뉴'를 누르고 '📃 전체 종목 리스트'를 선택하시면 전체 배당주를 확인하실 수 있습니다.""")
             if total_y_div > 20000000:
                 st.warning(f"🚨 **주의:** 연간 예상 배당금이 **{total_y_div/10000:,.0f}만원**입니다. 금융소득종합과세 대상에 해당될 수 있습니다.")
+    
+    # [변경] 2. AI 로보어드바이저를 시뮬레이션 아래로 이동 (로그인 유도)
+    st.markdown("---")
+    col_rec1, col_rec2 = st.columns([2, 1])
+    with col_rec1:
+        st.info("🤔 **어떤 종목을 담아야 할지 막막하신가요?**\n\nAI가 성향을 분석해 최적의 포트폴리오를 제안합니다.")
+    with col_rec2:
+        st.write("") 
+        if not st.session_state.get("is_logged_in"):
+            # 로그인 안 된 상태 -> 버튼 누르면 로그인 안내판 표시
+            if st.button("🔐 로그인하고 AI 진단 받기", use_container_width=True):
+                st.session_state.show_ai_login = True
+        else:
+            # 로그인 된 상태 -> 정상 실행
+            if st.button("🕵️ AI 로보어드바이저 실행", use_container_width=True, type="primary"):
+                logger.info("🤖 AI 로보어드바이저 세션 시작")
+                st.session_state.ai_modal_open = True
+                st.session_state.wiz_step = 1
+                st.session_state.wiz_data = {}
+                if "ai_result_cache" in st.session_state:
+                    del st.session_state.ai_result_cache
+    
+    # AI용 로그인 안내판 표시
+    if st.session_state.get("show_ai_login", False) and not st.session_state.get("is_logged_in"):
+        with st.container(border=True):
+            st.warning("🔒 AI 진단은 로그인 후 이용 가능합니다.")
+            render_login_buttons()
+            if st.button("닫기", key="close_ai_login"):
+                st.session_state.show_ai_login = False
+                st.rerun()
+
+    if st.session_state.get("ai_modal_open", False):
+        recommendation.show_wizard()
 
     df_ana = pd.DataFrame(all_data)
     if not df_ana.empty:
@@ -1015,45 +1047,19 @@ def main():
     if "total_invest" not in st.session_state:
         st.session_state.total_invest = 30000000 
     if "selected_stocks" not in st.session_state:
-        st.session_state.selected_stocks = []     
+        st.session_state.selected_stocks = []      
         
     if "monthly_expense" not in st.session_state:
         st.session_state.monthly_expense = 200    
 
     render_login_ui()
     
-    auth_container = st.container(border=True)
-    with auth_container:
-        if not st.session_state.get("is_logged_in", False):
-            if "code" in st.query_params:
-                 st.info("🔄 로그인 확인 중입니다... 잠시만 기다려주세요.")
-            else:
-                st.info("🔒 로그인이 필요합니다. (AI 진단 및 저장 기능 활성화)")
-                try:
-                    ctx = get_script_run_ctx()
-                    current_session_id = ctx.session_id
-                except: current_session_id = "unknown"
-                redirect_url = f"https://dividend-pange.streamlit.app?old_id={current_session_id}"
-
-                col_l, col_r = st.columns(2)
-                with col_l:
-                    try:
-                        res_kakao = supabase.auth.sign_in_with_oauth({"provider": "kakao", "options": {"redirect_to": redirect_url, "skip_browser_redirect": True}})
-                        if res_kakao.url:
-                            st.markdown(f'''<a href="{res_kakao.url}" target="_blank" style="display: inline-flex; justify-content: center; align-items: center; width: 100%; background-color: #FEE500; color: #000000; border: 1px solid rgba(0,0,0,0.05); padding: 0.8rem; border-radius: 0.5rem; text-decoration: none; font-weight: bold; font-size: 1.1em; box-shadow: 0 1px 2px rgba(0,0,0,0.1); margin-bottom: 10px;">💬 Kakao로 3초 만에 시작하기</a>''', unsafe_allow_html=True)
-                    except: pass
-                with col_r:
-                    if st.button("🔵 Google로 시작하기(pc/크롬 권장)", use_container_width=True, key="top_google_btn"):
-                        try:
-                            res_google = supabase.auth.sign_in_with_oauth({"provider": "google", "options": {"redirect_to": redirect_url, "queryParams": {"access_type": "offline", "prompt": "consent"}, "skip_browser_redirect": False}})
-                            if res_google.url:
-                                st.markdown(f'<meta http-equiv="refresh" content="0;url={res_google.url}">', unsafe_allow_html=True)
-                                st.stop()
-                        except: pass
-        else:
-            user = st.session_state.user_info
-            nickname = user.email.split("@")[0] if user.email else "User"
-            st.success(f"👋 **{nickname}**님, 환영합니다! 모든 기능이 활성화되었습니다.")
+    # [변경] 메인 상단 강제 로그인 박스 제거 
+    # 대신 로그인된 경우에만 환영 인사 표시
+    if st.session_state.get("is_logged_in", False):
+        user = st.session_state.user_info
+        nickname = user.email.split("@")[0] if user.email else "User"
+        st.success(f"👋 **{nickname}**님, 환영합니다! 모든 기능이 활성화되었습니다.")
 
     df_raw = logic.load_stock_data_from_csv()
     if df_raw.empty: 
