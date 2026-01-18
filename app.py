@@ -203,6 +203,75 @@ def render_sidebar_footer():
 # ==========================================
 # [SECTION 4] 페이지별 렌더링 함수 (부품화)
 # ==========================================
+# ==========================================
+# [SECTION 4] 페이지별 렌더링 함수 (부품화)
+# ==========================================
+
+# 👇 [여기] 이 코드를 통째로 복사해서 붙여넣으세요! 
+def render_login_buttons(key_suffix="default"):
+    """로그인이 필요할 때 보여줄 예쁜 디자인의 로그인 버튼 세트"""
+    try:
+        ctx = get_script_run_ctx()
+        current_session_id = ctx.session_id
+    except: current_session_id = "unknown"
+    redirect_url = f"https://dividend-pange.streamlit.app?old_id={current_session_id}"
+
+    # 안내 문구 (심플하게)
+    st.caption("🔒 기능을 사용하려면 로그인이 필요합니다.")
+
+    # [핵심] 두 버튼을 5:5 비율로 나란히 배치
+    col1, col2 = st.columns(2)
+    
+    # 1. 카카오 로그인 (왼쪽): 노란색 디자인 + 문구 유지
+    with col1:
+        try:
+            res_kakao = supabase.auth.sign_in_with_oauth({
+                "provider": "kakao", 
+                "options": {"redirect_to": redirect_url, "skip_browser_redirect": True}
+            })
+            if res_kakao.url:
+                # HTML/CSS로 버튼 스타일 구현 (높이/마진 조절하여 구글 버튼과 라인 맞춤)
+                st.markdown(f'''
+                <a href="{res_kakao.url}" target="_blank" style="
+                    display: inline-flex;
+                    justify-content: center;
+                    align-items: center;
+                    width: 100%;
+                    background-color: #FEE500; 
+                    color: #000000; 
+                    border: 1px solid rgba(0,0,0,0.05); 
+                    padding: 0.5rem; 
+                    border-radius: 0.5rem; 
+                    text-decoration: none; 
+                    font-weight: bold; 
+                    font-size: 1rem; 
+                    box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+                    height: 2.6rem;">
+                    💬 카카오로 3초 만에 시작
+                </a>
+                ''', unsafe_allow_html=True)
+        except: 
+            st.error("Kakao 오류")
+
+    # 2. 구글 로그인 (오른쪽): 문구는 심플하게, 기능은 그대로
+    with col2:
+        unique_key = f"btn_google_{key_suffix}"
+        # use_container_width=True로 꽉 차게 만들어 카카오 버튼과 균형 맞춤
+        if st.button("🔵 Google로 시작하기", key=unique_key, use_container_width=True):
+            try:
+                res_google = supabase.auth.sign_in_with_oauth({
+                    "provider": "google", 
+                    "options": {
+                        "redirect_to": redirect_url, 
+                        "queryParams": {"access_type": "offline", "prompt": "consent"}, 
+                        "skip_browser_redirect": False
+                    }
+                })
+                if res_google.url:
+                    st.markdown(f'<meta http-equiv="refresh" content="0;url={res_google.url}">', unsafe_allow_html=True)
+                    st.stop()
+            except: pass
+
 
 def render_admin_tools(df_raw):
     """관리자 전용 도구 렌더링"""
@@ -1023,36 +1092,15 @@ def main():
 
     render_login_ui()
     
+    # [수정됨] 이제 복잡한 코드는 다 지우고, 아까 만든 함수만 부르면 됩니다!
     auth_container = st.container(border=True)
     with auth_container:
         if not st.session_state.get("is_logged_in", False):
             if "code" in st.query_params:
                  st.info("🔄 로그인 확인 중입니다... 잠시만 기다려주세요.")
             else:
-                st.info("🔒 로그인이 필요합니다. (AI 진단 및 저장 기능 활성화)")
-                try:
-                    ctx = get_script_run_ctx()
-                    current_session_id = ctx.session_id
-                except: current_session_id = "unknown"
-                redirect_url = f"https://dividend-pange.streamlit.app?old_id={current_session_id}"
-
-                col_l, col_r = st.columns(2)
-                with col_l:
-                    try:
-                        res_kakao = supabase.auth.sign_in_with_oauth({"provider": "kakao", "options": {"redirect_to": redirect_url, "skip_browser_redirect": True}})
-                        if res_kakao.url:
-                            # [변경] 크기를 줄인 카카오 버튼 (link_button 활용)
-                            st.link_button("💬 카카오 로그인", res_kakao.url, use_container_width=True)
-                    except: pass
-                with col_r:
-                    # [변경] 텍스트를 줄인 구글 버튼
-                    if st.button("🔵 구글 로그인", use_container_width=True, key="top_google_btn"):
-                        try:
-                            res_google = supabase.auth.sign_in_with_oauth({"provider": "google", "options": {"redirect_to": redirect_url, "queryParams": {"access_type": "offline", "prompt": "consent"}, "skip_browser_redirect": False}})
-                            if res_google.url:
-                                st.markdown(f'<meta http-equiv="refresh" content="0;url={res_google.url}">', unsafe_allow_html=True)
-                                st.stop()
-                        except: pass
+                # 여기서 아까 만든 '예쁜 가로형 버튼' 함수 호출!
+                render_login_buttons(key_suffix="top_main")
         else:
             user = st.session_state.user_info
             nickname = user.email.split("@")[0] if user.email else "User"
