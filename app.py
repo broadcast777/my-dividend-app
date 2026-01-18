@@ -508,7 +508,9 @@ def render_calculator_page(df):
                 if "ai_result_cache" in st.session_state:
                     del st.session_state.ai_result_cache
             else:
-                st.session_state.show_ai_login = True
+                # ✅ [요청 반영] 복잡한 창 대신 에러 메시지만 심플하게 표시
+                st.error("🔒 로그인이 필요한 기능입니다. 페이지 최상단에서 로그인을 먼저 해주세요!")
+                st.toast("위에서 로그인을 해주세요!", icon="👆")
 
     # [AI 로그인 창 표시]
     if st.session_state.get("show_ai_login", False) and not st.session_state.get("is_logged_in"):
