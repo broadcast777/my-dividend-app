@@ -34,21 +34,60 @@ import timeline
 # 앱의 타이틀과 가로 너비를 설정합니다
 st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
 
+# 👇 [1단계] RFID 센서 설치 (여기부터 복사해서 붙여넣으세요)
+# 브라우저에 저장된 '인증 도장(localStorage)'이 있으면, 주소창에 표시를 남겨서 파이썬에게 알려줍니다.
+st.components.v1.html("""
+<script>
+    // 1. 주머니(로컬스토리지) 확인
+    const ageVerified = localStorage.getItem('age_verified');
+    
+    // 2. 현재 상황 파악 (이미 URL에 표시가 있는지?)
+    const params = new URLSearchParams(window.location.search);
+    
+    // 3. 주머니엔 있는데, 아직 입장권(URL)을 안 보여줬다면? -> 새로고침하며 보여줌
+    if (ageVerified === '1' && !params.has('age_verified')) {
+        params.set('age_verified', '1');
+        window.location.search = params.toString();
+    }
+</script>
+""", height=0)
+# 👆 [1단계 끝]
+
 # ---------------------------------------------------------
 # [추가 과제] 4과제: COPPA 나이 확인 (안전 장치)
 # ---------------------------------------------------------
-# 주석 처리를 원하시면 아래 함수 전체를 드래그해서 Ctrl + / 누르시면 됩니다.
+# 👇 [2단계] 검문소 로직 교체
 def check_coppa_compliance():
-    """만 13세 이상 이용 확인 (법적 준수 안내판)"""
-    if "age_verified" not in st.session_state:
-        st.warning("📋 **서비스 이용 안내**")
-        st.write("본 서비스는 개인정보보호법 및 COPPA 규정에 따라 만 13세 이상 사용자만 이용 가능합니다.")
-        if st.checkbox("나는 만 13세 이상이며, 이용 약관 및 개인정보 처리방침에 동의합니다."):
-            st.session_state.age_verified = True
-            logger.info("✅ 사용자가 나이 확인 및 약관에 동의함")
-            st.rerun()
-        else:
-            st.stop()
+    """만 13세 이상 이용 확인 (RFID 센서 연동 버전)"""
+    
+    # 1. 이미 세션(단기 기억)에 인증 기록이 있으면 통과
+    if st.session_state.get("age_verified"):
+        return
+
+    # 2. RFID 센서(URL 파라미터)가 "인증됨(1)" 신호를 보내고 있으면 통과
+    # (로그인하고 돌아왔을 때 여기서 걸려서 통과됨!)
+    if "age_verified" in st.query_params:
+        st.session_state.age_verified = True
+        return
+
+    # 3. 아무 기록도 없으면 검문소(체크박스) 가동
+    st.warning("📋 **서비스 이용 안내**")
+    st.write("본 서비스는 개인정보보호법 및 COPPA 규정에 따라 만 13세 이상 사용자만 이용 가능합니다.")
+    
+    if st.checkbox("나는 만 13세 이상이며, 이용 약관 및 개인정보 처리방침에 동의합니다."):
+        # (1) 세션에 기록 (임시)
+        st.session_state.age_verified = True
+        
+        # (2) 브라우저 주머니(localStorage)에 영구 도장 찍기! (자바스크립트 실행)
+        st.components.v1.html("""
+            <script>
+                localStorage.setItem('age_verified', '1');
+                parent.window.location.reload(); // 도장 찍었으니 새로고침해서 1단계 센서 통과시키기
+            </script>
+        """, height=0)
+        st.stop() # 새로고침 될 때까지 잠시 멈춤
+    else:
+        st.stop()
 
 # 세션 상태(Session State) 변수 초기화 로직
 for key in ["is_logged_in", "user_info", "code_processed"]:
@@ -1064,7 +1103,7 @@ def main():
     
     # 1. 안전 장치 및 로깅
     # [수정] 1. 안전 장치 (COPPA 비활성화)
-    # check_coppa_compliance() 
+    check_coppa_compliance() 
     
     logger.info("🚀 배당팽이 메인 엔진 가동")
     db.cleanup_old_tokens()
