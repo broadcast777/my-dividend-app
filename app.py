@@ -988,6 +988,33 @@ def confirm_delete_dialog(target_names, opts, supabase):
     if col_del2.button("취소", use_container_width=True):
         st.rerun()
 
+# 💾 [추가된 함수] 덮어쓰기 확인 다이얼로그
+@st.dialog("💾 기존 파일 덮어쓰기")
+def confirm_overwrite_dialog(final_name, user_id, user_email, save_data, existing_id, supabase):
+    """이미 같은 이름의 포트폴리오가 있을 때 띄우는 팝업"""
+    st.write(f"이미 **'{final_name}'**이라는 이름의 포트폴리오가 존재합니다.")
+    st.info("새로운 데이터로 덮어쓰시겠습니까?")
+    
+    col_ov1, col_ov2 = st.columns(2)
+    
+    if col_ov1.button("🎮 네, 덮어씁니다", type="primary", use_container_width=True):
+        try:
+            # 기존 ID를 찾아서 해당 데이터만 업데이트
+            supabase.table("portfolios").update({
+                "ticker_data": save_data, 
+                "created_at": "now()" # 저장 시간 갱신
+            }).eq("id", existing_id).execute()
+            
+            logger.info(f"🔄 기존 포트폴리오 덮어쓰기 완료: {final_name}")
+            st.toast(f"'{final_name}' 파일을 성공적으로 갱신했습니다!", icon="✅")
+            st.balloons()
+            time.sleep(1.0)
+            st.rerun()
+        except Exception as e:
+            st.error(f"저장 중 오류 발생: {e}")
+            
+    if col_ov2.button("아니요, 취소", use_container_width=True):
+        st.rerun()
 
 def main():
     inject_ga()
