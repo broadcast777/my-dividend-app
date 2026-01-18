@@ -57,46 +57,33 @@ st.components.v1.html("""
 # ---------------------------------------------------------
 # [추가 과제] 4과제: COPPA 나이 확인 (안전 장치)
 # ---------------------------------------------------------
-# 👇 [2단계 수정] 검문소 로직 (도장 꼼꼼하게 찍는 버전)
 def check_coppa_compliance():
-    """만 13세 이상 이용 확인 (도장 저장 강화 버전)"""
-    
-    # 1. [프리패스] 이미 인증된 상태라면? (세션, URL, 로그인)
+    # 1. 프리패스 조건
     if (st.session_state.get("age_verified") or 
         st.query_params.get("age_verified") == "1" or 
-        st.session_state.get("is_logged_in")): 
+        st.session_state.get("is_logged_in")):
         
+        # 세션이 풀렸더라도 URL이나 로그인 정보가 있으면 세션에 다시 등록
         st.session_state.age_verified = True
-        
-        # [핵심 추가] 통과할 때마다 도장을 다시 한 번 확실하게 찍어줍니다! (보험용)
-        st.components.v1.html("""
-            <script>
-                if (localStorage.getItem('age_verified') !== '1') {
-                    localStorage.setItem('age_verified', '1');
-                }
-            </script>
-        """, height=0)
         return
 
-    # 2. [검문] 아무 기록도 없으면 체크박스 표시
+    # 2. 검문소 UI
     with st.expander("📋 서비스 이용 안내 (필수)", expanded=True):
         st.warning("본 서비스는 만 13세 이상 사용자만 이용 가능합니다.")
-        
         if st.checkbox("나는 만 13세 이상이며, 이용 약관에 동의합니다."):
-            # (1) 세션 통과
             st.session_state.age_verified = True
             
-            # (2) URL 도장 쾅
+            # ✅ URL에 도장 쾅! (이게 있어야 F5 눌러도 안 뜸)
             st.query_params["age_verified"] = "1"
             
-            # (3) 브라우저 저장 시도 (혹시 여기서 실패해도, 위 1번 로직이 나중에 살려줍니다)
+            # ✅ 브라우저 저장소에도 문신 쾅!
             st.components.v1.html("""
                 <script>
                     localStorage.setItem('age_verified', '1');
                 </script>
             """, height=0)
             
-            # (4) 새로고침
+            time.sleep(0.5) # 도장 찍힐 시간 확보
             st.rerun()
         else:
             st.stop()
@@ -124,6 +111,7 @@ def check_auth_status():
     """
     사용자의 로그인 상태를 확인하고, 카카오/구글 로그인 후 
     돌아오는 콜백(auth code)을 처리하여 세션을 확정합니다.
+    (나이 인증 도장 age_verified는 보존하도록 수정됨)
     """
     if not supabase: return
 
@@ -133,8 +121,12 @@ def check_auth_status():
         if session and session.user:
             st.session_state.is_logged_in = True
             st.session_state.user_info = session.user
-            if "code" in st.query_params or "old_id" in st.query_params:
-                st.query_params.clear()
+            
+            # ✅ [수정] clear() 대신 로그인 관련 파라미터만 콕 집어서 삭제
+            # age_verified 파라미터는 건드리지 않으므로 F5 눌러도 안 뜸
+            for key in ["code", "old_id"]:
+                if key in st.query_params:
+                    del st.query_params[key]
             return 
     except Exception:
         pass
@@ -153,28 +145,35 @@ def check_auth_status():
             if session and session.user:
                 st.session_state.is_logged_in = True
                 st.session_state.user_info = session.user
-                logger.info(f"👤 사용자 로그인 성공: {session.user.email}") # [3과제] 로깅 추가
+                logger.info(f"👤 사용자 로그인 성공: {session.user.email}")
             
-            # 인증 성공 후 깨끗한 URL로 새로고침
-            st.query_params.clear()
+            # ✅ [수정] 인증 성공 후 code만 제거 (age_verified는 유지!)
+            if "code" in st.query_params:
+                del st.query_params["code"]
+            
             st.success("✅ 로그인되었습니다!")
             st.rerun()
             
         except Exception as e:
-            # [자동 복구 로직] verifier 오류(새로고침 시 발생 등) 시 파라미터 리셋 후 재시도
+            # [자동 복구 로직] verifier 오류 시 파라미터 리셋 후 재시도
             err_msg = str(e).lower()
-            logger.error(f"🔴 인증 과정 중 오류 발생: {err_msg}") # [3과제] 로깅 추가
+            logger.error(f"🔴 인증 과정 중 오류 발생: {err_msg}")
+            
             if "verifier" in err_msg or "non-empty" in err_msg:
                 st.warning("🔄 보안 토큰 갱신 중... 잠시만 기다려주세요.")
-                st.query_params.clear()
+                # ✅ [수정] 오류 시에도 로그인 관련 정보만 삭제
+                for key in ["code", "old_id"]:
+                    if key in st.query_params:
+                        del st.query_params[key]
                 time.sleep(1.0)
                 st.rerun()
             else:
                 st.error(f"🔴 인증 오류: {e}")
-                st.query_params.clear()
+                # ✅ [수정] 오류 시에도 로그인 관련 정보만 삭제
+                if "code" in st.query_params:
+                    del st.query_params["code"]
 
 check_auth_status()
-
 
 # ==========================================
 # [SECTION 3] UI 컴포넌트 (사이드바 및 공통 요소)
@@ -186,22 +185,22 @@ def render_login_ui():
     is_logged_in = st.session_state.get("is_logged_in", False)
     user_info = st.session_state.get("user_info", None)
     
+  
+    ...
     if is_logged_in and user_info:
-        # 이메일 앞부분을 닉네임으로 활용
-        email = user_info.email if user_info.email else "User"
-        nickname = email.split("@")[0]
+        nickname = user_info.email.split("@")[0]
         
         with st.sidebar:
             st.markdown("---")
             st.success(f"👋 반가워요! **{nickname}**님")
             
-            # 로그아웃 버튼 클릭 시 세션 초기화 및 새로고침
             if st.button("🚪 로그아웃", key="logout_btn_sidebar", use_container_width=True):
-                logger.info(f"🚪 사용자 로그아웃: {email}") # [3과제] 로깅 추가
+                logger.info(f"🚪 사용자 로그아웃")
                 supabase.auth.sign_out()
                 st.session_state.is_logged_in = False
                 st.session_state.user_info = None
                 st.session_state.code_processed = False
+                # ✅ age_verified는 session_state에서 삭제하지 않음으로써 동의 상태 유지!
                 st.rerun()
 
 def render_sidebar_footer():
