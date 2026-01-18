@@ -1,14 +1,15 @@
 """
-프로젝트: 배당 팽이 (Dividend Top) v1.9.4
+프로젝트: 배당 팽이 (Dividend Top) v1.9.5
 파일명: recommendation.py
-설명: AI 로보어드바이저 엔진 (import time 누락 수정 완료)
+설명: AI 로보어드바이저 엔진 (비중 상한 50% / 하한 10% 제한 장치 적용)
 """
 
 import streamlit as st
 import pandas as pd
 import re
 import random
-import time  # 👈 [범인 검거] 이 줄이 빠져서 에러가 났던 겁니다!
+import time
+import numpy as np # 계산을 위해 numpy 추가
 
 # -----------------------------------------------------------
 # [SECTION 1] 내부 헬퍼 함수
@@ -178,27 +179,37 @@ def get_smart_recommendation(df, user_choices):
 
     selected_pool = filtered_pool[filtered_pool['pure_name'].isin(final_picks)].copy()
 
+    # 4. 비중 최적화 (안전장치 적용: Min 10% ~ Max 50%)
     if selected_pool.empty: return "종목 선정 실패", [], {}
 
     selected_pool['sort_cat'] = pd.Categorical(selected_pool['pure_name'], categories=final_picks, ordered=True)
     selected_pool = selected_pool.sort_values('sort_cat')
 
+    # [수정된 비중 계산 로직]
+    # 1. 목표 배당률과의 거리에 따른 기본 점수 배점
     yields = selected_pool['연배당률'].values
-    inv_dist = 1 / (abs(yields - target_yield) + 0.5) 
-    weights = (inv_dist / inv_dist.sum()) * 100
+    scores = 1 / (abs(yields - target_yield) + 1.0) # +1.0으로 분모 0 방지 및 격차 완화
     
-    if style in ['safe', 'growth']:
-        min_threshold = 40.0 if style == 'safe' else 30.0
-        if weights[0] < min_threshold:
-            weights[0] = min_threshold
-            if len(weights) > 1:
-                other_sum = weights[1:].sum()
-                if other_sum > 0:
-                    weights[1:] = (weights[1:] / other_sum) * (100.0 - min_threshold)
-
+    # 2. 1차 정규화
+    weights = (scores / scores.sum()) * 100
+    
+    # 3. [핵심] 상/하한선 클리핑 (Min 10%, Max 50%)
+    # 단순히 clip만 하면 합계가 100이 안되므로, 합계가 100이 될 때까지 반복해서 맞춥니다.
+    MAX_CAP = 50.0
+    MIN_FLOOR = 10.0
+    
+    # 3번 정도 반복하면 수렴합니다.
+    for _ in range(3):
+        weights = weights.clip(MIN_FLOOR, MAX_CAP)
+        weights = (weights / weights.sum()) * 100
+    
+    # 4. 정수화 및 자투리 보정
     weights = weights.round().astype(int)
     diff = 100 - weights.sum()
-    if len(weights) > 0: weights[0] += diff 
+    
+    # 남는/모자란 비중은 가장 비중이 큰 종목(1순위)에 가감
+    max_idx = weights.argmax()
+    weights[max_idx] += diff
     
     pick_weights = dict(zip(selected_pool['pure_name'], weights))
     
@@ -225,7 +236,7 @@ def reset_wizard():
 
 
 # -----------------------------------------------------------
-# [SECTION 4] UI 위자드 (안전장치 추가됨)
+# [SECTION 4] UI 위자드
 # -----------------------------------------------------------
 
 @st.dialog("🕵️ AI 포트폴리오 설계", width="small")
@@ -281,7 +292,7 @@ def show_wizard():
             st.session_state.wiz_step = 4
             st.rerun()
 
-    # [STEP 4] 결과 (캐시 안전장치 추가)
+    # [STEP 4] 결과
     elif step == 4:
         # 캐시가 없으면(None) 분석 다시 돌리기
         if "ai_result_cache" not in st.session_state or st.session_state.ai_result_cache is None:
