@@ -407,11 +407,25 @@ def render_calculator_page(df):
 
         search_options = sorted(list(set(df.apply(clean_label, axis=1).tolist())))
         
+         # 🚨 [수정됨] 대조 로직 유연화: 로보어드바이저가 준 이름이 옵션에 포함되어 있으면 OK
         default_selected = []
         if st.session_state.get('selected_stocks'):
             for s_name in st.session_state.selected_stocks:
-                match = [opt for opt in search_options if opt.startswith(f"{s_name} (")]
-                if match: default_selected.append(match[0])
+                # 1차 시도: "종목명 (" 로 시작하는 완벽한 매칭 찾기
+                found = False
+                for opt in search_options:
+                    if opt.startswith(f"{s_name} ("):
+                        default_selected.append(opt)
+                        found = True
+                        break
+                
+                # 2차 시도 (실패 시): 종목명이 문자열 안에 포함되어 있으면 구제 (융통성 발휘)
+                if not found:
+                    for opt in search_options:
+                        if s_name in opt:
+                            default_selected.append(opt)
+                            found = True
+                            break
 
         selected_search = col2.multiselect(
             "📊 종목 선택 (이름 또는 코드로 검색)", 
