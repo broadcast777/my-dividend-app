@@ -203,8 +203,8 @@ def render_sidebar_footer():
 # [SECTION 4] 페이지별 렌더링 함수 (부품화)
 # ==========================================
 
-# [NEW] 로그인 버튼을 함수로 분리 (필요할 때 호출하기 위해)
-def render_login_buttons():
+# [수정 완료] 키 중복 방지를 위해 key_suffix 인자 추가
+def render_login_buttons(key_suffix="default"):
     """로그인이 필요할 때 보여줄 로그인 버튼 세트"""
     try:
         ctx = get_script_run_ctx()
@@ -578,8 +578,8 @@ def render_calculator_page(df):
                 if not st.session_state.get('is_logged_in', False):
                     st.warning("⚠️ **로그인이 필요합니다.**")
                     st.markdown("""나만의 포트폴리오를 저장하고 관리하시려면 로그인이 필요합니다.""")
-                    # 여기서 로그인 버튼 표시
-                    render_login_buttons()
+                    # 여기서 로그인 버튼 표시 (키 충돌 방지: save)
+                    render_login_buttons(key_suffix="save")
                 else:
                     try:
                         user = st.session_state.user_info
@@ -625,32 +625,32 @@ def render_calculator_page(df):
             if total_y_div > 20000000:
                 st.warning(f"🚨 **주의:** 연간 예상 배당금이 **{total_y_div/10000:,.0f}만원**입니다. 금융소득종합과세 대상에 해당될 수 있습니다.")
     
-    # [변경] 2. AI 로보어드바이저를 시뮬레이션 아래로 이동 (로그인 유도)
+    # [변경] 2. AI 로보어드바이저를 시뮬레이션 아래로 이동 (버튼 모양은 예전의 빨간색 유지)
     st.markdown("---")
     col_rec1, col_rec2 = st.columns([2, 1])
     with col_rec1:
         st.info("🤔 **어떤 종목을 담아야 할지 막막하신가요?**\n\nAI가 성향을 분석해 최적의 포트폴리오를 제안합니다.")
     with col_rec2:
         st.write("") 
-        if not st.session_state.get("is_logged_in"):
-            # 로그인 안 된 상태 -> 버튼 누르면 로그인 안내판 표시
-            if st.button("🔐 로그인하고 AI 진단 받기", use_container_width=True):
-                st.session_state.show_ai_login = True
-        else:
-            # 로그인 된 상태 -> 정상 실행
-            if st.button("🕵️ AI 로보어드바이저 실행", use_container_width=True, type="primary"):
+        # [복구] 예전 모양(빨간색, 🕵️ 이모지) 그대로 유지하되 기능만 분기
+        if st.button("🕵️ AI 로보어드바이저 실행", use_container_width=True, type="primary"):
+            if st.session_state.get("is_logged_in"):
                 logger.info("🤖 AI 로보어드바이저 세션 시작")
                 st.session_state.ai_modal_open = True
                 st.session_state.wiz_step = 1
                 st.session_state.wiz_data = {}
                 if "ai_result_cache" in st.session_state:
                     del st.session_state.ai_result_cache
+            else:
+                # 로그인 안 된 상태면 로그인창 열기
+                st.session_state.show_ai_login = True
     
     # AI용 로그인 안내판 표시
     if st.session_state.get("show_ai_login", False) and not st.session_state.get("is_logged_in"):
         with st.container(border=True):
             st.warning("🔒 AI 진단은 로그인 후 이용 가능합니다.")
-            render_login_buttons()
+            # 여기서 로그인 버튼 표시 (키 충돌 방지: ai)
+            render_login_buttons(key_suffix="ai")
             if st.button("닫기", key="close_ai_login"):
                 st.session_state.show_ai_login = False
                 st.rerun()
