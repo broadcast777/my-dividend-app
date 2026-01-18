@@ -220,7 +220,9 @@ def render_login_buttons():
                 st.markdown(f'''<a href="{res_kakao.url}" target="_blank" style="display: inline-flex; justify-content: center; align-items: center; width: 100%; background-color: #FEE500; color: #000000; border: 1px solid rgba(0,0,0,0.05); padding: 0.8rem; border-radius: 0.5rem; text-decoration: none; font-weight: bold; font-size: 1.1em; box-shadow: 0 1px 2px rgba(0,0,0,0.1); margin-bottom: 10px;">💬 Kakao로 3초 만에 시작하기</a>''', unsafe_allow_html=True)
         except: pass
     with col_r:
-        if st.button("🔵 Google로 시작하기(pc/크롬 권장)", use_container_width=True, key="func_google_btn"):
+        # [핵심] key 값 뒤에 suffix를 붙여서 중복 방지
+        unique_key = f"func_google_btn_{key_suffix}"
+        if st.button("🔵 Google로 시작하기(pc/크롬 권장)", use_container_width=True, key=unique_key):
             try:
                 res_google = supabase.auth.sign_in_with_oauth({"provider": "google", "options": {"redirect_to": redirect_url, "queryParams": {"access_type": "offline", "prompt": "consent"}, "skip_browser_redirect": False}})
                 if res_google.url:
