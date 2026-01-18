@@ -13,7 +13,7 @@ import random
 from streamlit.runtime.scriptrunner import get_script_run_ctx
 from logger import logger
 from analytics import inject_ga
-import streamlit.components.v1 as components
+import streamlit.components.v1 as components # 👈 [필수] RFID 센서용
 
 # [필수] 날짜 및 URL 라이브러리
 from datetime import datetime, timedelta
@@ -86,7 +86,7 @@ def check_coppa_compliance():
         else:
             # 체크 안 하면 여기서 멈춤 (화면 하단 로딩 방지)
             st.stop()
-            
+
 # 세션 상태(Session State) 변수 초기화 로직
 for key in ["is_logged_in", "user_info", "code_processed"]:
     if key not in st.session_state:
@@ -241,11 +241,8 @@ def render_sidebar_footer():
 # ==========================================
 # [SECTION 4] 페이지별 렌더링 함수 (부품화)
 # ==========================================
-# ==========================================
-# [SECTION 4] 페이지별 렌더링 함수 (부품화)
-# ==========================================
 
-# 👇 [여기] 이 코드를 통째로 복사해서 붙여넣으세요! 
+# [수정] 디자인(노란색+문구)은 유지하되, 한 줄에 나란히 배치하여 공간 절약
 def render_login_buttons(key_suffix="default"):
     """로그인이 필요할 때 보여줄 예쁜 디자인의 로그인 버튼 세트"""
     try:
@@ -310,7 +307,6 @@ def render_login_buttons(key_suffix="default"):
                     st.stop()
             except: pass
 
-
 def render_admin_tools(df_raw):
     """관리자 전용 도구 렌더링"""
     with st.sidebar:
@@ -351,13 +347,12 @@ def render_admin_tools(df_raw):
                             st.caption(f"원인: {src}")
                             
             st.divider()
-            # [새로 붙여넣을 코드 시작] =================================
+            
             st.caption("👇 배당금 업데이트 모드 선택")
             new_div = st.number_input("이번 달 확정 배당금 (또는 월평균)", value=0, step=10)
             
             col_btn1, col_btn2 = st.columns(2)
             
-            # [버튼 1] 일반적인 1개월 추가 (Rolling)
             # [버튼 1] 1개월 추가 (Rolling)
             if col_btn1.button("💾 1개월 추가", help="기존 기록 맨 뒤에 이번 달 금액만 추가합니다.", use_container_width=True):
                 new_total, new_hist = logic.update_dividend_rolling(cur_hist, new_div)
@@ -400,9 +395,6 @@ def render_admin_tools(df_raw):
                     st.success(f"⚡ 1년치 강제 적용 완료! ({new_total}원 / {new_yield}%)")
                 
                 st.session_state.df_dirty = df_raw
-
-     
-            # [새로 붙여넣을 코드 끝] ===================================
 
         st.markdown("---")
         st.subheader("💾 데이터 저장 및 백업")
@@ -511,12 +503,19 @@ def render_calculator_page(df):
                 if "ai_result_cache" in st.session_state:
                     del st.session_state.ai_result_cache
             else:
-                st.error("🔒 로그인이 필요한 기능입니다. 페이지 최상단에서 로그인을 먼저 해주세요!")
-                st.toast("위에서 로그인을 해주세요!", icon="👆")
-                st.session_state.ai_modal_open = False
+                st.session_state.show_ai_login = True
 
-        if st.session_state.get("ai_modal_open", False):
-            recommendation.show_wizard()
+    # [AI 로그인 창 표시]
+    if st.session_state.get("show_ai_login", False) and not st.session_state.get("is_logged_in"):
+        with st.container(border=True):
+            # 👇 여기서 아까 만든 '예쁜 버튼 부품'을 가져다 씁니다!
+            render_login_buttons(key_suffix="ai")
+            if st.button("닫기", key="close_ai_login"):
+                st.session_state.show_ai_login = False
+                st.rerun()
+
+    if st.session_state.get("ai_modal_open", False):
+        recommendation.show_wizard()
     
     st.markdown("---")
 
@@ -669,7 +668,7 @@ def render_calculator_page(df):
                 else:
                     if st.button("📥 전체 일정 파일 받기 (.ics)", key="ics_lock_btn", use_container_width=True):
                         st.error("🔒 로그인 회원 전용 기능입니다. 로그인을 완료해 주세요!")
-                        st.toast("맨 위로 올라가서 로그인을 해주세요!", icon="👆")
+                        st.toast("로그인이 필요합니다!", icon="🔒")
 
             with st.expander("❓ 다운로드 받은 파일은 어떻게 쓰나요? (사용법 보기)"):
                 st.markdown("""
@@ -1130,15 +1129,14 @@ def main():
 
     render_login_ui()
     
-    # [수정됨] 이제 복잡한 코드는 다 지우고, 아까 만든 함수만 부르면 됩니다!
     auth_container = st.container(border=True)
     with auth_container:
         if not st.session_state.get("is_logged_in", False):
             if "code" in st.query_params:
                  st.info("🔄 로그인 확인 중입니다... 잠시만 기다려주세요.")
             else:
-                # 여기서 아까 만든 '예쁜 가로형 버튼' 함수 호출!
-                render_login_buttons(key_suffix="top_main")
+                # [수정] 길게 늘어진 코드 다 지우고, 위에서 만든 함수 딱 한 줄 호출!
+                render_login_buttons(key_suffix="top_main") 
         else:
             user = st.session_state.user_info
             nickname = user.email.split("@")[0] if user.email else "User"
