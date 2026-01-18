@@ -56,39 +56,37 @@ st.components.v1.html("""
 # ---------------------------------------------------------
 # [추가 과제] 4과제: COPPA 나이 확인 (안전 장치)
 # ---------------------------------------------------------
-# 👇 [2단계] 검문소 로직 교체
+# 👇 [2단계] 검문소 로직 (안전한 버전)
 def check_coppa_compliance():
-    """만 13세 이상 이용 확인 (RFID 센서 연동 버전)"""
+    """만 13세 이상 이용 확인 (무한 로딩 해결 버전)"""
     
-    # 1. 이미 세션(단기 기억)에 인증 기록이 있으면 통과
-    if st.session_state.get("age_verified"):
+    # 1. [프리패스] 이미 세션(단기 기억)이나 URL(장기 기억)에 인증 흔적이 있으면 바로 통과!
+    if st.session_state.get("age_verified") or "age_verified" in st.query_params:
+        st.session_state.age_verified = True # 세션에 확실히 박아두기
         return
 
-    # 2. RFID 센서(URL 파라미터)가 "인증됨(1)" 신호를 보내고 있으면 통과
-    # (로그인하고 돌아왔을 때 여기서 걸려서 통과됨!)
-    if "age_verified" in st.query_params:
-        st.session_state.age_verified = True
-        return
-
-    # 3. 아무 기록도 없으면 검문소(체크박스) 가동
-    st.warning("📋 **서비스 이용 안내**")
-    st.write("본 서비스는 개인정보보호법 및 COPPA 규정에 따라 만 13세 이상 사용자만 이용 가능합니다.")
-    
-    if st.checkbox("나는 만 13세 이상이며, 이용 약관 및 개인정보 처리방침에 동의합니다."):
-        # (1) 세션에 기록 (임시)
-        st.session_state.age_verified = True
+    # 2. [검문] 아무 기록도 없으면 체크박스 표시
+    with st.expander("📋 서비스 이용 안내 (필수)", expanded=True):
+        st.warning("본 서비스는 만 13세 이상 사용자만 이용 가능합니다.")
         
-        # (2) 브라우저 주머니(localStorage)에 영구 도장 찍기! (자바스크립트 실행)
-        st.components.v1.html("""
-            <script>
-                localStorage.setItem('age_verified', '1');
-                parent.window.location.reload(); // 도장 찍었으니 새로고침해서 1단계 센서 통과시키기
-            </script>
-        """, height=0)
-        st.stop() # 새로고침 될 때까지 잠시 멈춤
-    else:
-        st.stop()
-
+        # 체크박스를 누르면?
+        if st.checkbox("나는 만 13세 이상이며, 이용 약관에 동의합니다."):
+            # (1) 즉시 통과 처리
+            st.session_state.age_verified = True
+            
+            # (2) 브라우저에 "나 인증했음" 도장 쾅! (자바스크립트)
+            st.components.v1.html("""
+                <script>
+                    localStorage.setItem('age_verified', '1');
+                </script>
+            """, height=0)
+            
+            # (3) 기분 좋게 새로고침 (st.stop 대신 rerun 사용)
+            st.rerun()
+        else:
+            # 체크 안 하면 여기서 멈춤 (화면 하단 로딩 방지)
+            st.stop()
+            
 # 세션 상태(Session State) 변수 초기화 로직
 for key in ["is_logged_in", "user_info", "code_processed"]:
     if key not in st.session_state:
