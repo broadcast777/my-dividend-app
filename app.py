@@ -959,7 +959,7 @@ def main():
     ui.load_css() # 👈 외부 CSS 파일을 여기서 로드합니다
     
     # 2. 안전 장치 (COPPA)
-    check_coppa_compliance() 
+    #check_coppa_compliance() 
     
     logger.info("🚀 배당팽이 메인 엔진 가동")
     db.cleanup_old_tokens()
