@@ -1107,7 +1107,7 @@ def main():
     
     # 1. 안전 장치 및 로깅
     # [수정] 1. 안전 장치 (COPPA 비활성화)
-    check_coppa_compliance() 
+    #check_coppa_compliance() 
     
     logger.info("🚀 배당팽이 메인 엔진 가동")
     db.cleanup_old_tokens()
