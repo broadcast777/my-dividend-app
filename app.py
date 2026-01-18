@@ -13,7 +13,7 @@ import random
 from streamlit.runtime.scriptrunner import get_script_run_ctx
 from logger import logger
 from analytics import inject_ga
-import streamlit.components.v1 as components  # 👈 [필수] RFID 센서용
+import streamlit.components.v1 as components
 
 # [필수] 날짜 및 URL 라이브러리
 from datetime import datetime, timedelta
@@ -35,13 +35,11 @@ import timeline
 st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
 
 # 📡 [RFID 센서] 브라우저 저장소(localStorage)와 URL 동기화
-# 이 코드가 있어야 로그아웃 후 새로고침 시에도 나이 인증을 기억합니다.
 components.html("""
 <script>
     try {
         const ageVerified = localStorage.getItem('age_verified');
         const params = new URLSearchParams(window.parent.location.search);
-        // 로컬스토리지엔 있는데 URL엔 없다면? -> 도장 찍고 새로고침
         if (ageVerified === '1' && !params.has('age_verified')) {
             params.set('age_verified', '1');
             window.parent.location.search = params.toString();
@@ -50,47 +48,48 @@ components.html("""
 </script>
 """, height=0)
 
+# [리팩토링 1] 세션 상태 초기화 함수 (중복 코드 제거 및 중앙 관리)
+def init_session_state():
+    """앱 전반에서 사용하는 모든 세션 변수를 안전하게 초기화합니다."""
+    defaults = {
+        "is_logged_in": False,
+        "user_info": None,
+        "code_processed": False,
+        "ai_modal_open": False,
+        "age_verified": False,
+        "total_invest": 30000000,  # 초기 자산: 3천만원
+        "selected_stocks": [],
+        "monthly_expense": 200,    # 월 지출: 200만원
+        "ai_result_cache": None    # AI 결과 캐싱
+    }
+    
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
 # ---------------------------------------------------------
 # [추가 과제] 4과제: COPPA 나이 확인 (안전 장치)
 # ---------------------------------------------------------
 def check_coppa_compliance():
     """만 13세 이상 이용 확인 (localStorage 및 URL 연동 버전)"""
-    # 1. 프리패스 조건: 세션, URL 파라미터, 혹은 로그인 상태 중 하나라도 만족 시 통과
     if (st.session_state.get("age_verified") or 
         st.query_params.get("age_verified") == "1" or 
         st.session_state.get("is_logged_in")):
         st.session_state.age_verified = True
         return
 
-    # 2. 동의 안내창 표시
     with st.expander("📋 서비스 이용 안내 (필수)", expanded=True):
         st.warning("본 서비스는 만 13세 이상 사용자만 이용 가능합니다.")
         if st.checkbox("나는 만 13세 이상이며, 이용 약관 및 개인정보 처리방침에 동의합니다."):
             st.session_state.age_verified = True
-            
-            # 브라우저에 영구 도장 찍기
             st.components.v1.html("<script>localStorage.setItem('age_verified','1');</script>", height=0)
-            
-            # 주소창에 즉시 도장 찍기 (F5 대비)
             st.query_params["age_verified"] = "1"
-            
-            time.sleep(0.5) # 도장 찍힐 시간 확보
+            time.sleep(0.5)
             st.rerun()
         else:
             st.stop()
 
-# 세션 상태(Session State) 변수 초기화 로직
-for key in ["is_logged_in", "user_info", "code_processed"]:
-    if key not in st.session_state:
-        st.session_state[key] = False if key != "user_info" else None
-
-# AI 추천 모달창 열림/닫힘 상태 관리 변수
-if "ai_modal_open" not in st.session_state:
-    st.session_state.ai_modal_open = False
-
-# ---------------------------------------------------------
 # 외부 데이터베이스(Supabase) 연결 초기화
-# ---------------------------------------------------------
 supabase = db.init_supabase()
 
 
@@ -102,33 +101,28 @@ def check_auth_status():
     """
     사용자의 로그인 상태를 확인하고, 카카오/구글 로그인 후 
     돌아오는 콜백(auth code)을 처리하여 세션을 확정합니다.
-    (나이 인증 도장 age_verified는 보존하도록 수정됨)
     """
     if not supabase: return
 
-    # 1. [기존 세션 확인] 이미 브라우저에 로그인 정보가 남아있는지 확인
+    # 1. [기존 세션 확인]
     try:
         session = supabase.auth.get_session()
         if session and session.user:
             st.session_state.is_logged_in = True
             st.session_state.user_info = session.user
-            
-            # ✅ [수정] clear() 대신 로그인 관련 파라미터만 콕 집어서 삭제
-            # age_verified 파라미터는 건드리지 않으므로 F5 눌러도 안 뜸
+            # 로그인 관련 파라미터만 정리 (age_verified 보존)
             for key in ["code", "old_id"]:
-                if key in st.query_params:
-                    del st.query_params[key]
+                if key in st.query_params: del st.query_params[key]
             return 
     except Exception:
         pass
 
-    # 2. [로그인 콜백 처리] OAuth 로그인 후 리다이렉트된 경우 처리
+    # 2. [로그인 콜백 처리]
     query_params = st.query_params
     if "code" in query_params and not st.session_state.get("code_processed", False):
         st.session_state.code_processed = True
         
         try:
-            # URL의 auth_code를 세션 토큰으로 교환
             auth_code = query_params["code"]
             auth_response = supabase.auth.exchange_code_for_session({"auth_code": auth_code})
             session = auth_response.session
@@ -138,101 +132,69 @@ def check_auth_status():
                 st.session_state.user_info = session.user
                 logger.info(f"👤 사용자 로그인 성공: {session.user.email}")
             
-            # ✅ [수정] 인증 성공 후 code만 제거 (age_verified는 유지!)
-            if "code" in st.query_params:
-                del st.query_params["code"]
-            
+            if "code" in st.query_params: del st.query_params["code"]
             st.success("✅ 로그인되었습니다!")
             st.rerun()
             
         except Exception as e:
-            # [자동 복구 로직] verifier 오류 시 파라미터 리셋 후 재시도
-            err_msg = str(e).lower()
-            logger.error(f"🔴 인증 과정 중 오류 발생: {err_msg}")
+            # [리팩토링 2] 에러 로그 강화 (상세 원인 기록)
+            logger.error(f"🚨 [Auth Error] 인증 프로세스 중 예외 발생: {str(e)}", exc_info=True)
             
+            err_msg = str(e).lower()
             if "verifier" in err_msg or "non-empty" in err_msg:
                 st.warning("🔄 보안 토큰 갱신 중... 잠시만 기다려주세요.")
-                # ✅ [수정] 오류 시에도 로그인 관련 정보만 삭제
                 for key in ["code", "old_id"]:
-                    if key in st.query_params:
-                        del st.query_params[key]
+                    if key in st.query_params: del st.query_params[key]
                 time.sleep(1.0)
                 st.rerun()
             else:
                 st.error(f"🔴 인증 오류: {e}")
-                # ✅ [수정] 오류 시에도 로그인 관련 정보만 삭제
-                if "code" in st.query_params:
-                    del st.query_params["code"]
+                if "code" in st.query_params: del st.query_params["code"]
 
 check_auth_status()
 
 
 # ==========================================
-# [SECTION 3] UI 컴포넌트 (사이드바 및 공통 요소)
+# [SECTION 3] UI 컴포넌트
 # ==========================================
 
 def render_login_ui():
-    """사이드바 상단에 현재 로그인된 유저 정보를 표시하고 로그아웃 기능을 제공합니다."""
+    """사이드바 상단에 로그인 유저 정보 표시 및 로그아웃"""
     if not supabase: return
     is_logged_in = st.session_state.get("is_logged_in", False)
     user_info = st.session_state.get("user_info", None)
     
     if is_logged_in and user_info:
-        # 이메일 앞부분을 닉네임으로 활용
         email = user_info.email if user_info.email else "User"
         nickname = email.split("@")[0]
         
         with st.sidebar:
             st.markdown("---")
             st.success(f"👋 반가워요! **{nickname}**님")
-            
-            # 로그아웃 버튼 클릭 시 세션 초기화 및 새로고침
             if st.button("🚪 로그아웃", key="logout_btn_sidebar", use_container_width=True):
-                logger.info(f"🚪 사용자 로그아웃: {email}") # [3과제] 로깅 추가
+                logger.info(f"🚪 사용자 로그아웃: {email}")
                 supabase.auth.sign_out()
                 st.session_state.is_logged_in = False
                 st.session_state.user_info = None
                 st.session_state.code_processed = False
-                # ✅ age_verified는 session_state에서 삭제하지 않음으로써 동의 상태 유지!
+                # age_verified는 유지 (편의성)
                 st.rerun()
 
 def render_sidebar_footer():
-    """사이드바 최하단 후원 버튼 및 저작권 정보"""
+    """사이드바 최하단 후원 버튼"""
     bmc_url = "https://www.buymeacoffee.com/dividenpange"
-
     st.sidebar.markdown("---") 
-    
     st.sidebar.markdown(f"""
         <style>
-        .bmc-container {{
-            display: flex;
-            justify-content: center;
-            margin: 10px 0;
-        }}
         .bmc-button {{
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background-color: #FFDD00;
-            color: #000000 !important;
-            padding: 10px 15px;
-            border-radius: 10px;
-            text-decoration: none;
-            font-weight: bold;
-            font-size: 14px;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-            transition: transform 0.2s;
-            width: 100%;
+            display: flex; align-items: center; justify-content: center;
+            background-color: #FFDD00; color: #000000 !important;
+            padding: 10px 15px; border-radius: 10px; text-decoration: none;
+            font-weight: bold; font-size: 14px; width: 100%;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1); transition: transform 0.2s;
         }}
-        .bmc-button:hover {{
-            transform: translateY(-2px);
-            text-decoration: none;
-            background-color: #FADA00;
-        }}
-        .bmc-logo {{
-            height: 18px;
-            margin-right: 8px;
-        }}
+        .bmc-button:hover {{ transform: translateY(-2px); background-color: #FADA00; }}
+        .bmc-logo {{ height: 18px; margin-right: 8px; }}
         </style>
         <div class="bmc-container">
             <a class="bmc-button" href="{bmc_url}" target="_blank">
@@ -244,69 +206,29 @@ def render_sidebar_footer():
 
 
 # ==========================================
-# [SECTION 4] 페이지별 렌더링 함수 (부품화)
+# [SECTION 4] 페이지별 렌더링 함수
 # ==========================================
 
-# [수정] 디자인(노란색+문구)은 유지하되, 한 줄에 나란히 배치하여 공간 절약
 def render_login_buttons(key_suffix="default"):
-    """로그인이 필요할 때 보여줄 예쁜 디자인의 로그인 버튼 세트"""
+    """예쁜 디자인의 가로형 로그인 버튼 세트"""
     try:
         ctx = get_script_run_ctx()
         current_session_id = ctx.session_id
     except: current_session_id = "unknown"
     redirect_url = f"https://dividend-pange.streamlit.app?old_id={current_session_id}"
 
-    # 안내 문구 (심플하게)
     st.caption("🔒 기능을 사용하려면 로그인이 필요합니다.")
-
-    # [핵심] 두 버튼을 5:5 비율로 나란히 배치
     col1, col2 = st.columns(2)
-    
-    # 1. 카카오 로그인 (왼쪽): 노란색 디자인 + 문구 유지
     with col1:
         try:
-            res_kakao = supabase.auth.sign_in_with_oauth({
-                "provider": "kakao", 
-                "options": {"redirect_to": redirect_url, "skip_browser_redirect": True}
-            })
+            res_kakao = supabase.auth.sign_in_with_oauth({"provider": "kakao", "options": {"redirect_to": redirect_url, "skip_browser_redirect": True}})
             if res_kakao.url:
-                # HTML/CSS로 버튼 스타일 구현 (높이/마진 조절하여 구글 버튼과 라인 맞춤)
-                st.markdown(f'''
-                <a href="{res_kakao.url}" target="_blank" style="
-                    display: inline-flex;
-                    justify-content: center;
-                    align-items: center;
-                    width: 100%;
-                    background-color: #FEE500; 
-                    color: #000000; 
-                    border: 1px solid rgba(0,0,0,0.05); 
-                    padding: 0.5rem; 
-                    border-radius: 0.5rem; 
-                    text-decoration: none; 
-                    font-weight: bold; 
-                    font-size: 1rem; 
-                    box-shadow: 0 1px 2px rgba(0,0,0,0.1);
-                    height: 2.6rem;">
-                    💬 카카오로 3초 만에 시작
-                </a>
-                ''', unsafe_allow_html=True)
-        except: 
-            st.error("Kakao 오류")
-
-    # 2. 구글 로그인 (오른쪽): 문구는 심플하게, 기능은 그대로
+                st.markdown(f'''<a href="{res_kakao.url}" target="_blank" style="display: inline-flex; justify-content: center; align-items: center; width: 100%; background-color: #FEE500; color: #000000; border: 1px solid rgba(0,0,0,0.05); padding: 0.5rem; border-radius: 0.5rem; text-decoration: none; font-weight: bold; font-size: 1rem; box-shadow: 0 1px 2px rgba(0,0,0,0.1); height: 2.6rem;">💬 카카오로 3초 만에 시작</a>''', unsafe_allow_html=True)
+        except: st.error("Kakao 오류")
     with col2:
-        unique_key = f"btn_google_{key_suffix}"
-        # use_container_width=True로 꽉 차게 만들어 카카오 버튼과 균형 맞춤
-        if st.button("🔵 Google로 시작하기", key=unique_key, use_container_width=True):
+        if st.button("🔵 Google로 시작하기", key=f"btn_google_{key_suffix}", use_container_width=True):
             try:
-                res_google = supabase.auth.sign_in_with_oauth({
-                    "provider": "google", 
-                    "options": {
-                        "redirect_to": redirect_url, 
-                        "queryParams": {"access_type": "offline", "prompt": "consent"}, 
-                        "skip_browser_redirect": False
-                    }
-                })
+                res_google = supabase.auth.sign_in_with_oauth({"provider": "google", "options": {"redirect_to": redirect_url, "queryParams": {"access_type": "offline", "prompt": "consent"}, "skip_browser_redirect": False}})
                 if res_google.url:
                     st.markdown(f'<meta http-equiv="refresh" content="0;url={res_google.url}">', unsafe_allow_html=True)
                     st.stop()
@@ -350,68 +272,49 @@ def render_admin_tools(df_raw):
                         else:
                             st.error("실패")
                             st.caption(f"원인: {src}")
-                            
-            st.divider()
             
+            st.divider()
             st.caption("👇 배당금 업데이트 모드 선택")
             new_div = st.number_input("이번 달 확정 배당금 (또는 월평균)", value=0, step=10)
             
             col_btn1, col_btn2 = st.columns(2)
             
-            # [버튼 1] 1개월 추가 (Rolling)
-            if col_btn1.button("💾 1개월 추가", help="기존 기록 맨 뒤에 이번 달 금액만 추가합니다.", use_container_width=True):
+            if col_btn1.button("💾 1개월 추가", use_container_width=True):
                 new_total, new_hist = logic.update_dividend_rolling(cur_hist, new_div)
-                
-                # [핵심 수정] 일반 컬럼 뿐만 아니라 '크롤링' 컬럼까지 강제로 덮어씌웁니다!
                 df_raw.loc[df_raw['종목코드'] == code, '배당기록'] = new_hist
                 df_raw.loc[df_raw['종목코드'] == code, '연배당금'] = new_total
-                df_raw.loc[df_raw['종목코드'] == code, '연배당금_크롤링'] = new_total  # 👈 여기가 포인트!
+                df_raw.loc[df_raw['종목코드'] == code, '연배당금_크롤링'] = new_total
                 
-                # 배당률 재계산
                 current_price = row.get('현재가', 0)
                 if not current_price: current_price = logic._fetch_price_raw(st.session_state.get('broker'), code, category)
-                
                 if current_price > 0:
                     new_yield = round((new_total / current_price) * 100, 2)
                     df_raw.loc[df_raw['종목코드'] == code, '연배당률'] = new_yield
-                    df_raw.loc[df_raw['종목코드'] == code, '연배당률_크롤링'] = new_yield # 👈 배당률도 동기화
+                    df_raw.loc[df_raw['종목코드'] == code, '연배당률_크롤링'] = new_yield
                     st.success(f"✅ 1개월 추가 완료 ({new_total}원 / {new_yield}%)")
-                
                 st.session_state.df_dirty = df_raw
 
-            # [버튼 2] 1년치 강제 적용 (Forward)
-            if col_btn2.button("⚡ 1년치 강제 적용", type="primary", help="과거 기록을 무시하고, 이번 달 금액이 1년 내내 나온다고 가정합니다.", use_container_width=True):
+            if col_btn2.button("⚡ 1년치 강제 적용", type="primary", use_container_width=True):
                 new_total = new_div * 12
                 new_hist = "|".join([str(new_div)] * 12)
-                
-                # [핵심 수정] 여기도 크롤링 컬럼까지 싹 다 덮어씁니다.
                 df_raw.loc[df_raw['종목코드'] == code, '배당기록'] = new_hist
                 df_raw.loc[df_raw['종목코드'] == code, '연배당금'] = new_total
-                df_raw.loc[df_raw['종목코드'] == code, '연배당금_크롤링'] = new_total # 👈 여기가 포인트!
+                df_raw.loc[df_raw['종목코드'] == code, '연배당금_크롤링'] = new_total
                 
-                # 배당률 재계산
                 current_price = row.get('현재가', 0)
                 if not current_price: current_price = logic._fetch_price_raw(st.session_state.get('broker'), code, category)
-                
                 if current_price > 0:
                     new_yield = round((new_total / current_price) * 100, 2)
                     df_raw.loc[df_raw['종목코드'] == code, '연배당률'] = new_yield
                     df_raw.loc[df_raw['종목코드'] == code, '연배당률_크롤링'] = new_yield 
                     st.success(f"⚡ 1년치 강제 적용 완료! ({new_total}원 / {new_yield}%)")
-                
                 st.session_state.df_dirty = df_raw
 
         st.markdown("---")
         st.subheader("💾 데이터 저장 및 백업")
-
+        
         csv_data = df_raw.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📂 (혹시 모르니) 현재 파일 백업하기",
-            data=csv_data,
-            file_name=f"stocks_backup_{pd.Timestamp.now().strftime('%Y%m%d')}.csv",
-            mime='text/csv',
-            use_container_width=True
-        )
+        st.download_button("📂 (혹시 모르니) 현재 파일 백업하기", data=csv_data, file_name=f"stocks_backup_{pd.Timestamp.now().strftime('%Y%m%d')}.csv", mime='text/csv', use_container_width=True)
 
         st.write("") 
         with st.expander("⚡ 전체 종목 자동 업데이트 (신규 제외)"):
@@ -421,8 +324,7 @@ def render_admin_tools(df_raw):
                 status_text = st.empty()
                 updated_count = 0
                 skipped_count = 0
-                fail_list = []  # 1. 실패 노트 준비
-                
+                fail_list = []
                 total_stocks = len(df_raw)
                 df_temp = df_raw.copy()
                 
@@ -437,33 +339,24 @@ def render_admin_tools(df_raw):
                     
                     code = str(row['종목코드']).strip()
                     cat = str(row.get('분류', '국내')).strip()
-                    
-                    # 배당'률'을 계산해주는 똑똑한 함수로 교체
                     y_val, src = logic.fetch_dividend_yield_hybrid(code, cat) 
                     
                     if y_val > 0:
-                        df_temp.at[i, '연배당률_크롤링'] = y_val # ← 이제 진짜 %가 들어갑니다
+                        df_temp.at[i, '연배당률_크롤링'] = y_val
                         updated_count += 1
                     else:
-                        # 3. 실패 시 명단 작성
                         fail_msg = f"{row['종목명']}({code}) - {src}"
                         fail_list.append(fail_msg)
                         logger.error(f"업데이트 실패: {fail_msg}")
-                    
                     time.sleep(0.1)
                         
                 progress_bar.empty()
                 status_text.text("완료!")
-                
-                # 4. 결과 리포트 (성공은 초록색, 실패는 빨간색 박스)
                 st.success(f"✅ {updated_count}개 갱신 성공 / 🛡️ {skipped_count}개 보호됨")
-
                 if fail_list:
                     st.error(f"🚨 {len(fail_list)}개 업데이트 실패")
                     with st.expander("🔍 실패 원인 명단 보기"):
-                        for f in fail_list:
-                            st.write(f"- {f}")
-                            
+                        for f in fail_list: st.write(f"- {f}")
                 st.session_state.df_dirty = df_temp
 
         st.markdown("---")
@@ -489,7 +382,6 @@ def render_admin_tools(df_raw):
 
 def render_calculator_page(df):
     """💰 배당금 계산기 페이지 렌더링"""
-    # [Level 1] 변수 가출 방지를 위해 함수 시작과 동시에 빈 바구니 생성
     all_data = []
 
     # 6-1. AI 로보어드바이저
@@ -508,18 +400,9 @@ def render_calculator_page(df):
                 if "ai_result_cache" in st.session_state:
                     del st.session_state.ai_result_cache
             else:
-                # ✅ [요청 반영] 복잡한 창 대신 에러 메시지만 심플하게 표시
+                # ✅ [수정 완료] 로그인 버튼 대신 심플한 경고 메시지만 표시
                 st.error("🔒 로그인이 필요한 기능입니다. 페이지 최상단에서 로그인을 먼저 해주세요!")
                 st.toast("위에서 로그인을 해주세요!", icon="👆")
-
-    # [AI 로그인 창 표시]
-    if st.session_state.get("show_ai_login", False) and not st.session_state.get("is_logged_in"):
-        with st.container(border=True):
-            # 👇 여기서 아까 만든 '예쁜 버튼 부품'을 가져다 씁니다!
-            render_login_buttons(key_suffix="ai")
-            if st.button("닫기", key="close_ai_login"):
-                st.session_state.show_ai_login = False
-                st.rerun()
 
     if st.session_state.get("ai_modal_open", False):
         recommendation.show_wizard()
@@ -534,24 +417,18 @@ def render_calculator_page(df):
         st.session_state.total_invest = invest_input * 10000
         total_invest = st.session_state.total_invest 
 
-        # --- [원복] "이름 (코드)" 방식으로 무조건 뜨게 만들기 ---
         code_col_name = next((c for c in df.columns if '코드' in c), '종목코드')
         name_col_name = next((c for c in df.columns if 'pure' in c or '명' in c), '종목명')
 
         def clean_label(row):
             c = str(row.get(code_col_name, '')).strip()
-            # 소수점 제거 및 6자리 보정 (이건 무조건 해야 검색이 됨)
             if '.' in c: c = c.split('.')[0]
             if c.isdigit() and len(c) < 6: c = c.zfill(6)
-            
             n = str(row.get(name_col_name, '')).strip()
-            # 아까 잘 됐던 그 형식: "이름 (코드)"
             return f"{n} ({c})"
 
-        # 검색 리스트 생성
         search_options = sorted(list(set(df.apply(clean_label, axis=1).tolist())))
         
-        # 기존 세션 복원
         default_selected = []
         if st.session_state.get('selected_stocks'):
             for s_name in st.session_state.selected_stocks:
@@ -562,15 +439,11 @@ def render_calculator_page(df):
             "📊 종목 선택 (이름 또는 코드로 검색)", 
             options=search_options, 
             default=default_selected,
-            # [중요] format_func를 제거하거나 단순화해서 괄호가 보이게 둠
-            # 그래야 검색할 때 "476" 쳤을 때 "(476..."이 보여서 매칭됨
             help="종목코드(숫자)나 종목명을 입력해 보세요!"
         )
 
-        # 선택된 값에서 이름만 추출해서 저장
         selected = [opt.split(' (')[0] if ' (' in opt else opt for opt in selected_search]
         st.session_state.selected_stocks = selected
-        # --- [원복 끝] ---
 
         if selected:
             has_foreign_stock = any(df[df['pure_name'] == s_name].iloc[0]['분류'] == '해외' for s_name in selected)
@@ -1105,8 +978,8 @@ def render_stocklist_page(df):
 def main():
     inject_ga()
     
-    # 1. 안전 장치 및 로깅
-    # [수정] 1. 안전 장치 (COPPA 비활성화)
+    # 1. 초기화 및 검문 (세션 초기화 함수 적용)
+    init_session_state() 
     #check_coppa_compliance() 
     
     logger.info("🚀 배당팽이 메인 엔진 가동")
@@ -1126,25 +999,15 @@ def main():
                 else:
                     st.error("비밀번호 불일치")
 
-    if "total_invest" not in st.session_state:
-        st.session_state.total_invest = 30000000 
-    if "selected_stocks" not in st.session_state:
-        st.session_state.selected_stocks = []     
-        
-    if "monthly_expense" not in st.session_state:
-        st.session_state.monthly_expense = 200    
-
     render_login_ui()
     
-    # [수정됨] 이제 복잡한 코드는 다 지우고, 아까 만든 함수만 부르면 됩니다!
     auth_container = st.container(border=True)
     with auth_container:
         if not st.session_state.get("is_logged_in", False):
             if "code" in st.query_params:
                  st.info("🔄 로그인 확인 중입니다... 잠시만 기다려주세요.")
             else:
-                # 여기서 아까 만든 '예쁜 가로형 버튼' 함수 호출!
-                render_login_buttons(key_suffix="top_main")
+                render_login_buttons(key_suffix="top_main") 
         else:
             user = st.session_state.user_info
             nickname = user.email.split("@")[0] if user.email else "User"
