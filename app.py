@@ -366,7 +366,7 @@ def render_admin_tools(df_raw):
 # 🚨 [추가된 함수] 삭제 확인 다이얼로그 (Dialog)
 @st.dialog("⚠️ 정말 삭제하시겠습니까?")
 def confirm_delete_dialog(target_names, opts, supabase):
-    st.write(f"선택하신 **{len(target_names)}개**의 포트폴리오가 영구적으로 삭제됩니다.")
+    st.write(f"선택하신 {len(target_names)}개의 포트폴리오가 영구적으로 삭제됩니다.")
     st.warning("이 작업은 되돌릴 수 없습니다.")
     
     col_del1, col_del2 = st.columns(2)
@@ -389,7 +389,7 @@ def confirm_delete_dialog(target_names, opts, supabase):
 @st.dialog("💾 기존 파일 덮어쓰기")
 def confirm_overwrite_dialog(final_name, user_id, user_email, save_data, existing_id, supabase):
     """이미 같은 이름의 포트폴리오가 있을 때 띄우는 팝업"""
-    st.write(f"이미 **'{final_name}'**이라는 이름의 포트폴리오가 존재합니다.")
+    st.write(f"이미 '{final_name}'이라는 이름의 포트폴리오가 존재합니다.")
     st.info("새로운 데이터로 덮어쓰시겠습니까?")
     
     col_ov1, col_ov2 = st.columns(2)
