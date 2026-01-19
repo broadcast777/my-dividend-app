@@ -1,8 +1,8 @@
 """
 프로젝트: 배당 팽이 (Dividend Top) v2.9
 파일명: recommendation.py
-설명: AI 로보어드바이저 엔진 (순수 로직만 포함, Dialog 데코레이터 없음)
-업데이트: 2026.01.20
+설명: AI 로보어드바이저 엔진 (안정형 리스크 필터링 + 투자 유의사항/수정 가이드 복구 완료)
+업데이트: 2026.01.19
 """
 
 import streamlit as st
@@ -223,7 +223,7 @@ def reset_wizard():
 # [SECTION 4] AI 로보어드바이저 UI 위저드
 # ===========================================================
 
-# 🚨 [주의] 여기에는 @st.dialog가 없어야 합니다. app.py에서 이미 선언했기 때문입니다.
+@st.dialog("🕵️ AI 포트폴리오 설계", width="small")
 def show_wizard():
     df = st.session_state.get('shared_df')
     if df is None or df.empty:
@@ -243,54 +243,23 @@ def show_wizard():
         st.write("🌍 **어떤 종목을 포함할까요?**")
         col_kor, col_all = st.columns(2)
         with col_kor:
-            # [수정] 콜백(on_click) 대신 직관적인 if문 구조로 변경하여 꺼짐 현상 방지
-            if st.button("🇰🇷 국내 종목만", use_container_width=True):
-                st.session_state.wiz_step = 1
-                st.session_state.wiz_data['include_foreign'] = False
-                st.rerun() # 즉시 갱신
-                
+            if st.button("🇰🇷 국내 종목만", use_container_width=True): go_next_step(1, 'include_foreign', False); st.rerun()
         with col_all:
-            # [수정] 콜백 함수로 페이지 전환 (Rerun 제거)
-            if st.button("🌎 해외 포함", use_container_width=True):
-                st.session_state.wiz_step = 1
-                st.session_state.wiz_data['include_foreign'] = True
-                st.rerun() # 즉시 갱신
+            if st.button("🌎 해외 포함", use_container_width=True): go_next_step(1, 'include_foreign', True); st.rerun()
 
     # [Step 1] 투자 스타일 결정
     elif step == 1:
         st.subheader("Q1. 어떤 투자를 원하세요?")
-        if st.button("📈 성장 추구 (주가 상승 + 배당)", use_container_width=True):
-            st.session_state.wiz_step = 2
-            st.session_state.wiz_data['style'] = 'growth'
-            st.rerun()
-            
-        if st.button("💰 현금 흐름 (월 배당금 극대화)", use_container_width=True):
-            st.session_state.wiz_step = 2
-            st.session_state.wiz_data['style'] = 'flow'
-            st.rerun()
-            
-        if st.button("🛡️ 안정성 (원금 방어 최우선)", use_container_width=True):
-            st.session_state.wiz_step = 2
-            st.session_state.wiz_data['style'] = 'safe'
-            st.rerun()
+        st.button("📈 성장 추구 (주가 상승 + 배당)", use_container_width=True, on_click=go_next_step, args=(2, 'style', 'growth'))
+        st.button("💰 현금 흐름 (월 배당금 극대화)", use_container_width=True, on_click=go_next_step, args=(2, 'style', 'flow'))
+        st.button("🛡️ 안정성 (원금 방어 최우선)", use_container_width=True, on_click=go_next_step, args=(2, 'style', 'safe'))
 
     # [Step 2] 배당 주기 결정
     elif step == 2:
         st.subheader("Q2. 선호하는 배당 날짜는요?")
-        if st.button("🗓️ 월중 (매월 15일 경)", use_container_width=True):
-            st.session_state.wiz_step = 3
-            st.session_state.wiz_data['timing'] = 'mid'
-            st.rerun()
-            
-        if st.button("🔚 월말/월초 (월급날 전후)", use_container_width=True):
-            st.session_state.wiz_step = 3
-            st.session_state.wiz_data['timing'] = 'end'
-            st.rerun()
-            
-        if st.button("🔄 상관없음 (섞어서 2주마다 받기)", use_container_width=True):
-            st.session_state.wiz_step = 3
-            st.session_state.wiz_data['timing'] = 'mix'
-            st.rerun()
+        st.button("🗓️ 월중 (매월 15일 경)", use_container_width=True, on_click=go_next_step, args=(3, 'timing', 'mid'))
+        st.button("🔚 월말/월초 (월급날 전후)", use_container_width=True, on_click=go_next_step, args=(3, 'timing', 'end'))
+        st.button("🔄 상관없음 (섞어서 2주마다 받기)", use_container_width=True, on_click=go_next_step, args=(3, 'timing', 'mix'))
 
     # [Step 3] 목표 수치 및 종목 개수 설정
     elif step == 3:
@@ -320,8 +289,7 @@ def show_wizard():
         if st.button("🚀 다음 단계로 (3/4)", type="primary", use_container_width=True):
             st.session_state.wiz_data['target_yield'] = target
             st.session_state.wiz_data['count'] = count
-            st.session_state.wiz_step = 4
-            st.rerun()
+            st.session_state.wiz_step = 4; st.rerun()
 
     # [Step 4] 나만의 원픽(Focus) 종목 선택
     elif step == 4:
@@ -394,6 +362,7 @@ def show_wizard():
         # [NEW] 필수 투자 유의사항 및 수정 가이드 (복구 완료)
         # -----------------------------------------------------------
         st.write("")
+        # 💡 줄바꿈을 위해 항목 사이에 빈 줄을 하나씩 더 넣었습니다.
         st.warning("""⚠️ **투자 유의사항 (필독)**
 
 1. 본 결과는 매수/매도 추천이 아니며, 과거 데이터를 기반으로 한 단순 시뮬레이션입니다.
@@ -401,6 +370,8 @@ def show_wizard():
 2. 배당률 및 지급일정은 시장 상황과 운용사 정책에 따라 언제든 변동될 수 있습니다.
 
 3. 과거의 수익이 미래의 수익을 보장하지 않으므로, 모든 투자의 책임은 본인에게 있습니다.""")
+        
+     
         
         st.info("💡 **팁:** AI 제안 결과는 단순 참고용입니다. [이대로 담기]를 누르신 후, 아래 [💰 배당금 계산기]에서 각 유형별 종목을 직접 교체하거나 비중을 자유롭게 수정하실 수 있습니다.")
 
