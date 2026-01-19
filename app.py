@@ -1,7 +1,7 @@
 """
 프로젝트: 배당 팽이 (Dividend Top) v2.6
 파일명: app.py
-설명: 모바일 UX 최적화 (Bottom-up 입력 방식 보완 - 초기값 1/N 자동 배분 로직 추가)
+설명: 모바일 UX 최적화 (Bottom-up 입력 방식 보완 - 들여쓰기 오류 수정 완료)
 """
 
 import streamlit as st
@@ -429,22 +429,15 @@ def render_calculator_page(df):
     
     # 여기서부터 시뮬레이션 섹션이 바로 시작됩니다. (expander default=True)
     with st.expander("🧮 나만의 배당 포트폴리오 시뮬레이션", expanded=True):
-        # 💡 [핵심 UX 개선] Top-down 입력 제거 -> Bottom-up 실시간 전광판 배치
+        # 1. 레이아웃 잡기 (Metric 코드 제거됨)
         col_total, col_select = st.columns([1, 2])
-        
-        with col_total:
-            # 합계 금액 실시간 표시 (Metric)
-            current_total_view = st.session_state.total_invest / 10000
-            st.metric("💰 총 투자 자산", f"{current_total_view:,.0f} 만원")
 
+        # -------------------------------------------------------
+        # [바코드(Dictionary) 매핑 시스템]
+        # -------------------------------------------------------
         code_col_name = next((c for c in df.columns if '코드' in c), '종목코드')
         name_col_name = next((c for c in df.columns if 'pure' in c or '명' in c), '종목명')
 
-        # -------------------------------------------------------
-        # [바코드(Dictionary) 매핑 시스템] (이전 수정사항 유지)
-        # -------------------------------------------------------
-        
-        # 1. 라벨 생성 함수
         def clean_label(row):
             c = str(row.get(code_col_name, '')).strip()
             if '.' in c: c = c.split('.')[0]
@@ -452,7 +445,6 @@ def render_calculator_page(df):
             n = str(row.get(name_col_name, '')).strip()
             return f"{n} ({c})"
 
-        # 2. 바코드 사전 생성
         label_to_real_name = {}
         for _, row in df.iterrows():
             lbl = clean_label(row)
@@ -460,7 +452,6 @@ def render_calculator_page(df):
 
         search_options = sorted(list(label_to_real_name.keys()))
         
-        # 3. 초기 선택값 세팅
         default_selected_labels = []
         if st.session_state.get('selected_stocks'):
             saved_stocks = st.session_state.selected_stocks
@@ -468,64 +459,61 @@ def render_calculator_page(df):
                 if real_name in saved_stocks:
                     default_selected_labels.append(label)
 
-        # 4. UI 출력
+        # 2. 종목 선택 (우측)
         selected_search = col_select.multiselect(
             "📊 종목 선택 (이름 또는 코드로 검색)", 
             options=search_options, 
             default=default_selected_labels, 
             help="종목코드(숫자)나 종목명을 입력해 보세요!"
         )
-
-        # 5. 최종 추출
         selected = [label_to_real_name[opt] for opt in selected_search]
         st.session_state.selected_stocks = selected
-        # -------------------------------------------------------
 
+        # 3. [NEW] 동기화 로직 정의 (selected 변수가 정의된 후에 위치해야 함)
+        def sync_from_individual():
+            """개별 종목 수정 -> 총액 자동 합산 (Bottom-up)"""
+            new_sum = sum([st.session_state.get(f"amt_{i}", 0) for i in range(len(selected))])
+            st.session_state.total_invest = new_sum * 10000
+            st.session_state.total_invest_input = new_sum 
+
+        def sync_from_total():
+            """총액 수정 -> 개별 종목 비율대로 배분 (Top-down)"""
+            new_total = st.session_state.total_invest_input
+            st.session_state.total_invest = new_total * 10000
+            
+            if not selected: return # 종목 없으면 배분 안 함
+
+            current_amts = [st.session_state.get(f"amt_{i}", 0) for i in range(len(selected))]
+            current_sum = sum(current_amts)
+            
+            for i in range(len(selected)):
+                if current_sum > 0:
+                    ratio = current_amts[i] / current_sum
+                    st.session_state[f"amt_{i}"] = int(new_total * ratio)
+                else:
+                    # 0원 상태였다면 N분의 1로 공평하게 시작
+                    st.session_state[f"amt_{i}"] = int(new_total // len(selected))
+
+        # 4. [NEW] 총 투자 자산 입력창 (좌측) - 이제 하나만 나옵니다!
+        if "total_invest_input" not in st.session_state:
+            st.session_state.total_invest_input = int(st.session_state.total_invest / 10000)
+
+        col_total.number_input(
+            "💰 총 투자 자산 (만원)", 
+            min_value=0, 
+            step=100, 
+            key="total_invest_input", 
+            on_change=sync_from_total,
+            help="이 금액을 수정하면 아래 종목들에 비율대로 자동 배분됩니다."
+        )
+
+        # 5. 하단 개별 입력 루프
         if selected:
             # 🚨 [안전한 검사]
             has_foreign_stock = any(df[df['pure_name'] == s_name].iloc[0]['분류'] == '해외' for s_name in selected)
             if has_foreign_stock:
                 st.warning("📢 **잠깐!** 선택하신 종목 중 '해외 상장 ETF'가 포함되어 있습니다. ISA/연금계좌 결과는 참고용으로만 봐주세요.")
 
-            # ⚡ [양방향 동기화 콜백 함수] 
-            # 1. 개별 종목 수정 시 -> 총액 자동 합산 (Bottom-up)
-            def sync_from_individual():
-                new_sum = sum([st.session_state.get(f"amt_{i}", 0) for i in range(len(selected))])
-                st.session_state.total_invest = new_sum * 10000
-                st.session_state.total_invest_input = new_sum # 상단 입력창에도 반영
-
-            # 2. 총액 수정 시 -> 개별 종목 비례 배분 (Top-down)
-            def sync_from_total():
-                new_total = st.session_state.total_invest_input
-                st.session_state.total_invest = new_total * 10000
-                
-                # 현재 입력된 비율을 유지하면서 배분
-                current_amts = [st.session_state.get(f"amt_{i}", 0) for i in range(len(selected))]
-                current_sum = sum(current_amts)
-                
-                for i in range(len(selected)):
-                    if current_sum > 0:
-                        ratio = current_amts[i] / current_sum
-                        st.session_state[f"amt_{i}"] = int(new_total * ratio)
-                    else:
-                        # 0원 상태였다면 N분의 1로 공평하게 시작
-                        st.session_state[f"amt_{i}"] = int(new_total // len(selected))
-
-            # 🧮 [상단] 총 투자 자산 (수정 가능, 전광판 제거됨)
-            if "total_invest_input" not in st.session_state:
-                st.session_state.total_invest_input = int(st.session_state.total_invest / 10000)
-
-            # 💡 수정: Metric(전광판) 코드를 삭제하고 입력창만 남김
-            col_total.number_input(
-                "💰 총 투자 자산 (만원)", 
-                min_value=0, 
-                step=100, 
-                key="total_invest_input", 
-                on_change=sync_from_total,
-                help="이 금액을 수정하면 아래 종목들에 비율대로 자동 배분됩니다."
-            )
-
-            # 💡 [하단] 개별 종목 입력
             temp_total_sum = 0
             amounts_map = {}
             cols_input = st.columns(2)
@@ -535,18 +523,17 @@ def render_calculator_page(df):
             
             for i, stock in enumerate(selected):
                 with cols_input[i % 2]:
-                    # 새로 추가된 종목의 amt_{i}가 없으면 초기값 세팅
+                    # 초기값 세팅 (session state에 없으면)
                     if f"amt_{i}" not in st.session_state:
-                        # AI 추천 비중이 있으면 우선 적용, 없으면 1/N
                         ai_suggested = st.session_state.get('ai_suggested_weights', {})
                         if stock in ai_suggested and current_total_view > 1:
                             w = ai_suggested[stock]
                             init_val = int(current_total_view * (w / 100))
                         else:
-                            init_val = int(st.session_state.total_invest_input // len(selected))
+                            init_val = int(st.session_state.total_invest_input // len(selected)) if len(selected) > 0 else 0
                         st.session_state[f"amt_{i}"] = init_val
 
-                    # 💰 금액 입력창 (on_change=sync_from_individual 필수)
+                    # 개별 금액 입력창
                     val = st.number_input(
                         f"{stock} (만원)", 
                         min_value=0, 
@@ -557,16 +544,15 @@ def render_calculator_page(df):
                     temp_total_sum += val
                     amounts_map[stock] = val
                     
-                    # 📊 비중 & 날짜 정보 통합 표시
+                    # 정보 표시 (비중 + 날짜)
                     current_weight = (val / current_total_view * 100)
-                    
                     stock_match = df[df['pure_name'] == stock]
+                    
                     if not stock_match.empty:
                         s_row = stock_match.iloc[0]
                         cal_link = s_row.get('캘린더링크') 
                         ex_date_view = s_row.get('배당락일', '-')
-                        
-                        info_text = f"📊 **{current_weight:.1f}%** | 📅 {ex_date_view}"
+                        info_text = f"📊 **{current_weight:.1f}%** | 🗓️ {ex_date_view}"
                         
                         if cal_link:
                             if len(selected) == 1:
@@ -581,13 +567,12 @@ def render_calculator_page(df):
                         else:
                             st.caption(f"📊 **{current_weight:.1f}%** | 📅 날짜 미정 ({ex_date_view})")
 
-            # 🔄 [데이터 최종 동기화] (오차 방지)
+            # 🔄 최종 동기화 (오차 보정)
             if temp_total_sum * 10000 != st.session_state.total_invest:
                  st.session_state.total_invest = temp_total_sum * 10000
-            
             total_invest = st.session_state.total_invest
 
-            # 🧮 [데이터 역산] (차트/시뮬레이션용 비중 계산)
+            # 🧮 데이터 역산 (비중)
             weights = {}
             if temp_total_sum > 0:
                 for s, amt in amounts_map.items():
@@ -595,18 +580,6 @@ def render_calculator_page(df):
             else:
                 for s in selected: weights[s] = 0
 
-            # (이후 로직은 weights 기반으로 작동하므로 기존 코드와 완벽 호환됨)
-            timeline.display_sidebar_roadmap(df, weights, total_invest)
-            
-            if len(selected) > 1:
-                st.markdown("""
-                    <div style="padding: 12px; border-radius: 8px; background-color: #f0f7ff; border: 1px solid #d0e8ff; margin: 15px 0;">
-                        <small style="color: #0068c9; font-weight: bold;">💡 안내</small><br>
-                        <small style="color: #555;">종목이 많아 가독성을 위해 개별 버튼 대신 배당일만 표시합니다.<br>
-                        모든 일정은 <b>화면 하단의 [📅 캘린더 일괄 등록]</b>에서 한 번에 저장하세요!</small>
-                    </div>
-                """, unsafe_allow_html=True)
-            
             # 테이블 데이터 생성 (all_data)
             for stock in selected:
                 stock_match = df[df['pure_name'] == stock]
@@ -621,6 +594,18 @@ def render_calculator_page(df):
                         '신규상장개월수': s_row.get('신규상장개월수', 0), '현재가': s_row.get('현재가', 0),
                         '환구분': s_row.get('환구분', '-'), '배당락일': s_row.get('배당락일', '-')
                     })
+            
+            # 로드맵 표시 (기존 코드 유지)
+            timeline.display_sidebar_roadmap(df, weights, total_invest)
+            
+            if len(selected) > 1:
+                st.markdown("""
+                    <div style="padding: 12px; border-radius: 8px; background-color: #f0f7ff; border: 1px solid #d0e8ff; margin: 15px 0;">
+                        <small style="color: #0068c9; font-weight: bold;">💡 안내</small><br>
+                        <small style="color: #555;">종목이 많아 가독성을 위해 개별 버튼 대신 배당일만 표시합니다.<br>
+                        모든 일정은 <b>화면 하단의 [📅 캘린더 일괄 등록]</b>에서 한 번에 저장하세요!</small>
+                    </div>
+                """, unsafe_allow_html=True)
 
             total_y_div = sum([(total_invest * (weights[n]/100) * (df[df['pure_name']==n].iloc[0]['연배당률']/100)) for n in selected])
             total_m = total_y_div / 12
@@ -1177,7 +1162,7 @@ def main():
     ui.load_css() 
     
     # 2. 안전 장치 (COPPA)
-    #check_coppa_compliance() 
+    check_coppa_compliance() 
     
     logger.info("🚀 배당팽이 메인 엔진 가동")
     db.cleanup_old_tokens()
