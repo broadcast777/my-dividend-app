@@ -1094,7 +1094,7 @@ def main():
     ui.load_css() 
     
     # 2. 안전 장치 (COPPA)
-    check_coppa_compliance() 
+    #check_coppa_compliance() 
     
     logger.info("🚀 배당팽이 메인 엔진 가동")
     db.cleanup_old_tokens()
@@ -1135,7 +1135,7 @@ def main():
             if st.button("🕵️ AI 로보어드바이저", use_container_width=True, type="primary"):
                 if st.session_state.get("is_logged_in"):
                     st.session_state.ai_modal_open = True
-                    st.session_state.wiz_step = 1
+                    st.session_state.wiz_step = 0
                     st.session_state.wiz_data = {}
                     if "ai_result_cache" in st.session_state:
                         del st.session_state.ai_result_cache
