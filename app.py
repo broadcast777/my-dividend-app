@@ -511,18 +511,17 @@ def render_calculator_page(df):
                         # 0원 상태였다면 N분의 1로 공평하게 시작
                         st.session_state[f"amt_{i}"] = int(new_total // len(selected))
 
-            # 🧮 [상단] 총 투자 자산 (수정 가능!)
-            # 세션에 값이 없으면 초기화
+            # 🧮 [상단] 총 투자 자산 (수정 가능, 전광판 제거됨)
             if "total_invest_input" not in st.session_state:
                 st.session_state.total_invest_input = int(st.session_state.total_invest / 10000)
 
-            # Metric 대신 number_input 사용 (수정 가능하게)
+            # 💡 수정: Metric(전광판) 코드를 삭제하고 입력창만 남김
             col_total.number_input(
                 "💰 총 투자 자산 (만원)", 
                 min_value=0, 
                 step=100, 
-                key="total_invest_input", # 이 키값으로 세션 관리
-                on_change=sync_from_total, # 수정 시 배분 로직 실행
+                key="total_invest_input", 
+                on_change=sync_from_total,
                 help="이 금액을 수정하면 아래 종목들에 비율대로 자동 배분됩니다."
             )
 
@@ -558,7 +557,7 @@ def render_calculator_page(df):
                     temp_total_sum += val
                     amounts_map[stock] = val
                     
-                    # 📊 [NEW] 비중 & 날짜 정보 통합 표시
+                    # 📊 비중 & 날짜 정보 통합 표시
                     current_weight = (val / current_total_view * 100)
                     
                     stock_match = df[df['pure_name'] == stock]
@@ -567,7 +566,6 @@ def render_calculator_page(df):
                         cal_link = s_row.get('캘린더링크') 
                         ex_date_view = s_row.get('배당락일', '-')
                         
-                        # 요청하신 포맷: 비중 + 배당일
                         info_text = f"📊 **{current_weight:.1f}%** | 📅 {ex_date_view}"
                         
                         if cal_link:
