@@ -526,7 +526,7 @@ def render_calculator_page(df):
                 new_total = st.session_state.total_invest_input
                 st.session_state.total_invest = new_total * 10000
                 
-                if not selected: return # 종목 없으면 배분 안 함
+            if not selected: return # 종목 없으면 배분 안 함
 
                 current_amts = [st.session_state.get(f"amt_{i}", 0) for i in range(len(selected))]
                 current_sum = sum(current_amts)
