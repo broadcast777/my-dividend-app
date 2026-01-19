@@ -1,7 +1,7 @@
 """
-프로젝트: 배당 팽이 (Dividend Top) v2.7
+프로젝트: 배당 팽이 (Dividend Top) v2.8
 파일명: app.py
-설명: 모바일 UX 최적화 (Bottom-up 입력 + 단일 종목 캘린더 버튼 부활 + 다중 종목 텍스트 처리)
+설명: 모바일 UX 최적화 (Bottom-up 입력 + 단일/일괄 캘린더 등록 완벽 구현)
 """
 
 import streamlit as st
@@ -505,7 +505,6 @@ def render_calculator_page(df):
                 
                 init_sum += st.session_state[key]
             
-            # 강제 동기화 (화면 그리기 전)
             st.session_state.total_invest_input = init_sum
             st.session_state.total_invest = init_sum * 10000
 
@@ -524,7 +523,6 @@ def render_calculator_page(df):
 
         # 6. 하단 개별 입력 루프
         if selected:
-            # 🚨 [안전한 검사]
             has_foreign_stock = any(df[df['pure_name'] == s_name].iloc[0]['분류'] == '해외' for s_name in selected)
             if has_foreign_stock:
                 st.warning("📢 **잠깐!** 선택하신 종목 중 '해외 상장 ETF'가 포함되어 있습니다. ISA/연금계좌 결과는 참고용으로만 봐주세요.")
@@ -555,31 +553,22 @@ def render_calculator_page(df):
                     if not stock_match.empty:
                         s_row = stock_match.iloc[0]
                         ex_date_view = s_row.get('배당락일', '-')
+                        
+                        # [NEW] 단일/다중 분기 처리
                         info_text = f"**종목 비중 {current_weight:.1f}%**"
                         
                         if ex_date_view and ex_date_view not in ['-', 'nan', 'None']:
                             date_msg = f" | 📅 {ex_date_view}"
                             
-                            # 1개일 때만 구글 캘린더 링크 생성 및 버튼 표시
+                            # 1개일 때: 버튼으로 유도 (즉시 실행)
                             if len(selected) == 1:
-                                # 날짜 파싱 후 링크 생성 (즉석 로직)
-                                target_date = logic.parse_dividend_date(ex_date_view)
-                                if target_date:
-                                    safe_date = target_date - timedelta(days=3)
-                                    while safe_date.weekday() >= 5: safe_date -= timedelta(days=1)
-                                    
-                                    start_str = safe_date.strftime("%Y%m%d")
-                                    end_str = (safe_date + timedelta(days=1)).strftime("%Y%m%d")
-                                    
-                                    base_url = "https://www.google.com/calendar/render?action=TEMPLATE"
-                                    title = urllib.parse.quote(f"💰 [{stock}] 매수 알림 (D-3)")
-                                    details = urllib.parse.quote(f"배당 기준일: {ex_date_view}\n안전하게 오늘 매수하세요!")
-                                    cal_url = f"{base_url}&text={title}&dates={start_str}/{end_str}&details={details}"
-                                    
+                                cal_url = logic.get_google_cal_url(stock, ex_date_view)
+                                if cal_url:
                                     st.caption(f"{info_text}{date_msg}")
                                     st.link_button("📅 구글 캘린더 등록", cal_url, use_container_width=True)
                                 else:
                                     st.caption(f"{info_text}{date_msg}")
+                            # 2개 이상일 때: 텍스트만 보여주고 하단 ICS 유도
                             else:
                                 st.caption(f"{info_text}{date_msg}")
                         else:
@@ -621,7 +610,7 @@ def render_calculator_page(df):
                     <div style="padding: 12px; border-radius: 8px; background-color: #f0f7ff; border: 1px solid #d0e8ff; margin: 15px 0;">
                         <small style="color: #0068c9; font-weight: bold;">💡 안내</small><br>
                         <small style="color: #555;">종목이 많아 가독성을 위해 개별 버튼 대신 배당일만 표시합니다.<br>
-                        모든 일정은 <b>화면 하단의 [📅 캘린더 일괄 등록]</b>에서 한 번에 저장하세요!</small>
+                        모든 일정은 <b>화면 하단의 [📅 배당 일정 등록]</b>에서 한 번에 저장하세요!</small>
                     </div>
                 """, unsafe_allow_html=True)
 
@@ -650,7 +639,8 @@ def render_calculator_page(df):
 
             st.divider()
             ics_data = logic.generate_portfolio_ics(all_data)
-            st.subheader("📅 캘린더 일괄 등록")
+            # [수정 완료] 캘린더 일괄 등록 -> 배당 일정 등록
+            st.subheader("📅 배당 일정 등록")
             col_d1, col_d2 = st.columns([1.5, 1])
             with col_d1:
                 st.caption("매번 버튼을 누르기 귀찮으신가요?")
