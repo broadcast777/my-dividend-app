@@ -451,6 +451,11 @@ def render_calculator_page(df):
         code_col_name = next((c for c in df.columns if '코드' in c), '종목코드')
         name_col_name = next((c for c in df.columns if 'pure' in c or '명' in c), '종목명')
 
+        # -------------------------------------------------------
+        # [수정된 로직] 바코드(Dictionary) 매핑 시스템 도입
+        # -------------------------------------------------------
+        
+        # 1. 라벨 생성 함수 (기존 유지)
         def clean_label(row):
             c = str(row.get(code_col_name, '')).strip()
             if '.' in c: c = c.split('.')[0]
@@ -458,45 +463,39 @@ def render_calculator_page(df):
             n = str(row.get(name_col_name, '')).strip()
             return f"{n} ({c})"
 
-        search_options = sorted(list(set(df.apply(clean_label, axis=1).tolist())))
+        # 2. [핵심] 바코드 사전 생성 (라벨 -> 진짜이름 매핑)
+        # 예: {"TIGER 미국(H) (123456)": "TIGER 미국(H)"}
+        label_to_real_name = {}
+        for _, row in df.iterrows():
+            lbl = clean_label(row)
+            label_to_real_name[lbl] = row['pure_name']
+
+        search_options = sorted(list(label_to_real_name.keys()))
         
-        # 🚨 [수정된 부분] 안전하게 'default' 값을 계산해서 위젯에 다시 넣어줍니다.
-        default_selected_opts = []
+        # 3. 초기 선택값(Default) 세팅
+        # 저장된 진짜 이름(saved_stocks)에 해당하는 라벨을 역추적해서 찾아냅니다.
+        default_selected_labels = []
         if st.session_state.get('selected_stocks'):
             saved_stocks = st.session_state.selected_stocks
-            # session_state에 있는 이름이 search_options에 실제 존재하는지 확인하고,
-            # '이름 (코드)' 형태의 풀 네임을 찾아서 리스트에 담습니다.
-            for s_name in saved_stocks:
-                for opt in search_options:
-                    # 1. '이름 (' 로 시작하는 완벽한 매칭 (예: 삼성전자 (005930))
-                    if opt.startswith(f"{s_name} ("):
-                        default_selected_opts.append(opt)
-                        break
-                    # 2. 이름만 있는 경우 (해외주식 등 예외 처리)
-                    elif s_name == opt.split(' (')[0]:
-                        default_selected_opts.append(opt)
-                        break
+            for label, real_name in label_to_real_name.items():
+                if real_name in saved_stocks:
+                    default_selected_labels.append(label)
 
+        # 4. UI 출력 (사용자는 라벨을 봅니다)
         selected_search = col2.multiselect(
             "📊 종목 선택 (이름 또는 코드로 검색)", 
             options=search_options, 
-            default=default_selected_opts, # 👈 여기가 핵심입니다! (초기값 복구)
+            default=default_selected_labels, 
             help="종목코드(숫자)나 종목명을 입력해 보세요!"
         )
 
-        # 위젯에서 선택된 값들을 1차 파싱
-        raw_selected = [opt.split(' (')[0] if ' (' in opt else opt for opt in selected_search]
+        # 5. [최종 추출] 딕셔너리로 즉시 변환 (Split 사용 X -> 괄호 버그 해결)
+        # 선택된 라벨을 넣으면 사전이 '진짜 이름'을 뱉어냅니다.
+        selected = [label_to_real_name[opt] for opt in selected_search]
         
-        # 🚨 [유령 종목 필터링]
-        # 선택된 이름 중 현재 데이터프레임(df)에 진짜로 존재하는 것만 남깁니다.
-        selected = []
-        for s in raw_selected:
-            if not df[df['pure_name'] == s].empty:
-                selected.append(s)
-        
-        # 필터링된 진짜 리스트를 세션에 저장
+        # 세션 업데이트
         st.session_state.selected_stocks = selected
-
+        # -------------------------------------------------------
         if selected:
             # 🚨 [안전한 검사]
             has_foreign_stock = any(df[df['pure_name'] == s_name].iloc[0]['분류'] == '해외' for s_name in selected)
