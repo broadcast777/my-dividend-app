@@ -487,67 +487,79 @@ def render_calculator_page(df):
             if has_foreign_stock:
                 st.warning("📢 **잠깐!** 선택하신 종목 중 '해외 상장 ETF'가 포함되어 있습니다. ISA/연금계좌 결과는 참고용으로만 봐주세요.")
 
-            # ⚡ [NEW] 실시간 합계 계산 콜백 함수 (반응속도 해결의 핵심!)
-            def recalc_total():
-                # 현재 세션에 있는 모든 amt_ 값들을 싹 긁어모아서 합산
-                new_sum = 0
-                # 만약 종목이 줄어들었을 때 찌꺼기 데이터 방지를 위해 selected 길이만큼만 순회
-                for idx in range(len(st.session_state.selected_stocks)):
-                    key = f"amt_{idx}"
-                    if key in st.session_state:
-                        new_sum += st.session_state[key]
+            # ⚡ [양방향 동기화 콜백 함수] 
+            # 1. 개별 종목 수정 시 -> 총액 자동 합산 (Bottom-up)
+            def sync_from_individual():
+                new_sum = sum([st.session_state.get(f"amt_{i}", 0) for i in range(len(selected))])
                 st.session_state.total_invest = new_sum * 10000
+                st.session_state.total_invest_input = new_sum # 상단 입력창에도 반영
 
-            # 🧮 [전광판] 이제 콜백 덕분에 '입력 즉시' 반영된 값을 보여줍니다.
-            current_total_view = st.session_state.total_invest / 10000
-            
-            # (metric 위치는 col_total 컬럼에 표시)
-            col_total.metric("💰 총 투자 자산", f"{current_total_view:,.0f} 만원")
+            # 2. 총액 수정 시 -> 개별 종목 비례 배분 (Top-down)
+            def sync_from_total():
+                new_total = st.session_state.total_invest_input
+                st.session_state.total_invest = new_total * 10000
+                
+                # 현재 입력된 비율을 유지하면서 배분
+                current_amts = [st.session_state.get(f"amt_{i}", 0) for i in range(len(selected))]
+                current_sum = sum(current_amts)
+                
+                for i in range(len(selected)):
+                    if current_sum > 0:
+                        ratio = current_amts[i] / current_sum
+                        st.session_state[f"amt_{i}"] = int(new_total * ratio)
+                    else:
+                        # 0원 상태였다면 N분의 1로 공평하게 시작
+                        st.session_state[f"amt_{i}"] = int(new_total // len(selected))
 
-            # 💡 [핵심 로직] 금액 기반 입력
+            # 🧮 [상단] 총 투자 자산 (수정 가능!)
+            # 세션에 값이 없으면 초기화
+            if "total_invest_input" not in st.session_state:
+                st.session_state.total_invest_input = int(st.session_state.total_invest / 10000)
+
+            # Metric 대신 number_input 사용 (수정 가능하게)
+            col_total.number_input(
+                "💰 총 투자 자산 (만원)", 
+                min_value=0, 
+                step=100, 
+                key="total_invest_input", # 이 키값으로 세션 관리
+                on_change=sync_from_total, # 수정 시 배분 로직 실행
+                help="이 금액을 수정하면 아래 종목들에 비율대로 자동 배분됩니다."
+            )
+
+            # 💡 [하단] 개별 종목 입력
             temp_total_sum = 0
             amounts_map = {}
             cols_input = st.columns(2)
             
+            # 실시간 비중 표시를 위한 분모 (0원 방지)
+            current_total_view = st.session_state.total_invest_input if st.session_state.total_invest_input > 0 else 1
+            
             for i, stock in enumerate(selected):
                 with cols_input[i % 2]:
-                    # 초기값 세팅 (기존 값 유지 or 1/N 배분)
-                    default_amt = 0
-                    if st.session_state.total_invest > 0:
-                        # 이미 입력된 값이 session_state에 있다면 그 값을 우선시 (중요!)
-                        if f"amt_{i}" in st.session_state:
-                            default_amt = st.session_state[f"amt_{i}"]
+                    # 새로 추가된 종목의 amt_{i}가 없으면 초기값 세팅
+                    if f"amt_{i}" not in st.session_state:
+                        # AI 추천 비중이 있으면 우선 적용, 없으면 1/N
+                        ai_suggested = st.session_state.get('ai_suggested_weights', {})
+                        if stock in ai_suggested and current_total_view > 1:
+                            w = ai_suggested[stock]
+                            init_val = int(current_total_view * (w / 100))
                         else:
-                            # 값이 없으면(새로 추가됨) AI 추천 비중이나 1/N 로직 적용
-                            ai_suggested = st.session_state.get('ai_suggested_weights', {})
-                            if stock in ai_suggested:
-                                w = ai_suggested[stock]
-                                default_amt = int((st.session_state.total_invest / 10000) * (w / 100))
-                            else:
-                                # 0원 방지용 1/N (총액이 0이면 0)
-                                if current_total_view > 0:
-                                    default_amt = int(current_total_view // len(selected))
-                                else:
-                                    default_amt = 0
-                    
-                    # 💰 금액 입력창 (on_change 추가됨!)
+                            init_val = int(st.session_state.total_invest_input // len(selected))
+                        st.session_state[f"amt_{i}"] = init_val
+
+                    # 💰 금액 입력창 (on_change=sync_from_individual 필수)
                     val = st.number_input(
                         f"{stock} (만원)", 
                         min_value=0, 
-                        value=default_amt, 
                         step=10, 
-                        key=f"amt_{i}",
-                        on_change=recalc_total  # 👈 여기가 마법의 키! 입력하자마자 재계산
+                        key=f"amt_{i}", 
+                        on_change=sync_from_individual
                     )
-                    
-                    # 루프 내 합산 (화면 표시용 비중 계산을 위해 필요)
                     temp_total_sum += val
                     amounts_map[stock] = val
                     
-                    # 📊 비중 및 날짜 정보 통합 표시
-                    # (여기서 temp_total_sum은 현재 루프까지의 합이므로, 전체 비중을 보려면 current_total_view 사용)
-                    real_total_for_calc = current_total_view if current_total_view > 0 else 1
-                    current_weight = (val / real_total_for_calc * 100)
+                    # 📊 [NEW] 비중 & 날짜 정보 통합 표시
+                    current_weight = (val / current_total_view * 100)
                     
                     stock_match = df[df['pure_name'] == stock]
                     if not stock_match.empty:
@@ -555,7 +567,8 @@ def render_calculator_page(df):
                         cal_link = s_row.get('캘린더링크') 
                         ex_date_view = s_row.get('배당락일', '-')
                         
-                        info_text = f"📊 **{current_weight:.1f}%** 담김 | 🗓️ {ex_date_view}"
+                        # 요청하신 포맷: 비중 + 배당일
+                        info_text = f"📊 **{current_weight:.1f}%** | 📅 {ex_date_view}"
                         
                         if cal_link:
                             if len(selected) == 1:
@@ -564,20 +577,19 @@ def render_calculator_page(df):
                                     st.link_button(btn_label, cal_link, use_container_width=True)
                                 else:
                                     if st.button(btn_label, key=f"btn_cal_{i}", use_container_width=True):
-                                        st.toast("🔒 로그인 후 캘린더에 등록할 수 있습니다!", icon="🔒")
+                                        st.toast("🔒 로그인 필요", icon="🔒")
                             else:
                                 st.caption(info_text)
                         else:
                             st.caption(f"📊 **{current_weight:.1f}%** | 📅 날짜 미정 ({ex_date_view})")
 
-            # 🔄 [데이터 동기화] (혹시 모를 오차 방지용 최종 업데이트)
-            # 콜백이 이미 처리했지만, 루프가 끝난 시점의 값으로 한 번 더 확실하게
+            # 🔄 [데이터 최종 동기화] (오차 방지)
             if temp_total_sum * 10000 != st.session_state.total_invest:
                  st.session_state.total_invest = temp_total_sum * 10000
             
             total_invest = st.session_state.total_invest
 
-            # 🧮 [데이터 역산]
+            # 🧮 [데이터 역산] (차트/시뮬레이션용 비중 계산)
             weights = {}
             if temp_total_sum > 0:
                 for s, amt in amounts_map.items():
