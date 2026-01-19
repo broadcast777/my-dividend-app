@@ -534,6 +534,7 @@ def render_calculator_page(df):
             current_total_view = st.session_state.total_invest_input if st.session_state.total_invest_input > 0 else 1
             
             for i, stock in enumerate(selected):
+                
                 with cols_input[i % 2]:
                     # 개별 금액 입력창
                     val = st.number_input(
@@ -565,7 +566,14 @@ def render_calculator_page(df):
                                 cal_url = logic.get_google_cal_url(stock, ex_date_view)
                                 if cal_url:
                                     st.caption(f"{info_text}{date_msg}")
-                                    st.link_button("📅 배당 일정 등록", cal_url, use_container_width=True)
+                                    
+                                    # 🔒 [보안 패치 완료] 로그인 상태 체크
+                                    if st.session_state.get("is_logged_in", False):
+                                        st.link_button("📅 구글 캘린더 등록", cal_url, use_container_width=True)
+                                    else:
+                                        # 비로그인 시: 가짜 버튼 보여주고 누르면 경고
+                                        if st.button("📅 구글 캘린더 등록", key=f"btn_cal_indi_{i}", use_container_width=True):
+                                            st.toast("🔒 로그인 회원만 캘린더에 등록할 수 있습니다!", icon="🔒")
                                 else:
                                     st.caption(f"{info_text}{date_msg}")
                             # 2개 이상일 때: 텍스트만 보여주고 하단 ICS 유도
@@ -573,6 +581,8 @@ def render_calculator_page(df):
                                 st.caption(f"{info_text}{date_msg}")
                         else:
                             st.caption(f"{info_text} | 📅 날짜 미정")
+                
+
 
             # 🔄 최종 동기화 (오차 보정)
             if temp_total_sum * 10000 != st.session_state.total_invest:
