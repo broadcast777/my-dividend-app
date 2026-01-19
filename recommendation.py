@@ -1,7 +1,7 @@
 """
-프로젝트: 배당 팽이 (Dividend Top) v2.1
+프로젝트: 배당 팽이 (Dividend Top) v2.2
 파일명: recommendation.py
-설명: AI 로보어드바이저 엔진 (Q4 원픽 종목 지정 기능 추가 및 비중 자동 보정 적용)
+설명: AI 로보어드바이저 엔진 (Q4 가변형 원픽: 4종목 선택 시 최애 2개까지 허용)
 """
 
 import streamlit as st
@@ -52,16 +52,16 @@ def get_smart_recommendation(df, user_choices):
     wanted_count = user_choices.get('count', 3)
     timing = user_choices.get('timing', 'mix')
     
-    # [Q4 추가] 사용자 원픽 데이터 추출
-    focus_label = user_choices.get('focus_stock_label')
-    focus_weight = user_choices.get('focus_weight', 0)
-    focus_real_name = None
+    # [Q4 수정] 다중 원픽 데이터 추출
+    focus_labels = user_choices.get('focus_stock_labels', [])
+    total_focus_weight = user_choices.get('focus_weight', 0)
+    focus_real_names = []
     
-    if focus_label and focus_label != "선택 안 함":
-        # 검색 라벨에서 진짜 이름 찾기
-        match = df[df['검색라벨'] == focus_label]
-        if not match.empty:
-            focus_real_name = match.iloc[0]['pure_name']
+    if focus_labels:
+        for lbl in focus_labels:
+            match = df[df['검색라벨'] == lbl]
+            if not match.empty:
+                focus_real_names.append(match.iloc[0]['pure_name'])
 
     pool = df[df['연배당률'] > 0].copy()
     pool['temp_date_str'] = pool['배당락일'].fillna('').astype(str)
@@ -116,14 +116,15 @@ def get_smart_recommendation(df, user_choices):
     picked_core_names = []
     
     # -----------------------------------------------------
-    # [NEW] 원픽 종목 0순위 알박기
+    # [NEW] 원픽 종목들(1~2개) 0순위 알박기
     # -----------------------------------------------------
-    if focus_real_name:
-        final_picks.append(focus_real_name)
-        picked_core_names.append(_get_core_index_name(focus_real_name))
-        # AI가 뽑아야 할 남은 개수 차감
-        wanted_count = max(1, wanted_count - 1)
+    for name in focus_real_names:
+        final_picks.append(name)
+        picked_core_names.append(_get_core_index_name(name))
 
+    # AI가 채워야 할 나머지 개수 (전체 - 원픽 수)
+    # 안전장치: 혹시라도 원픽이 전체 개수랑 같으면 AI가 0개 되는데, UI에서 막았으므로 여기선 pass
+    
     cc_count = 0
     cash_count = 0 
     bond_count = 0 
@@ -180,11 +181,9 @@ def get_smart_recommendation(df, user_choices):
                     break
 
     # (B) 나머지 채우기 (쿼터 적용)
-    # 원픽 때문에 wanted_count가 줄어든 상태로 루프 돔
-    total_needed = wanted_count + (1 if focus_real_name else 0) # 전체 목표 개수 복구
-
+    # 원픽이 이미 final_picks에 들어있으므로, len 체크하며 채움
     for idx, row in filtered_pool.iterrows():
-        if len(final_picks) >= total_needed: break
+        if len(final_picks) >= wanted_count: break
         if row['pure_name'] in final_picks: continue
             
         core_name = _get_core_index_name(row['pure_name'])
@@ -211,10 +210,10 @@ def get_smart_recommendation(df, user_choices):
         if is_reit: reit_count += 1
         
     # (C) [안전장치] 쿼터 때문에 모자라면 제한 풀고 채우기
-    if len(final_picks) < total_needed:
+    if len(final_picks) < wanted_count:
         remain_pool = filtered_pool[~filtered_pool['pure_name'].isin(final_picks)].copy()
         if not remain_pool.empty:
-            needed = total_needed - len(final_picks)
+            needed = wanted_count - len(final_picks)
             final_picks.extend(remain_pool.head(needed)['pure_name'].tolist())
 
     selected_pool = filtered_pool[filtered_pool['pure_name'].isin(final_picks)].copy()
@@ -222,38 +221,39 @@ def get_smart_recommendation(df, user_choices):
     # 4. 비중 최적화 (Min 10% ~ Max 50%)
     if selected_pool.empty: return "종목 선정 실패", [], {}
 
-    # 원픽 종목과 나머지 종목 분리
-    ai_picks = [p for p in final_picks if p != focus_real_name]
     pick_weights = {}
-
+    
     # [비중 계산 로직 분기]
-    if focus_real_name:
-        # 1. 원픽 종목 비중 고정
-        pick_weights[focus_real_name] = focus_weight
-        remaining_quota = 100 - focus_weight
+    if focus_real_names:
+        # 1. 원픽 종목들에게 설정 비중을 균등하게 배분
+        # 예: 총 40%고 원픽이 2개면 -> 각각 20%씩
+        weight_per_focus = total_focus_weight // len(focus_real_names)
+        for name in focus_real_names:
+            pick_weights[name] = weight_per_focus
+            
+        remaining_quota = 100 - (weight_per_focus * len(focus_real_names))
         
-        # 2. 나머지 AI 종목 비중 계산 (남은 파이 안에서 나눠먹기)
+        # 2. 나머지 AI 종목 비중 계산
+        ai_picks = [p for p in final_picks if p not in focus_real_names]
+        
         if ai_picks:
             ai_pool = selected_pool[selected_pool['pure_name'].isin(ai_picks)].copy()
             if not ai_pool.empty:
                 yields = ai_pool['연배당률'].values
                 scores = 1 / (abs(yields - target_yield) + 1.0)
                 
-                # 남은 쿼터(예: 70%) 내에서 비율대로 나눔
+                # 남은 쿼터 내에서 비율대로 나눔
                 w_temp = (scores / scores.sum()) * remaining_quota
                 w_temp = w_temp.round().astype(int)
                 
-                # 잔차 보정 (합계가 remaining_quota가 되도록)
+                # 잔차 보정
                 diff = remaining_quota - w_temp.sum()
-                max_idx = w_temp.argmax()
-                w_temp[max_idx] += diff
+                if len(w_temp) > 0:
+                    max_idx = w_temp.argmax()
+                    w_temp[max_idx] += diff
                 
                 for name, w in zip(ai_pool['pure_name'], w_temp):
                     pick_weights[name] = w
-        else:
-            # 혹시 원픽만 남았으면 몰빵 (근데 slider max가 50이라 이런 일은 거의 없음)
-            pick_weights[focus_real_name] = 100 
-
     else:
         # 기존 로직 (원픽 없음)
         selected_pool['sort_cat'] = pd.Categorical(selected_pool['pure_name'], categories=final_picks, ordered=True)
@@ -365,27 +365,34 @@ def show_wizard():
             st.rerun()
 
     # ------------------------------------------------------------------
-    # [Q4 신설] 원픽 종목 선택 단계
+    # [Q4 신설] 원픽 종목 선택 단계 (가변형 멀티 선택 적용)
     # ------------------------------------------------------------------
     elif step == 4:
-        st.subheader("🎯 나만의 '원픽' 종목 (선택사항)")
-        st.info("💡 포트폴리오에 **무조건 포함하고 싶은 종목**이 하나쯤 있으신가요?")
-        st.caption("정확한 결과를 위해 꼭 선택하지 않으셔도 무방합니다. 없으시면 바로 **[결과 보기]**를 눌러주세요.")
+        wanted_cnt = st.session_state.wiz_data.get('count', 3)
+        # 종목 4개 선택 시에만 2개 허용, 그 외엔 1개
+        max_fav = 2 if wanted_cnt == 4 else 1
+        
+        st.subheader("🎯 나만의 최애 종목 (선택사항)")
+        st.info(f"💡 전체 {wanted_cnt}개 종목 중 최대 **{max_fav}개**까지 직접 지정할 수 있습니다.")
+        st.caption("선택하지 않으셔도 AI가 최적의 종목을 알아서 찾아드립니다.")
 
-        # 1. 종목 선택 (검색라벨 기준)
+        # 1. 종목 선택 (검색라벨 기준, 멀티셀렉트)
         stock_list = sorted(df['검색라벨'].tolist())
-        selected_one = st.selectbox("원픽 종목을 선택하세요", ["선택 안 함"] + stock_list, index=0)
+        selected_favs = st.multiselect("최애 종목 선택", options=stock_list, max_selections=max_fav)
 
-        if selected_one != "선택 안 함":
-            # 2. 비중 설정 (최대 50% 제한)
-            focus_weight = st.slider(f"[{selected_one.split('(')[0]}] 비중 설정 (%)", 5, 50, 20, step=5)
-            st.success(f"✅ 전체 자산의 **{focus_weight}%**를 이 종목에 고정하고, 남은 **{100-focus_weight}%**를 AI가 최적으로 설계합니다.")
+        if selected_favs:
+            # 2. 비중 설정 (합계 기준, 최대 50% 제한)
+            focus_weight = st.slider(f"💰 선택 종목 합계 비중 (%)", 5, 50, 20, step=5)
+            if len(selected_favs) > 1:
+                st.success(f"✅ 선택하신 {len(selected_favs)}개 종목에 각각 **{focus_weight // len(selected_favs)}%**씩, 총 **{focus_weight}%**를 배치합니다.")
+            else:
+                st.success(f"✅ 선택하신 종목에 **{focus_weight}%**를 고정 배치합니다.")
             
             # 세션에 데이터 저장
-            st.session_state.wiz_data['focus_stock_label'] = selected_one
+            st.session_state.wiz_data['focus_stock_labels'] = selected_favs
             st.session_state.wiz_data['focus_weight'] = focus_weight
         else:
-            st.session_state.wiz_data['focus_stock_label'] = None
+            st.session_state.wiz_data['focus_stock_labels'] = []
             st.session_state.wiz_data['focus_weight'] = 0
 
         st.write("")
