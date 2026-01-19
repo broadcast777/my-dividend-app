@@ -1,7 +1,7 @@
 """
-프로젝트: 배당 팽이 (Dividend Top) v2.4
+프로젝트: 배당 팽이 (Dividend Top) v2.5
 파일명: app.py
-설명: 모바일 UX 최적화 (상단 통합 헤더 신설 및 시뮬레이션 섹션 최우선 배치)
+설명: 모바일 UX 최적화 (금액 기반 Bottom-up 입력 방식 전면 적용)
 """
 
 import streamlit as st
@@ -429,11 +429,13 @@ def render_calculator_page(df):
     
     # 여기서부터 시뮬레이션 섹션이 바로 시작됩니다. (expander default=True)
     with st.expander("🧮 나만의 배당 포트폴리오 시뮬레이션", expanded=True):
-        col1, col2 = st.columns([1, 2])
-        current_invest_val = int(st.session_state.total_invest / 10000)
-        invest_input = col1.number_input("💰 총 투자 금액 (만원)", min_value=100, value=current_invest_val, step=100)
-        st.session_state.total_invest = invest_input * 10000
-        total_invest = st.session_state.total_invest 
+        # 💡 [핵심 UX 개선] Top-down 입력 제거 -> Bottom-up 실시간 전광판 배치
+        col_total, col_select = st.columns([1, 2])
+        
+        with col_total:
+            # 합계 금액 실시간 표시 (Metric)
+            current_total_view = st.session_state.total_invest / 10000
+            st.metric("💰 총 투자 자산", f"{current_total_view:,.0f} 만원")
 
         code_col_name = next((c for c in df.columns if '코드' in c), '종목코드')
         name_col_name = next((c for c in df.columns if 'pure' in c or '명' in c), '종목명')
@@ -467,7 +469,7 @@ def render_calculator_page(df):
                     default_selected_labels.append(label)
 
         # 4. UI 출력
-        selected_search = col2.multiselect(
+        selected_search = col_select.multiselect(
             "📊 종목 선택 (이름 또는 코드로 검색)", 
             options=search_options, 
             default=default_selected_labels, 
@@ -486,28 +488,34 @@ def render_calculator_page(df):
             if has_foreign_stock:
                 st.warning("📢 **잠깐!** 선택하신 종목 중 '해외 상장 ETF'가 포함되어 있습니다. ISA/연금계좌 결과는 참고용으로만 봐주세요.")
 
-            weights = {}
-            remaining = 100
-            cols_w = st.columns(2)
+            # 💡 [핵심 로직 변경] 금액 기반 입력 및 실시간 합산
+            temp_total_sum = 0
+            amounts_map = {}
+            cols_input = st.columns(2)
             
             for i, stock in enumerate(selected):
-                with cols_w[i % 2]:
-                    safe_rem = max(0, remaining)
-                    ai_suggested = st.session_state.get('ai_suggested_weights', {})
-                    default_w = ai_suggested.get(stock, 100 // len(selected))
+                with cols_input[i % 2]:
+                    # AI 추천이나 기존 저장된 비중(%)이 있으면 금액으로 환산해주는 UX (UX 연결성)
+                    default_amt = 0
+                    if st.session_state.total_invest > 0:
+                        ai_suggested = st.session_state.get('ai_suggested_weights', {})
+                        if stock in ai_suggested:
+                            # 기존: 비중(%) -> 변경: 금액(만원)으로 자동 변환 초기값 세팅
+                            w = ai_suggested[stock]
+                            default_amt = int((st.session_state.total_invest / 10000) * (w / 100))
                     
-                    if i < len(selected) - 1:
-                        val = st.number_input(f"{stock} (%)", min_value=0, max_value=safe_rem, value=min(safe_rem, default_w), step=5, key=f"s_{i}")
-                        weights[stock] = val
-                        remaining -= val
-                        amt = total_invest * (val / 100)
-                    else:
-                        st.info(f"{stock}: {safe_rem}% 자동 적용")
-                        weights[stock] = safe_rem
-                        amt = total_invest * (safe_rem / 100)
+                    # 💰 금액 입력창 (Bottom-up 방식)
+                    val = st.number_input(
+                        f"{stock} (만원)", 
+                        min_value=0, 
+                        value=default_amt, 
+                        step=10, 
+                        key=f"amt_{i}"
+                    )
+                    temp_total_sum += val
+                    amounts_map[stock] = val
                     
-                    st.caption(f"💰 투자금: **{amt/10000:,.0f}만원**")
-                    
+                    # 캘린더 등 부가 정보 표시 (기존 로직 유지)
                     stock_match = df[df['pure_name'] == stock]
                     if not stock_match.empty:
                         s_row = stock_match.iloc[0]
@@ -526,17 +534,20 @@ def render_calculator_page(df):
                                 st.caption(f"🗓️ 배당락일: **{ex_date_view}**")
                         else:
                             st.caption(f"📅 날짜 미정 ({ex_date_view})")
-                    
-                    if not stock_match.empty:
-                        s_row = stock_match.iloc[0]
-                        all_data.append({
-                            '종목': stock, '비중': weights[stock], '자산유형': s_row['자산유형'], '투자금액_만원': amt / 10000,
-                            '종목명': stock, '코드': s_row.get('코드', ''), '분류': s_row.get('분류', '국내'),
-                            '연배당률': s_row.get('연배당률', 0), '금융링크': s_row.get('금융링크', '#'),
-                            '신규상장개월수': s_row.get('신규상장개월수', 0), '현재가': s_row.get('현재가', 0),
-                            '환구분': s_row.get('환구분', '-'), '배당락일': s_row.get('배당락일', '-')
-                        })
             
+            # 🔄 [데이터 동기화] 입력된 총합을 전역 변수에 반영
+            st.session_state.total_invest = temp_total_sum * 10000
+            total_invest = st.session_state.total_invest
+
+            # 🧮 [데이터 역산] 금액 -> 비중(%) 자동 변환 (기존 차트 엔진 호환용)
+            weights = {}
+            if temp_total_sum > 0:
+                for s, amt in amounts_map.items():
+                    weights[s] = (amt / temp_total_sum) * 100
+            else:
+                for s in selected: weights[s] = 0
+
+            # (이후 로직은 weights 기반으로 작동하므로 기존 코드와 완벽 호환됨)
             timeline.display_sidebar_roadmap(df, weights, total_invest)
             
             if len(selected) > 1:
@@ -548,6 +559,21 @@ def render_calculator_page(df):
                     </div>
                 """, unsafe_allow_html=True)
             
+            # 테이블 데이터 생성 (all_data)
+            for stock in selected:
+                stock_match = df[df['pure_name'] == stock]
+                if not stock_match.empty:
+                    s_row = stock_match.iloc[0]
+                    w = weights.get(stock, 0)
+                    amt = total_invest * (w / 100)
+                    all_data.append({
+                        '종목': stock, '비중': w, '자산유형': s_row['자산유형'], '투자금액_만원': amt / 10000,
+                        '종목명': stock, '코드': s_row.get('코드', ''), '분류': s_row.get('분류', '국내'),
+                        '연배당률': s_row.get('연배당률', 0), '금융링크': s_row.get('금융링크', '#'),
+                        '신규상장개월수': s_row.get('신규상장개월수', 0), '현재가': s_row.get('현재가', 0),
+                        '환구분': s_row.get('환구분', '-'), '배당락일': s_row.get('배당락일', '-')
+                    })
+
             total_y_div = sum([(total_invest * (weights[n]/100) * (df[df['pure_name']==n].iloc[0]['연배당률']/100)) for n in selected])
             total_m = total_y_div / 12
             avg_y = sum([(df[df['pure_name']==n].iloc[0]['연배당률'] * (weights[n]/100)) for n in selected])
@@ -996,15 +1022,24 @@ def render_roadmap_page(df):
         st.warning("⚠️ **'💰 배당금 계산기'** 메뉴에서 종목을 먼저 선택해 주세요!")
         st.stop()
     
+    # [수정] Bottom-up 호환 로직 (키값 amt_i 확인)
     weights = {}
-    remaining = 100
+    temp_total = 0
+    amounts = {}
+    
+    # 1. 입력된 금액 수집
     for i, stock in enumerate(selected):
-        if i < len(selected) - 1:
-            val = st.session_state.get(f"s_{i}", 100 // len(selected))
-            weights[stock] = val
-            remaining -= val
-        else:
-            weights[stock] = max(0, remaining)
+        val = st.session_state.get(f"amt_{i}", 0)
+        temp_total += val
+        amounts[stock] = val
+        
+    # 2. 비중 계산 (Zero Division 방지)
+    if temp_total > 0:
+        for stock in selected:
+            weights[stock] = (amounts[stock] / temp_total) * 100
+    else:
+        # 금액이 하나도 없으면 균등 비중 등으로 처리하거나 0으로
+        for stock in selected: weights[stock] = 0
 
     timeline.render_toss_style_heatmap(df, weights, st.session_state.total_invest)
 
@@ -1135,7 +1170,7 @@ def main():
             if st.button("🕵️ AI 로보어드바이저", use_container_width=True, type="primary"):
                 if st.session_state.get("is_logged_in"):
                     st.session_state.ai_modal_open = True
-                    st.session_state.wiz_step = 0
+                    st.session_state.wiz_step = 0 # <--- 0으로 수정된 핵심 포인트!
                     st.session_state.wiz_data = {}
                     if "ai_result_cache" in st.session_state:
                         del st.session_state.ai_result_cache
