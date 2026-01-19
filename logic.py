@@ -1,7 +1,7 @@
 """
-프로젝트: 배당 팽이 (Dividend Top) v2.7
+프로젝트: 배당 팽이 (Dividend Top) v2.8
 파일명: logic.py
-설명: 금융 API 연동, 데이터 크롤링, 캘린더 파일 생성 등 핵심 비즈니스 로직 (통합본)
+설명: 금융 API 연동, 데이터 크롤링, 캘린더 파일 생성 (구글 캘린더 링크 버그 수정 완료)
 """
 
 import streamlit as st
@@ -18,7 +18,7 @@ import requests
 import base64
 import json
 from github import Github
-from logger import logger  # 로깅 시스템 연동
+from logger import logger
 
 # -----------------------------------------------------------
 # [SECTION 1] 날짜 및 스케줄링 헬퍼 (공통 도구)
@@ -26,7 +26,7 @@ from logger import logger  # 로깅 시스템 연동
 
 def parse_dividend_date(date_str):
     """
-    다양한 형태의 날짜 문자열('매월 15일', '2024-01-01')을 컴퓨터가 이해하는 날짜로 변환합니다.
+    다양한 형태의 날짜 문자열을 datetime.date 객체로 변환합니다.
     """
     s = str(date_str).strip()
     today = datetime.date.today()
@@ -42,25 +42,27 @@ def parse_dividend_date(date_str):
     if day_match and ('매월' in s or '일' in s):
         try:
             day = int(day_match.group(1))
-            # 날짜가 오늘보다 지났으면 다음달, 아니면 이번달 (단순 예시)
+            # 이번 달 배당락일 추정
             target_date = datetime.date(today.year, today.month, day)
+            
+            # 이미 지났으면 다음 달로
             if target_date < today:
                 next_month = today.month + 1 if today.month < 12 else 1
                 year = today.year if today.month < 12 else today.year + 1
                 try:
                     return datetime.date(year, next_month, day)
-                except ValueError: # 2월 30일 같은 경우 말일로
+                except ValueError: # 2월 30일 같은 경우 말일로 처리
                     last_day = calendar.monthrange(year, next_month)[1]
                     return datetime.date(year, next_month, last_day)
             return target_date
         except ValueError:
             pass
             
-    return None # 변환 실패 시
+    return None 
 
 def generate_portfolio_ics(portfolio_data):
     """
-    [NEW] 선택된 포트폴리오를 '내 캘린더에 한번에 넣기' 위한 파일(.ics)을 생성합니다.
+    [일괄 등록용] 포트폴리오 전체 일정을 .ics 파일 포맷으로 생성
     """
     ics_content = [
         "BEGIN:VCALENDAR",
@@ -77,10 +79,8 @@ def generate_portfolio_ics(portfolio_data):
         name = item.get('종목', '배당주')
         date_info = str(item.get('배당락일', '-'))
         
-        # 날짜 파싱 시도
         day_match = re.search(r'(\d+)', date_info)
         
-        # '매월 XX일' 패턴이면 향후 12개월치 생성
         if day_match and ('매월' in date_info or '일' in date_info):
             day = int(day_match.group(1))
             for i in range(12):
@@ -89,15 +89,11 @@ def generate_portfolio_ics(portfolio_data):
                 month = (month - 1) % 12 + 1
                 
                 try:
-                    # 해당 월의 말일 체크
                     last_day = calendar.monthrange(year, month)[1]
                     safe_day = min(day, last_day)
-                    
                     event_date = datetime.date(year, month, safe_day)
                     
-                    # D-3 매수 알림일 계산
                     buy_date = event_date - datetime.timedelta(days=3)
-                    # 주말이면 금요일로 당김
                     while buy_date.weekday() >= 5:
                         buy_date -= datetime.timedelta(days=1)
                         
@@ -117,6 +113,38 @@ def generate_portfolio_ics(portfolio_data):
 
     ics_content.append("END:VCALENDAR")
     return "\n".join(ics_content)
+
+def get_google_cal_url(stock_name, date_str):
+    """
+    [단일 등록용] 구글 캘린더 일정 등록 URL 생성 (D-3일 기준)
+    """
+    try:
+        # 1. 날짜 파싱
+        target_date = parse_dividend_date(date_str)
+        if not target_date: return None
+        
+        # 2. 안전 매수일 계산 (D-3)
+        if isinstance(target_date, datetime.date):
+            safe_buy_date = target_date - datetime.timedelta(days=3) # [수정됨] 변수명 통일 (safe_buy_date)
+        else:
+            return None
+
+        # 주말이면 금요일로 당김
+        while safe_buy_date.weekday() >= 5:
+            safe_buy_date -= datetime.timedelta(days=1)
+
+        # 3. URL 생성
+        start_str = safe_buy_date.strftime("%Y%m%d")
+        end_str = (safe_buy_date + datetime.timedelta(days=1)).strftime("%Y%m%d")
+        
+        base_url = "https://www.google.com/calendar/render?action=TEMPLATE"
+        title = quote(f"💰 [{stock_name}] 매수 알림 (D-3)")
+        details = quote(f"배당 기준일: {date_str}\n안전하게 오늘 매수하세요!\n(배당팽이 알림)")
+        
+        return f"{base_url}&text={title}&dates={start_str}/{end_str}&details={details}"
+    except Exception as e:
+        logger.error(f"Calendar URL Error: {e}")
+        return None
 
 
 # -----------------------------------------------------------
@@ -261,7 +289,7 @@ def load_and_process_data(df_raw, is_admin=False):
                 '분류': category,
                 '유형': final_type, 
                 '자산유형': auto_asset_type,
-                '캘린더링크': None, # ICS 파일 생성으로 대체됨
+                '캘린더링크': None, 
                 'pure_name': name.replace("🚫 ", "").replace(" (필터대상)", ""), 
                 '신규상장개월수': months,
                 '배당기록': str(row.get('배당기록', '')),
@@ -321,7 +349,6 @@ def save_to_github(df):
 # -----------------------------------------------------------
 
 def fetch_dividend_yield_hybrid(code, category):
-    """한투 API, 야후 파이낸스, 네이버 금융을 교차 활용하여 실시간 배당수익률 조회"""
     code = str(code).strip()
     
     # [국내 주식 조회 로직]
@@ -431,39 +458,3 @@ def update_dividend_rolling(current_history_str, new_dividend_amount):
     new_annual_total = sum(history)
     new_history_str = "|".join(map(str, history))
     return new_annual_total, new_history_str
-
-# -----------------------------------------------------------
-# [SECTION 7] (추가) 개별 구글 캘린더 링크 생성기
-# -----------------------------------------------------------
-
-def get_google_cal_url(stock_name, date_str):
-    """
-    단일 종목에 대한 구글 캘린더 일정 등록 URL을 생성합니다. (D-3일 기준)
-    """
-    try:
-        # 1. 날짜 파싱 (기존 함수 재활용)
-        target_date = parse_dividend_date(date_str)
-        if not target_date: return None
-        
-        # 2. 안전 매수일 계산 (D-3)
-        # datetime.date 객체인지 확인
-        if isinstance(target_date, datetime.date):
-            safe_date = target_date - datetime.timedelta(days=3)
-        else:
-            return None
-
-        # 주말이면 금요일로 당김
-        while safe_buy_date.weekday() >= 5:
-            safe_buy_date -= datetime.timedelta(days=1)
-
-        # 3. URL 생성
-        start_str = safe_date.strftime("%Y%m%d")
-        end_str = (safe_date + datetime.timedelta(days=1)).strftime("%Y%m%d")
-        
-        base_url = "https://www.google.com/calendar/render?action=TEMPLATE"
-        title = quote(f"💰 [{stock_name}] 매수 알림 (D-3)")
-        details = quote(f"배당 기준일: {date_str}\n안전하게 오늘 매수하세요!")
-        
-        return f"{base_url}&text={title}&dates={start_str}/{end_str}&details={details}"
-    except:
-        return None
