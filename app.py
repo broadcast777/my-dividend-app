@@ -1,7 +1,7 @@
 """
-프로젝트: 배당 팽이 (Dividend Top) v2.6
+프로젝트: 배당 팽이 (Dividend Top) v2.7
 파일명: app.py
-설명: 모바일 UX 최적화 (Bottom-up 입력 방식 보완 - 들여쓰기 오류 수정 완료)
+설명: 모바일 UX 최적화 (Bottom-up 입력 + 단일 종목 캘린더 버튼 부활 + 다중 종목 텍스트 처리)
 """
 
 import streamlit as st
@@ -418,23 +418,17 @@ def confirm_overwrite_dialog(final_name, user_id, user_email, save_data, existin
 def render_calculator_page(df):
     """💰 배당금 계산기 페이지 렌더링"""
     
-    # 📌 [수정됨] AI 로보어드바이저 안내 섹션을 여기서 제거했습니다.
-    # (이미 최상단 헤더로 이동했으므로 중복 노출 방지)
-    
     if st.session_state.get("ai_modal_open", False):
         recommendation.show_wizard()
     
     # 6-2. 포트폴리오 시뮬레이션
     all_data = []
     
-    # 여기서부터 시뮬레이션 섹션이 바로 시작됩니다. (expander default=True)
     with st.expander("🧮 나만의 배당 포트폴리오 시뮬레이션", expanded=True):
         # 1. 레이아웃 잡기
         col_total, col_select = st.columns([1, 2])
 
-        # -------------------------------------------------------
         # [바코드(Dictionary) 매핑 시스템]
-        # -------------------------------------------------------
         code_col_name = next((c for c in df.columns if '코드' in c), '종목코드')
         name_col_name = next((c for c in df.columns if 'pure' in c or '명' in c), '종목명')
 
@@ -491,37 +485,27 @@ def render_calculator_page(df):
                     ratio = current_amts[i] / current_sum
                     st.session_state[f"amt_{i}"] = int(new_total * ratio)
                 else:
-                    # 0원 상태였다면 N분의 1로 공평하게 시작
                     st.session_state[f"amt_{i}"] = int(new_total // len(selected))
 
-        # 🚨 [핵심 수정] 4. 선행 초기화 (Pre-Initialization)
-        # 화면을 그리기 전에, 선택된 종목에 값이 없으면 '미리' 채워넣고 합계를 구합니다.
-        # 이 과정이 있어야 화면에 뜰 때 이미 계산된 정확한 합계가 나옵니다.
+        # 4. 선행 초기화 (Pre-Initialization)
         if selected:
             init_sum = 0
-            # 현재 총액 가져오기 (없으면 기본값)
             current_base_total = st.session_state.get("total_invest_input", 3000)
             
             for i, stock in enumerate(selected):
                 key = f"amt_{i}"
                 if key not in st.session_state:
-                    # 값이 없는 새 종목 발견! -> 초기값 계산 및 주입
                     ai_suggested = st.session_state.get('ai_suggested_weights', {})
                     if stock in ai_suggested and current_base_total > 0:
                         w = ai_suggested[stock]
                         init_val = int(current_base_total * (w / 100))
                     else:
-                        # 1/N 배분 (기존 총액 기준)
-                        if len(selected) > 0:
-                            init_val = int(current_base_total // len(selected))
-                        else:
-                            init_val = 0
+                        init_val = int(current_base_total // len(selected)) if len(selected) > 0 else 0
                     st.session_state[key] = init_val
                 
-                # 존재하는 값 합산
                 init_sum += st.session_state[key]
             
-            # 🔄 [강제 동기화] 미리 계산된 합계를 세션에 반영
+            # 강제 동기화 (화면 그리기 전)
             st.session_state.total_invest_input = init_sum
             st.session_state.total_invest = init_sum * 10000
 
@@ -538,7 +522,7 @@ def render_calculator_page(df):
             help="이 금액을 수정하면 아래 종목들에 비율대로 자동 배분됩니다."
         )
 
-        # 6. 하단 개별 입력 루프 (이제 값은 이미 세팅되어 있음)
+        # 6. 하단 개별 입력 루프
         if selected:
             # 🚨 [안전한 검사]
             has_foreign_stock = any(df[df['pure_name'] == s_name].iloc[0]['분류'] == '해외' for s_name in selected)
@@ -549,13 +533,10 @@ def render_calculator_page(df):
             amounts_map = {}
             cols_input = st.columns(2)
             
-            # 실시간 비중 표시를 위한 분모 (방금 위에서 계산된 최신 합계 사용)
             current_total_view = st.session_state.total_invest_input if st.session_state.total_invest_input > 0 else 1
             
             for i, stock in enumerate(selected):
                 with cols_input[i % 2]:
-                    # (이미 위에서 초기화했으므로 바로 사용)
-                    
                     # 개별 금액 입력창
                     val = st.number_input(
                         f"{stock} (만원)", 
@@ -567,28 +548,42 @@ def render_calculator_page(df):
                     temp_total_sum += val
                     amounts_map[stock] = val
                     
-                    # 정보 표시 (비중 + 날짜)
+                    # 📊 비중 & 날짜 정보 & 개별 알림 버튼
                     current_weight = (val / current_total_view * 100)
                     stock_match = df[df['pure_name'] == stock]
                     
                     if not stock_match.empty:
                         s_row = stock_match.iloc[0]
-                        cal_link = s_row.get('캘린더링크') 
                         ex_date_view = s_row.get('배당락일', '-')
-                        info_text = f"**종목 비중 {current_weight:.1f}%** | 🗓️ {ex_date_view}"
+                        info_text = f"**종목 비중 {current_weight:.1f}%**"
                         
-                        if cal_link:
+                        if ex_date_view and ex_date_view not in ['-', 'nan', 'None']:
+                            date_msg = f" | 📅 {ex_date_view}"
+                            
+                            # 1개일 때만 구글 캘린더 링크 생성 및 버튼 표시
                             if len(selected) == 1:
-                                btn_label = f"📅 {ex_date_view} (D-3 알림)"
-                                if st.session_state.get("is_logged_in", False):
-                                    st.link_button(btn_label, cal_link, use_container_width=True)
+                                # 날짜 파싱 후 링크 생성 (즉석 로직)
+                                target_date = logic.parse_dividend_date(ex_date_view)
+                                if target_date:
+                                    safe_date = target_date - timedelta(days=3)
+                                    while safe_date.weekday() >= 5: safe_date -= timedelta(days=1)
+                                    
+                                    start_str = safe_date.strftime("%Y%m%d")
+                                    end_str = (safe_date + timedelta(days=1)).strftime("%Y%m%d")
+                                    
+                                    base_url = "https://www.google.com/calendar/render?action=TEMPLATE"
+                                    title = urllib.parse.quote(f"💰 [{stock}] 매수 알림 (D-3)")
+                                    details = urllib.parse.quote(f"배당 기준일: {ex_date_view}\n안전하게 오늘 매수하세요!")
+                                    cal_url = f"{base_url}&text={title}&dates={start_str}/{end_str}&details={details}"
+                                    
+                                    st.caption(f"{info_text}{date_msg}")
+                                    st.link_button("📅 구글 캘린더 등록", cal_url, use_container_width=True)
                                 else:
-                                    if st.button(btn_label, key=f"btn_cal_{i}", use_container_width=True):
-                                        st.toast("🔒 로그인 필요", icon="🔒")
+                                    st.caption(f"{info_text}{date_msg}")
                             else:
-                                st.caption(info_text)
+                                st.caption(f"{info_text}{date_msg}")
                         else:
-                            st.caption(f"**종목 비중 {current_weight:.1f}%** | 📅 날짜 미정 ({ex_date_view})")
+                            st.caption(f"{info_text} | 📅 날짜 미정")
 
             # 🔄 최종 동기화 (오차 보정)
             if temp_total_sum * 10000 != st.session_state.total_invest:
