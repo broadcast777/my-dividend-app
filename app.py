@@ -748,13 +748,33 @@ def render_calculator_page(df):
             st.info("""📢 **찾으시는 종목이 안 보이나요?**\n왼쪽 상단(모바일은 ↖ 메뉴 버튼)의 '📂 메뉴'를 누르고 '📃 전체 종목 리스트'를 선택하시면 전체 배당주를 확인하실 수 있습니다.""")
             if total_y_div > 20000000:
                 st.warning(f"🚨 **주의:** 연간 예상 배당금이 **{total_y_div/10000:,.0f}만원**입니다. 금융소득종합과세 대상에 해당될 수 있습니다.")
+    # ... (위쪽 코드는 그대로 유지) ...
 
     df_ana = pd.DataFrame(all_data)
     if not df_ana.empty:
         st.write("")
-        tab_analysis, tab_simulation, tab_goal = st.tabs(["💎 자산 구성 분석", "💰 10년 뒤 자산 미리보기", "🎯 목표 배당 달성"])
+        st.write("")
         
-        with tab_analysis:
+        # 💡 [CSS 위장형 탭] style.css에 의해 버튼처럼 보입니다.
+        # key를 부여하면 숫자를 바꿔도 내가 보던 탭이 세션에 고정됩니다.
+        tab_options = ["💎 자산 구성 분석", "💰 10년 뒤 자산 미리보기", "🎯 목표 배당 달성"]
+        
+        selected_tab = st.radio(
+            "탭 선택", # 라벨은 CSS로 숨겨집니다.
+            options=tab_options,
+            horizontal=True,
+            key="calc_tab_nav", # 👈 상태를 유지하는 열쇠!
+            label_visibility="collapsed"
+        )
+        
+        # 탭 아래에 얇은 선 하나 추가해서 경계 구분
+        st.markdown('<div style="margin-top: -15px; border-bottom: 1px solid #eee;"></div>', unsafe_allow_html=True)
+        st.write("")
+
+        # ------------------------------------------------
+        # 1. 자산 구성 분석 섹션
+        # ------------------------------------------------
+        if selected_tab == "💎 자산 구성 분석":
             chart_col, table_col = st.columns([1.2, 1])
             def classify_currency(row):
                 try:
@@ -787,7 +807,10 @@ def render_calculator_page(df):
             ui.render_custom_table(df_ana)
             st.error("""**⚠️ 포트폴리오 분석 시 유의사항**\n1. 과거의 데이터를 기반으로 한 단순 결과값이며, 실제 투자 수익을 보장하지 않습니다.\n2. '달러 자산' 비율 실제 환노출 여부와 다를 수 있습니다 투자 전 확인이 필요합니다.\n3. 실제 배당금 지급일과 금액은 운용사의 사정에 따라 변경될 수 있습니다.""")
 
-        with tab_simulation:
+        # ------------------------------------------------
+        # 2. 10년 뒤 자산 미리보기 섹션
+        # ------------------------------------------------
+        elif selected_tab == "💰 10년 뒤 자산 미리보기":
             start_money = total_invest
             is_over_100m = start_money > 100000000
             st.info(f"📊 상단에서 설정한 **초기 자산 {start_money/10000:,.0f}만원**으로 시뮬레이션을 시작합니다.")
@@ -957,7 +980,11 @@ def render_calculator_page(df):
             if annual_div_income > 20000000: st.warning(f"🚨 **주의:** {years_sim}년 뒤 연간 배당금이 2,000만원을 초과하여 금융소득종합과세 대상이 될 수 있습니다.")
             st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**\n1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 단순 결과입니다.
                     2. 재투자가 매월 이루어진다는 가정하에 계산된 복리 결과입니다.""")
-        with tab_goal:
+
+        # ------------------------------------------------
+        # 3. 목표 배당 달성 섹션
+        # ------------------------------------------------
+        elif selected_tab == "🎯 목표 배당 달성":
             st.subheader("🎯 목표 배당금 역산기 (은퇴 시뮬레이터)")
             st.caption("내가 원하는 월급을 받기 위해 얼마를 더 모아야 할지 정밀하게 계산합니다.")
 
@@ -992,7 +1019,7 @@ def render_calculator_page(df):
                 )
                 st.caption(f"보유: {total_invest/10000:,.0f}만원")
 
-            # [계산 로직] - 물가상승(inflation) 제거됨
+            # [계산 로직]
             current_bal_goal = total_invest if use_start_money else 0
             actual_start_bal = current_bal_goal 
             
@@ -1018,7 +1045,7 @@ def render_calculator_page(df):
 
             st.markdown("---")
 
-            # [결과 표시] - 진행률 및 초록색 차감 표시
+            # [결과 표시]
             gap_money = max(0, required_asset_at_time - actual_start_bal)
             progress_rate = (actual_start_bal / required_asset_at_time) * 100 if required_asset_at_time > 0 else 0
 
@@ -1061,6 +1088,12 @@ def render_calculator_page(df):
                     1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 단순 결과입니다.
                     2. 재투자가 매월 이루어진다는 가정하에 계산된 복리 결과입니다.
                     """)
+
+
+
+
+    
+ 
 
             
 def render_roadmap_page(df):
