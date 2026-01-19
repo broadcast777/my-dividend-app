@@ -1,7 +1,7 @@
 """
 프로젝트: 배당 팽이 (Dividend Top) v2.9
 파일명: app.py
-설명: 모바일 UX 최적화 + UnboundLocalError 변수 범위 완벽 해결
+설명: 모바일 UX 최적화 + UnboundLocalError 해결 + Dialog 중첩 에러(StreamlitAPIException) 해결
 """
 
 import streamlit as st
@@ -414,8 +414,9 @@ def confirm_overwrite_dialog(final_name, user_id, user_email, save_data, existin
     if col_ov2.button("아니요, 취소", use_container_width=True):
         st.rerun()
 
-# [NEW] AI 로보어드바이저 팝업 (Rerun 방지용)
-@st.dialog("🕵️ AI 로보어드바이저", width="large")
+# [수정] AI 로보어드바이저 팝업 호출 함수
+# [중요] 여기 있던 @st.dialog 데코레이터를 제거했습니다.
+# recommendation.show_wizard() 내부에서 이미 다이얼로그를 띄우고 있기 때문에 중복을 방지합니다.
 def open_ai_wizard_dialog():
     recommendation.show_wizard()
 
