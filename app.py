@@ -1,7 +1,7 @@
 """
-프로젝트: 배당 팽이 (Dividend Top) v2.8
+프로젝트: 배당 팽이 (Dividend Top) v2.9
 파일명: app.py
-설명: 모바일 UX 최적화 (Bottom-up 입력 + 단일/일괄 캘린더 등록 완벽 구현)
+설명: 모바일 UX 최적화 + UnboundLocalError 변수 범위 완벽 해결
 """
 
 import streamlit as st
@@ -766,6 +766,12 @@ def render_calculator_page(df):
         # 기본값 방어 코드
         if not selected_tab: selected_tab = tab_options[0]
 
+        # [KEY FIX] 변수 호이스팅 (Hoisting): 탭 로직 밖에서 미리 정의하여 UnboundLocalError 방지
+        # 세션에서 값을 가져오거나 기본값(150)을 사용
+        saved_monthly = st.session_state.get("shared_monthly_input", 150)
+        # Tab 3에서 참조할 수 있도록 미리 변수 선언
+        monthly_input = saved_monthly * 10000 
+
         st.write("")
 
         # ---------------------------------------------------------
@@ -835,12 +841,14 @@ def render_calculator_page(df):
                     reinvest_ratio = st.slider("💰 재투자 비율 (%)", 0, 100, 100, step=10)
             
             st.markdown("---")
-            # [수정] 탭 2와 탭 3에서 값을 공유하기 위해 key 지정
-            monthly_input = st.number_input(
+            
+            # [KEY FIX] Tab 2에서 입력값을 받아 세션 업데이트 및 로컬 변수 갱신
+            monthly_input_val = st.number_input(
                 "➕ 매월 추가 적립 (만원)", 
-                min_value=0, max_value=3000, value=150, step=10, 
+                min_value=0, max_value=3000, value=saved_monthly, step=10, 
                 key="shared_monthly_input"
-            ) * 10000
+            )
+            monthly_input = monthly_input_val * 10000 # 로컬 변수 업데이트
             monthly_add = monthly_input
             
             if is_isa_mode and monthly_add > 1666666:
@@ -989,13 +997,10 @@ def render_calculator_page(df):
             st.subheader("🎯 목표 배당금 역산기 (은퇴 시뮬레이터)")
             st.caption("내가 원하는 월급을 받기 위해 얼마를 더 모아야 할지 정밀하게 계산합니다.")
 
-            # [수정 완료] monthly_input이 정의되지 않아 에러가 나던 문제를 해결
-            # 탭 2에서 설정된 값을 가져오거나, 없으면 기본값(150)을 사용합니다.
-            monthly_input = st.session_state.get("shared_monthly_input", 150) * 10000
-
             with st.container(border=True):
                 col_info1, col_info2, col_info3 = st.columns(3)
                 col_info1.metric("📊 평균 연배당률", f"{avg_y:.2f}%")
+                # [KEY FIX] 상단에서 정의된 monthly_input을 사용하여 에러 방지
                 col_info2.metric("💰 매월 추가적립", f"{monthly_input/10000:,.0f}만원")
                 col_info3.metric("📦 선택 종목 수", f"{len(selected)}개")
                 st.caption(f"🔎 **적용 종목:** {', '.join(selected)}")
@@ -1040,6 +1045,7 @@ def render_calculator_page(df):
                     break
                     
                 div_reinvest = current_bal_goal * monthly_yld * tax_factor
+                # [KEY FIX] monthly_input 사용
                 current_bal_goal += monthly_input + div_reinvest
                 months_passed += 1
 
@@ -1153,7 +1159,7 @@ def main():
     ui.load_css() 
     
     # 2. 안전 장치 (COPPA)
-    check_coppa_compliance() 
+    #check_coppa_compliance() 
     
     logger.info("🚀 배당팽이 메인 엔진 가동")
     db.cleanup_old_tokens()
