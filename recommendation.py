@@ -1,7 +1,7 @@
 """
-프로젝트: 배당 팽이 (Dividend Top) v2.7
+프로젝트: 배당 팽이 (Dividend Top) v2.9
 파일명: recommendation.py
-설명: AI 로보어드바이저 엔진 (표현 중립화 및 리스크 고지 강화)
+설명: AI 로보어드바이저 엔진 (안정형 리스크 필터링 + 투자 유의사항/수정 가이드 복구 완료)
 업데이트: 2026.01.19
 """
 
@@ -103,7 +103,6 @@ def get_smart_recommendation(df, user_choices):
     first_try = pool[mask_timing].copy()
     
     # 필터링 결과가 부족할 경우 전체 데이터로 확장 (Relaxed Stage)
-    # [수정] filter_stage 변수는 이제 내부 로직용으로만 쓰고, 최종 타이틀 결정에는 쓰지 않습니다.
     if not first_try.empty and len(first_try) >= wanted_count:
         filtered_pool = first_try
     else:
@@ -112,20 +111,31 @@ def get_smart_recommendation(df, user_choices):
     if filtered_pool.empty: return "조건에 맞는 종목 없음", [], {}
 
     # 5. 종목별 점수 산정 (목표 배당률 근접도 + 스타일 가중치)
-    def check_is_cash(row):
-        cash_keywords = ['shv', 'bil', 'sgov', 'cd', 'kofr', '파킹', '단기채', '초단기']
-        is_bond = (row.get('유형') == '채권')
-        text = (str(row['종목명']) + " " + str(row.get('pure_name', ''))).lower()
-        return is_bond and any(k in text for k in cash_keywords)
-
     filtered_pool['yield_diff'] = abs(filtered_pool['연배당률'] - target_yield)
     filtered_pool['score'] = 100 - (filtered_pool['yield_diff'] * 10)
     
     for idx, row in filtered_pool.iterrows():
         cat = row.get('유형', '')
-        if style == 'growth' and cat == '배당성장': filtered_pool.at[idx, 'score'] += 50 
-        elif style == 'safe' and cat in ['채권', '혼합']: filtered_pool.at[idx, 'score'] += 100
-        elif style == 'flow': filtered_pool.at[idx, 'score'] += (row['연배당률'] * 2)
+        name_full = (str(row.get('종목명', '')) + " " + str(row.get('pure_name', ''))).lower()
+        
+        # [리스크 필터] 하이일드/액티브 리스크 탐지 키워드
+        is_risky_bond = any(k in name_full for k in ['하이일드', 'high yield', 'active', '액티브'])
+
+        if style == 'growth':
+            if cat == '배당성장': filtered_pool.at[idx, 'score'] += 50 
+        
+        elif style == 'safe':
+            # 안정형일 때 채권/혼합은 우대하되, 리스크 있는 채권은 강력 페널티
+            if cat in ['채권', '혼합']: 
+                if is_risky_bond:
+                    filtered_pool.at[idx, 'score'] -= 150 # 🚨 하이일드 강력 억제 (추천 제외급)
+                else:
+                    filtered_pool.at[idx, 'score'] += 100 # 국채/우량채 우대
+            elif is_risky_bond:
+                 filtered_pool.at[idx, 'score'] -= 100
+
+        elif style == 'flow':
+            filtered_pool.at[idx, 'score'] += (row['연배당률'] * 2)
 
     filtered_pool['score'] += [random.uniform(0, 15) for _ in range(len(filtered_pool))]
     filtered_pool = filtered_pool.sort_values('score', ascending=False)
@@ -160,11 +170,12 @@ def get_smart_recommendation(df, user_choices):
         
         if ai_picks: 
             ai_pool = selected_pool[selected_pool['pure_name'].isin(ai_picks)].copy()
-            scores = 1 / (abs(ai_pool['연배당률'].values - target_yield) + 1.0)
-            w_temp = ((scores / scores.sum()) * remaining_quota).round().astype(int)
-            diff = remaining_quota - w_temp.sum()
-            if len(w_temp) > 0: w_temp[w_temp.argmax()] += diff
-            for name, w in zip(ai_pool['pure_name'], w_temp): pick_weights[name] = w
+            if not ai_pool.empty:
+                scores = 1 / (abs(ai_pool['연배당률'].values - target_yield) + 1.0)
+                w_temp = ((scores / scores.sum()) * remaining_quota).round().astype(int)
+                diff = remaining_quota - w_temp.sum()
+                if len(w_temp) > 0: w_temp[w_temp.argmax()] += diff
+                for name, w in zip(ai_pool['pure_name'], w_temp): pick_weights[name] = w
         else: 
             if focus_real_names: pick_weights[focus_real_names[-1]] += remaining_quota
     else:
@@ -174,7 +185,7 @@ def get_smart_recommendation(df, user_choices):
         weights[weights.argmax()] += (100 - weights.sum())
         pick_weights = dict(zip(selected_pool['pure_name'], weights))
     
-    # 8. [핵심 수정] 실제 결과물(final_picks) 기반 날짜 유연성 검증
+    # 8. 실제 결과물(final_picks) 기반 날짜 유연성 검증
     is_timing_compromised = False
     if timing != 'mix':
         for pick in final_picks:
@@ -227,7 +238,7 @@ def show_wizard():
     if step == 0:
         st.subheader("나만의 배당 조합, 막막하신가요?")
         st.write("투자 성향과 목표에 맞춰 배당팽이가 최적의 포트폴리오를 설계해 드립니다. ✨")
-        st.caption("배당 팽이 알고리즘이 70여 개의 종목을 실시간으로 분석합니다.")
+        st.caption("AI 알고리즘이 30여 개의 종목을 실시간으로 분석합니다.")
         st.markdown("---")
         st.write("🌍 **어떤 종목을 포함할까요?**")
         col_kor, col_all = st.columns(2)
@@ -250,25 +261,30 @@ def show_wizard():
         st.button("🔚 월말/월초 (월급날 전후)", use_container_width=True, on_click=go_next_step, args=(3, 'timing', 'end'))
         st.button("🔄 상관없음 (섞어서 2주마다 받기)", use_container_width=True, on_click=go_next_step, args=(3, 'timing', 'mix'))
 
-    # [Step 3] 목표 수치 및 종목 개수 설정 (경고 문구 복구됨)
+    # [Step 3] 목표 수치 및 종목 개수 설정
     elif step == 3:
         st.subheader("Q3. 목표와 규모를 정해주세요")
         target = st.slider("💰 목표 연배당률 (%)", 3.0, 20.0, 7.0, 0.5)
         count = st.slider("📊 구성 종목 개수", 2, 4, 3)
         
         current_style = st.session_state.wiz_data.get('style')
+        
+        # [NEW] 스타일별 맞춤형 조언 및 경고
         if current_style == 'safe':
-            st.info("🛡️ **안정 추구:** 변동성이 낮은 채권 위주로 구성되나, 원금 손실 가능성은 여전히 존재합니다.")
+            st.info("🛡️ **안정 추구:** 변동성이 낮은 국채/우량채 위주로 구성합니다.")
+            st.warning("⚠️ **주의:** 채권형 ETF라도 금리 변동에 따라 원금 손실 가능성은 존재합니다.")
             if target > 5.0:
-                st.warning(f"⚠️ **수익률 제한:** 안전 자산 비중이 높아 목표({target}%) 달성이 어려울 수 있습니다. 더 높은 수익을 원하신다면 아래 **[계산기]**에서 **리츠나 고배당 상품을 직접 추가**하여 보완해 보세요.")
+                st.caption("💡 안정형에서 5% 이상 수익을 내려면 리츠나 혼합형 상품이 일부 포함될 수 있습니다.")
+                
         elif current_style == 'growth':
-            st.info("📈 **성장 집중:** 당장의 배당금보다 미래 주가 상승을 위한 종목이 의무 포함됩니다.")
+            st.info("📈 **성장 집중:** 당장의 배당금보다 미래 주가 상승(S&P500, 나스닥 등)을 위한 종목이 포함됩니다.")
             if target >= 7.0:
-                st.warning(f"⚠️ **배당률 괴리:** 성장주 비중으로 인해 실제 배당률이 목표보다 낮을 수 있습니다. 당장의 현금흐름이 더 중요하다면 아래 화면에서 **성장주 일부를 고배당 ETF로 직접 교체**해 보세요.")
-        else:
-            st.info("💰 **현금 흐름:** 매월 들어오는 월 배당금 극대화에 집중합니다.")
-            if target >= 8.0:
-                st.warning(f"⚠️ **고배당 집중:** 목표 달성을 위해 리스크가 큰 커버드콜 비중이 높게 설정되었습니다. 특정 종목이 불안하시다면 아래 **[계산기]**에서 **안정적인 배당성장주로 직접 비중을 옮겨** 균형을 맞추실 수 있습니다.")
+                st.warning("⚠️ **주의:** 성장주 위주로는 고배당(7%+) 달성이 어렵습니다. 실제 결과가 목표보다 낮을 수 있습니다.")
+                
+        else: # flow (현금흐름)
+            st.info("💰 **현금 흐름:** 커버드콜 등 월 배당금이 많이 나오는 종목에 집중합니다.")
+            if target >= 9.0:
+                st.warning("⚠️ **고위험 경고:** 목표 배당률이 매우 높습니다. 원금 하락 위험이 있는 고배당 커버드콜 비중이 높아질 수 있습니다.")
 
         if st.button("🚀 다음 단계로 (3/4)", type="primary", use_container_width=True):
             st.session_state.wiz_data['target_yield'] = target
@@ -282,7 +298,6 @@ def show_wizard():
         st.subheader("🎯 나만의 최애 종목 (선택사항)")
         st.info(f"💡 전체 {wanted_cnt}개 종목 중 최대 **{max_fav}개**까지 직접 지정할 수 있습니다.")
         
-        # 해외 종목 필터링 반영
         inc_foreign = st.session_state.wiz_data.get('include_foreign', True)
         stock_list = sorted(df['검색라벨'].tolist()) if inc_foreign else sorted(df[df['분류'] == '국내']['검색라벨'].tolist())
 
@@ -323,7 +338,7 @@ def show_wizard():
         # 블로그 최신글 연동
         blog_title, blog_url = _get_latest_blog_info()
         
-        # [수정됨] 표현을 중립적으로 변경
+        # [표현 수정] 중립적인 표현 사용
         share_text = f"🐌 [AI 분석 포트폴리오]\n\n📌 컨셉: {title}\n"
         total_avg_yld = 0
 
@@ -342,6 +357,17 @@ def show_wizard():
         with st.expander("📲 친구에게 공유하거나 카톡에 저장하기", expanded=False):
             st.code(share_text, language="text")
             st.info("💡 우측 상단 복사 아이콘을 눌러 카톡에 붙여넣으세요!")
+
+        # -----------------------------------------------------------
+        # [NEW] 필수 투자 유의사항 및 수정 가이드 (복구 완료)
+        # -----------------------------------------------------------
+        st.write("")
+        st.warning("""⚠️ **투자 유의사항 (필독)**
+        1. 본 결과는 매수/매도 추천이 아니며, 과거 데이터를 기반으로 한 단순 시뮬레이션입니다.
+        2. 배당률 및 지급일정은 시장 상황과 운용사 정책에 따라 언제든 변동될 수 있습니다.
+        3. 과거의 수익이 미래의 수익을 보장하지 않으므로, 모든 투자의 책임은 본인에게 있습니다.""")
+        
+        st.info("💡 **팁:** AI 제안 결과는 단순 참고용입니다. **[이대로 담기]**를 누르신 후, 아래 **[💰 배당금 계산기]**에서 각 유형별 종목을 직접 교체하거나 비중을 자유롭게 수정하실 수 있습니다.")
 
         st.divider()
         c1, c2 = st.columns(2)
