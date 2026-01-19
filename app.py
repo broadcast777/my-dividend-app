@@ -514,6 +514,45 @@ def render_calculator_page(df):
             if has_foreign_stock:
                 st.warning("📢 **잠깐!** 선택하신 종목 중 '해외 상장 ETF'가 포함되어 있습니다. ISA/연금계좌 결과는 참고용으로만 봐주세요.")
 
+            # ⚡ [양방향 동기화 콜백 함수] 
+            # 1. 개별 종목 수정 시 -> 총액 자동 합산 (Bottom-up)
+            def sync_from_individual():
+                new_sum = sum([st.session_state.get(f"amt_{i}", 0) for i in range(len(selected))])
+                st.session_state.total_invest = new_sum * 10000
+                st.session_state.total_invest_input = new_sum 
+
+            # 2. 총액 수정 시 -> 개별 종목 비례 배분 (Top-down)
+            def sync_from_total():
+                new_total = st.session_state.total_invest_input
+                st.session_state.total_invest = new_total * 10000
+                
+                if not selected: return # 종목 없으면 배분 안 함
+
+                current_amts = [st.session_state.get(f"amt_{i}", 0) for i in range(len(selected))]
+                current_sum = sum(current_amts)
+                
+                for i in range(len(selected)):
+                    if current_sum > 0:
+                        ratio = current_amts[i] / current_sum
+                        st.session_state[f"amt_{i}"] = int(new_total * ratio)
+                    else:
+                        # 0원 상태였다면 N분의 1로 공평하게 시작
+                        st.session_state[f"amt_{i}"] = int(new_total // len(selected))
+
+            # 🧮 [상단] 총 투자 자산 (수정 가능)
+            if "total_invest_input" not in st.session_state:
+                st.session_state.total_invest_input = int(st.session_state.total_invest / 10000)
+
+            col_total.number_input(
+                "💰 총 투자 자산 (만원)", 
+                min_value=0, 
+                step=100, 
+                key="total_invest_input", 
+                on_change=sync_from_total,
+                help="이 금액을 수정하면 아래 종목들에 비율대로 자동 배분됩니다."
+            )
+
+            # 💡 [하단] 개별 종목 입력
             temp_total_sum = 0
             amounts_map = {}
             cols_input = st.columns(2)
@@ -552,7 +591,9 @@ def render_calculator_page(df):
                         s_row = stock_match.iloc[0]
                         cal_link = s_row.get('캘린더링크') 
                         ex_date_view = s_row.get('배당락일', '-')
-                        info_text = f"📊 **{current_weight:.1f}%** | 🗓️ {ex_date_view}"
+                        
+                        # [요청 반영] 이모지 대신 "종목 비중" 한글 텍스트 사용
+                        info_text = f"**종목 비중 {current_weight:.1f}%** | 🗓️ {ex_date_view}"
                         
                         if cal_link:
                             if len(selected) == 1:
@@ -565,7 +606,7 @@ def render_calculator_page(df):
                             else:
                                 st.caption(info_text)
                         else:
-                            st.caption(f"📊 **{current_weight:.1f}%** | 📅 날짜 미정 ({ex_date_view})")
+                            st.caption(f"**종목 비중 {current_weight:.1f}%** | 📅 날짜 미정 ({ex_date_view})")
 
             # 🔄 최종 동기화 (오차 보정)
             if temp_total_sum * 10000 != st.session_state.total_invest:
