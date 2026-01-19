@@ -1,7 +1,7 @@
 """
-프로젝트: 배당 팽이 (Dividend Top) v2.0.2
+프로젝트: 배당 팽이 (Dividend Top) v2.1
 파일명: recommendation.py
-설명: AI 로보어드바이저 엔진 (최소 2개 ~ 최대 4개 종목 집중 전략 적용)
+설명: AI 로보어드바이저 엔진 (Q4 원픽 종목 지정 기능 추가 및 비중 자동 보정 적용)
 """
 
 import streamlit as st
@@ -52,6 +52,17 @@ def get_smart_recommendation(df, user_choices):
     wanted_count = user_choices.get('count', 3)
     timing = user_choices.get('timing', 'mix')
     
+    # [Q4 추가] 사용자 원픽 데이터 추출
+    focus_label = user_choices.get('focus_stock_label')
+    focus_weight = user_choices.get('focus_weight', 0)
+    focus_real_name = None
+    
+    if focus_label and focus_label != "선택 안 함":
+        # 검색 라벨에서 진짜 이름 찾기
+        match = df[df['검색라벨'] == focus_label]
+        if not match.empty:
+            focus_real_name = match.iloc[0]['pure_name']
+
     pool = df[df['연배당률'] > 0].copy()
     pool['temp_date_str'] = pool['배당락일'].fillna('').astype(str)
     
@@ -104,6 +115,15 @@ def get_smart_recommendation(df, user_choices):
     final_picks = []
     picked_core_names = []
     
+    # -----------------------------------------------------
+    # [NEW] 원픽 종목 0순위 알박기
+    # -----------------------------------------------------
+    if focus_real_name:
+        final_picks.append(focus_real_name)
+        picked_core_names.append(_get_core_index_name(focus_real_name))
+        # AI가 뽑아야 할 남은 개수 차감
+        wanted_count = max(1, wanted_count - 1)
+
     cc_count = 0
     cash_count = 0 
     bond_count = 0 
@@ -124,15 +144,18 @@ def get_smart_recommendation(df, user_choices):
     elif style == 'growth':
         MAX_REIT = 2             # 성장형은 리츠 2개까지
     
-    # (A) 의무 선발
+    # (A) 의무 선발 (원픽이 없을 때만 작동하거나, 원픽과 겹치지 않게)
     if style == 'safe':
         safe_candidates = filtered_pool[filtered_pool['유형'] == '채권']
         if not safe_candidates.empty:
-            best_safe = safe_candidates.iloc[0]
-            final_picks.append(best_safe['pure_name'])
-            picked_core_names.append(_get_core_index_name(best_safe['pure_name']))
-            if check_is_cash(best_safe): cash_count += 1
-            else: bond_count += 1
+            # 상위 후보 중 이미 뽑힌(원픽) 것 제외
+            for _, cand in safe_candidates.iterrows():
+                if cand['pure_name'] not in final_picks:
+                    final_picks.append(cand['pure_name'])
+                    picked_core_names.append(_get_core_index_name(cand['pure_name']))
+                    if check_is_cash(cand): cash_count += 1
+                    else: bond_count += 1
+                    break # 1개만 의무
             
         growth_candidates = filtered_pool[filtered_pool['유형'] == '배당성장']
         if growth_candidates.empty:
@@ -150,13 +173,18 @@ def get_smart_recommendation(df, user_choices):
     elif style == 'growth':
         growth_candidates = filtered_pool[filtered_pool['유형'] == '배당성장']
         if not growth_candidates.empty:
-            best_growth = growth_candidates.iloc[0]
-            final_picks.append(best_growth['pure_name'])
-            picked_core_names.append(_get_core_index_name(best_growth['pure_name']))
+            for _, cand in growth_candidates.iterrows():
+                if cand['pure_name'] not in final_picks:
+                    final_picks.append(cand['pure_name'])
+                    picked_core_names.append(_get_core_index_name(cand['pure_name']))
+                    break
 
     # (B) 나머지 채우기 (쿼터 적용)
+    # 원픽 때문에 wanted_count가 줄어든 상태로 루프 돔
+    total_needed = wanted_count + (1 if focus_real_name else 0) # 전체 목표 개수 복구
+
     for idx, row in filtered_pool.iterrows():
-        if len(final_picks) >= wanted_count: break
+        if len(final_picks) >= total_needed: break
         if row['pure_name'] in final_picks: continue
             
         core_name = _get_core_index_name(row['pure_name'])
@@ -183,10 +211,10 @@ def get_smart_recommendation(df, user_choices):
         if is_reit: reit_count += 1
         
     # (C) [안전장치] 쿼터 때문에 모자라면 제한 풀고 채우기
-    if len(final_picks) < wanted_count:
+    if len(final_picks) < total_needed:
         remain_pool = filtered_pool[~filtered_pool['pure_name'].isin(final_picks)].copy()
         if not remain_pool.empty:
-            needed = wanted_count - len(final_picks)
+            needed = total_needed - len(final_picks)
             final_picks.extend(remain_pool.head(needed)['pure_name'].tolist())
 
     selected_pool = filtered_pool[filtered_pool['pure_name'].isin(final_picks)].copy()
@@ -194,26 +222,60 @@ def get_smart_recommendation(df, user_choices):
     # 4. 비중 최적화 (Min 10% ~ Max 50%)
     if selected_pool.empty: return "종목 선정 실패", [], {}
 
-    selected_pool['sort_cat'] = pd.Categorical(selected_pool['pure_name'], categories=final_picks, ordered=True)
-    selected_pool = selected_pool.sort_values('sort_cat')
+    # 원픽 종목과 나머지 종목 분리
+    ai_picks = [p for p in final_picks if p != focus_real_name]
+    pick_weights = {}
 
-    yields = selected_pool['연배당률'].values
-    scores = 1 / (abs(yields - target_yield) + 1.0)
-    weights = (scores / scores.sum()) * 100
-    
-    MAX_CAP = 50.0
-    MIN_FLOOR = 10.0
-    
-    for _ in range(3):
-        weights = weights.clip(MIN_FLOOR, MAX_CAP)
-        weights = (weights / weights.sum()) * 100
-    
-    weights = weights.round().astype(int)
-    diff = 100 - weights.sum()
-    max_idx = weights.argmax()
-    weights[max_idx] += diff
-    
-    pick_weights = dict(zip(selected_pool['pure_name'], weights))
+    # [비중 계산 로직 분기]
+    if focus_real_name:
+        # 1. 원픽 종목 비중 고정
+        pick_weights[focus_real_name] = focus_weight
+        remaining_quota = 100 - focus_weight
+        
+        # 2. 나머지 AI 종목 비중 계산 (남은 파이 안에서 나눠먹기)
+        if ai_picks:
+            ai_pool = selected_pool[selected_pool['pure_name'].isin(ai_picks)].copy()
+            if not ai_pool.empty:
+                yields = ai_pool['연배당률'].values
+                scores = 1 / (abs(yields - target_yield) + 1.0)
+                
+                # 남은 쿼터(예: 70%) 내에서 비율대로 나눔
+                w_temp = (scores / scores.sum()) * remaining_quota
+                w_temp = w_temp.round().astype(int)
+                
+                # 잔차 보정 (합계가 remaining_quota가 되도록)
+                diff = remaining_quota - w_temp.sum()
+                max_idx = w_temp.argmax()
+                w_temp[max_idx] += diff
+                
+                for name, w in zip(ai_pool['pure_name'], w_temp):
+                    pick_weights[name] = w
+        else:
+            # 혹시 원픽만 남았으면 몰빵 (근데 slider max가 50이라 이런 일은 거의 없음)
+            pick_weights[focus_real_name] = 100 
+
+    else:
+        # 기존 로직 (원픽 없음)
+        selected_pool['sort_cat'] = pd.Categorical(selected_pool['pure_name'], categories=final_picks, ordered=True)
+        selected_pool = selected_pool.sort_values('sort_cat')
+
+        yields = selected_pool['연배당률'].values
+        scores = 1 / (abs(yields - target_yield) + 1.0)
+        weights = (scores / scores.sum()) * 100
+        
+        MAX_CAP = 50.0
+        MIN_FLOOR = 10.0
+        
+        for _ in range(3):
+            weights = weights.clip(MIN_FLOOR, MAX_CAP)
+            weights = (weights / weights.sum()) * 100
+        
+        weights = weights.round().astype(int)
+        diff = 100 - weights.sum()
+        max_idx = weights.argmax()
+        weights[max_idx] += diff
+        
+        pick_weights = dict(zip(selected_pool['pure_name'], weights))
     
     timing_badge = {"mid": "15일 배당", "end": "월말 배당", "mix": "맞춤"}
     prefix = "(날짜 유연) " if filter_stage == "relaxed" and timing != 'mix' else ""
@@ -295,13 +357,53 @@ def show_wizard():
         # 🚨 [수정] 최소 2개 ~ 최대 4개로 슬라이더 범위 변경
         count = st.slider("📊 종목 개수", 2, 4, 3)
         
-        if st.button("🚀 결과 확인하기", type="primary", use_container_width=True):
+        # [수정] Step 4로 이동
+        if st.button("🚀 다음 단계로 (3/4)", type="primary", use_container_width=True):
             st.session_state.wiz_data['target_yield'] = target
             st.session_state.wiz_data['count'] = count
             st.session_state.wiz_step = 4
             st.rerun()
 
+    # ------------------------------------------------------------------
+    # [Q4 신설] 원픽 종목 선택 단계
+    # ------------------------------------------------------------------
     elif step == 4:
+        st.subheader("🎯 나만의 '원픽' 종목 (선택사항)")
+        st.info("💡 포트폴리오에 **무조건 포함하고 싶은 종목**이 하나쯤 있으신가요?")
+        st.caption("정확한 결과를 위해 꼭 선택하지 않으셔도 무방합니다. 없으시면 바로 **[결과 보기]**를 눌러주세요.")
+
+        # 1. 종목 선택 (검색라벨 기준)
+        stock_list = sorted(df['검색라벨'].tolist())
+        selected_one = st.selectbox("원픽 종목을 선택하세요", ["선택 안 함"] + stock_list, index=0)
+
+        if selected_one != "선택 안 함":
+            # 2. 비중 설정 (최대 50% 제한)
+            focus_weight = st.slider(f"[{selected_one.split('(')[0]}] 비중 설정 (%)", 5, 50, 20, step=5)
+            st.success(f"✅ 전체 자산의 **{focus_weight}%**를 이 종목에 고정하고, 남은 **{100-focus_weight}%**를 AI가 최적으로 설계합니다.")
+            
+            # 세션에 데이터 저장
+            st.session_state.wiz_data['focus_stock_label'] = selected_one
+            st.session_state.wiz_data['focus_weight'] = focus_weight
+        else:
+            st.session_state.wiz_data['focus_stock_label'] = None
+            st.session_state.wiz_data['focus_weight'] = 0
+
+        st.write("")
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("⬅️ 이전으로", use_container_width=True):
+                st.session_state.wiz_step = 3
+                st.rerun()
+        with c2:
+            if st.button("🚀 결과 보기", type="primary", use_container_width=True):
+                # 결과 페이지(5)로 이동
+                st.session_state.wiz_step = 5
+                st.rerun()
+
+    # ------------------------------------------------------------------
+    # [Step 5] 결과 확인 페이지 (기존 Step 4)
+    # ------------------------------------------------------------------
+    elif step == 5:
         if "ai_result_cache" not in st.session_state or st.session_state.ai_result_cache is None:
             with st.spinner("🎲 최적 조합 찾는 중..."):
                 t_res, p_res, w_res = get_smart_recommendation(df, st.session_state.wiz_data)
