@@ -330,7 +330,7 @@ def show_wizard():
         st.subheader("나만의 배당 조합, 막막하신가요?")
         st.write("투자 성향과 목표에 맞춰 배당팽이가 최적의 포트폴리오를 설계해 드립니다. ✨")
         
-        st.caption("배당 팽이 알고리즘이 70여 개의 종목을 실시간으로 분석합니다.")
+        st.caption("배당 팽이 알고리즘이 30여 개의 종목을 실시간으로 분석합니다.")
 
         st.markdown("---")
         st.write("🌍 **어떤 종목을 포함할까요?**")
@@ -385,7 +385,7 @@ def show_wizard():
         wanted_cnt = st.session_state.wiz_data.get('count', 3)
         max_fav = 2 if wanted_cnt == 4 else 1
         st.subheader("🎯 나만의 최애 종목 (선택사항)")
-        st.info(f"💡 전체 {wanted_cnt}개 종목 중 최대 **{max_fav}개**까지 직접 지정할 수 있습니다.")
+        st.info(f"💡 전체 {wanted_cnt}개 종목 중 최대 {max_fav} 개까지 직접 지정할 수 있습니다.")
         st.caption("선택하지 않으셔도 AI가 최적의 종목을 알아서 찾아드립니다.")
 
         # [필터링 적용] 해외 포함 여부에 따라 리스트 필터링
@@ -399,7 +399,7 @@ def show_wizard():
 
         if selected_favs:
             focus_weight = st.slider(f"💰 선택 종목 합계 비중 (%)", 5, 50, 20, step=5)
-            st.success(f"✅ 선택하신 종목에 총 **{focus_weight}%**를 고정 배치합니다.")
+            st.success(f"✅ 선택하신 종목에 총 {focus_weight}% 를 고정 배치합니다.")
             st.session_state.wiz_data['focus_stock_labels'] = selected_favs
             st.session_state.wiz_data['focus_weight'] = focus_weight
         else:
