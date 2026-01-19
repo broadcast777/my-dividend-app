@@ -749,30 +749,12 @@ def render_calculator_page(df):
             if total_y_div > 20000000:
                 st.warning(f"🚨 **주의:** 연간 예상 배당금이 **{total_y_div/10000:,.0f}만원**입니다. 금융소득종합과세 대상에 해당될 수 있습니다.")
 
-    # ... (위쪽 코드는 그대로 유지) ...
-
     df_ana = pd.DataFrame(all_data)
     if not df_ana.empty:
         st.write("")
-        st.write("")
+        tab_analysis, tab_simulation, tab_goal = st.tabs(["💎 자산 구성 분석", "💰 10년 뒤 자산 미리보기", "🎯 목표 배당 달성"])
         
-        # 💡 [UX 개선] 탭 튕김 방지를 위해 '가로형 라디오 버튼'으로 탭 구현
-        # 이렇게 하면 토글이나 숫자를 바꿔도 보고 있던 화면이 유지됩니다.
-        tabs_list = ["💎 자산 구성 분석", "💰 10년 뒤 자산 미리보기", "🎯 목표 배당 달성"]
-        current_tab = st.radio(
-            "dashboard_tab_navigator", 
-            tabs_list, 
-            horizontal=True, 
-            label_visibility="collapsed",
-            index=0
-        )
-        
-        st.divider() # 탭 아래 구분선
-
-        # ------------------------------------------------
-        # 1. 자산 구성 분석 탭
-        # ------------------------------------------------
-        if current_tab == "💎 자산 구성 분석":
+        with tab_analysis:
             chart_col, table_col = st.columns([1.2, 1])
             def classify_currency(row):
                 try:
@@ -805,10 +787,7 @@ def render_calculator_page(df):
             ui.render_custom_table(df_ana)
             st.error("""**⚠️ 포트폴리오 분석 시 유의사항**\n1. 과거의 데이터를 기반으로 한 단순 결과값이며, 실제 투자 수익을 보장하지 않습니다.\n2. '달러 자산' 비율 실제 환노출 여부와 다를 수 있습니다 투자 전 확인이 필요합니다.\n3. 실제 배당금 지급일과 금액은 운용사의 사정에 따라 변경될 수 있습니다.""")
 
-        # ------------------------------------------------
-        # 2. 10년 뒤 자산 미리보기 탭
-        # ------------------------------------------------
-        elif current_tab == "💰 10년 뒤 자산 미리보기":
+        with tab_simulation:
             start_money = total_invest
             is_over_100m = start_money > 100000000
             st.info(f"📊 상단에서 설정한 **초기 자산 {start_money/10000:,.0f}만원**으로 시뮬레이션을 시작합니다.")
@@ -978,11 +957,7 @@ def render_calculator_page(df):
             if annual_div_income > 20000000: st.warning(f"🚨 **주의:** {years_sim}년 뒤 연간 배당금이 2,000만원을 초과하여 금융소득종합과세 대상이 될 수 있습니다.")
             st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**\n1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 단순 결과입니다.
                     2. 재투자가 매월 이루어진다는 가정하에 계산된 복리 결과입니다.""")
-
-        # ------------------------------------------------
-        # 3. 목표 배당 달성 탭
-        # ------------------------------------------------
-        elif current_tab == "🎯 목표 배당 달성":
+        with tab_goal:
             st.subheader("🎯 목표 배당금 역산기 (은퇴 시뮬레이터)")
             st.caption("내가 원하는 월급을 받기 위해 얼마를 더 모아야 할지 정밀하게 계산합니다.")
 
@@ -1086,6 +1061,7 @@ def render_calculator_page(df):
                     1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 단순 결과입니다.
                     2. 재투자가 매월 이루어진다는 가정하에 계산된 복리 결과입니다.
                     """)
+
             
 def render_roadmap_page(df):
     """📅 월별 로드맵 페이지 렌더링"""
