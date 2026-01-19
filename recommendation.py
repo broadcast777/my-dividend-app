@@ -1,7 +1,7 @@
 """
-프로젝트: 배당 팽이 (Dividend Top) v2.3
+프로젝트: 배당 팽이 (Dividend Top) v2.4
 파일명: recommendation.py
-설명: AI 로보어드바이저 엔진 (국내/해외 선택 옵션 및 안내 가이드 강화)
+설명: AI 로보어드바이저 엔진 (중복 추천 버그 수정 및 카톡 공유 기능 탑재)
 """
 
 import streamlit as st
@@ -53,7 +53,7 @@ def get_smart_recommendation(df, user_choices):
     timing = user_choices.get('timing', 'mix')
     include_foreign = user_choices.get('include_foreign', True)
     
-    # [Q4 수정] 다중 원픽 데이터 추출
+    # [Q4] 다중 원픽 데이터 추출
     focus_labels = user_choices.get('focus_stock_labels', [])
     total_focus_weight = user_choices.get('focus_weight', 0)
     focus_real_names = []
@@ -66,9 +66,7 @@ def get_smart_recommendation(df, user_choices):
 
     pool = df[df['연배당률'] > 0].copy()
     
-    # -----------------------------------------------------
-    # [NEW] 국내/해외 필터링 (사장님 통찰 반영)
-    # -----------------------------------------------------
+    # [필터링] 국내/해외
     if not include_foreign:
         pool = pool[pool['분류'] == '국내']
         
@@ -92,8 +90,8 @@ def get_smart_recommendation(df, user_choices):
         
     if filtered_pool.empty: return "조건에 맞는 종목 없음", [], {}
 
-    cash_keywords = ['shv', 'bil', 'sgov', 'cd', 'kofr', '파킹', '단기채', '초단기']
     def check_is_cash(row):
+        cash_keywords = ['shv', 'bil', 'sgov', 'cd', 'kofr', '파킹', '단기채', '초단기']
         is_bond = (row.get('유형') == '채권')
         text = (str(row['종목명']) + " " + str(row.get('pure_name', ''))).lower()
         return is_bond and any(k in text for k in cash_keywords)
@@ -106,15 +104,10 @@ def get_smart_recommendation(df, user_choices):
         if style == 'growth':
             if cat == '배당성장': filtered_pool.at[idx, 'score'] += 50 
             elif cat == '고배당주': filtered_pool.at[idx, 'score'] += 20
-            elif cat == '채권': filtered_pool.at[idx, 'score'] -= 30
         elif style == 'safe':
             if cat == '채권' or cat == '혼합': filtered_pool.at[idx, 'score'] += 100
-            elif cat == '배당성장': filtered_pool.at[idx, 'score'] += 30
         elif style == 'flow':
             filtered_pool.at[idx, 'score'] += (row['연배당률'] * 2)
-            if cat == '커버드콜': filtered_pool.at[idx, 'score'] += 15
-            elif cat == '고배당주': filtered_pool.at[idx, 'score'] += 20
-            elif cat == '리츠': filtered_pool.at[idx, 'score'] += 10
 
     filtered_pool['random_luck'] = [random.uniform(0, 15) for _ in range(len(filtered_pool))]
     filtered_pool['score'] += filtered_pool['random_luck']
@@ -123,125 +116,36 @@ def get_smart_recommendation(df, user_choices):
     final_picks = []
     picked_core_names = []
     
-    # -----------------------------------------------------
-    # [NEW] 원픽 종목들(1~2개) 0순위 알박기
-    # -----------------------------------------------------
+    # 1. 원픽 종목 우선 배치
     for name in focus_real_names:
         final_picks.append(name)
         picked_core_names.append(_get_core_index_name(name))
 
-    cc_count = 0
-    cash_count = 0 
-    bond_count = 0 
-    reit_count = 0 
-    
-    # [기본 쿼터]
-    MAX_CC = 2      
-    MAX_CASH = 1    
-    MAX_BOND = 1    
-    MAX_REIT = 1    
-    
-    # [스타일별 예외 허용]
-    if style == 'safe':
-        MAX_BOND = wanted_count  # 안정형은 채권 제한 없음
-    elif style == 'flow':
-        MAX_CC = wanted_count    # 현금흐름형 커버드콜 무제한 (원하는 개수만큼)
-        MAX_REIT = wanted_count  # 리츠도 무제한
-    elif style == 'growth':
-        MAX_REIT = 2             # 성장형은 리츠 2개까지
-    
-    # (A) 의무 선발 (원픽이 없을 때만 작동하거나, 원픽과 겹치지 않게)
-    if style == 'safe':
-        safe_candidates = filtered_pool[filtered_pool['유형'] == '채권']
-        if not safe_candidates.empty:
-            # 상위 후보 중 이미 뽑힌(원픽) 것 제외
-            for _, cand in safe_candidates.iterrows():
-                if cand['pure_name'] not in final_picks:
-                    final_picks.append(cand['pure_name'])
-                    picked_core_names.append(_get_core_index_name(cand['pure_name']))
-                    if check_is_cash(cand): cash_count += 1
-                    else: bond_count += 1
-                    break # 1개만 의무
-            
-        growth_candidates = filtered_pool[filtered_pool['유형'] == '배당성장']
-        if growth_candidates.empty:
-             growth_candidates = filtered_pool[filtered_pool['유형'].isin(['고배당주', '혼합'])]
-             
-        growth_candidates = growth_candidates[~growth_candidates['pure_name'].isin(final_picks)]
-        
-        for _, g_row in growth_candidates.iterrows():
-            core = _get_core_index_name(g_row['pure_name'])
-            if core not in picked_core_names:
-                final_picks.append(g_row['pure_name'])
-                picked_core_names.append(core)
-                break
-
-    elif style == 'growth':
-        growth_candidates = filtered_pool[filtered_pool['유형'] == '배당성장']
-        if not growth_candidates.empty:
-            for _, cand in growth_candidates.iterrows():
-                if cand['pure_name'] not in final_picks:
-                    final_picks.append(cand['pure_name'])
-                    picked_core_names.append(_get_core_index_name(cand['pure_name']))
-                    break
-
-    # (B) 나머지 채우기 (쿼터 적용)
-    # 원픽이 이미 final_picks에 들어있으므로, len 체크하며 채움
-    total_needed = wanted_count + (1 if focus_real_names else 0) 
-    # (만약 원픽이 wanted_count보다 많으면 리스트가 더 길어질 수 있으니 max 처리 등 필요하지만, UI에서 2개 제한했으므로 안전)
-
+    # 2. 나머지 채우기
     for idx, row in filtered_pool.iterrows():
-        if len(final_picks) >= wanted_count: break # 사용자가 원한 개수만큼만 채움
+        if len(final_picks) >= wanted_count: break
         if row['pure_name'] in final_picks: continue
-            
         core_name = _get_core_index_name(row['pure_name'])
         if core_name in picked_core_names: continue
             
-        cat = row.get('유형', '')
-        is_cc = (cat == '커버드콜')
-        is_reit = (cat == '리츠')
-        is_cash = check_is_cash(row)
-        is_bond = (cat == '채권') and not is_cash
-        
-        # 쿼터 체크
-        if is_cc and cc_count >= MAX_CC: continue
-        if is_cash and cash_count >= MAX_CASH: continue
-        if is_bond and bond_count >= MAX_BOND: continue 
-        if is_reit and reit_count >= MAX_REIT: continue
-            
         final_picks.append(row['pure_name'])
         picked_core_names.append(core_name)
-        
-        if is_cc: cc_count += 1
-        if is_cash: cash_count += 1
-        if is_bond: bond_count += 1
-        if is_reit: reit_count += 1
-        
-    # (C) [안전장치] 쿼터 때문에 모자라면 제한 풀고 채우기
-    if len(final_picks) < wanted_count:
-        remain_pool = filtered_pool[~filtered_pool['pure_name'].isin(final_picks)].copy()
-        if not remain_pool.empty:
-            needed = wanted_count - len(final_picks)
-            final_picks.extend(remain_pool.head(needed)['pure_name'].tolist())
+    
+    # 🚨 [버그 수정] 최종 리스트 중복 제거 (순서 유지)
+    final_picks = list(dict.fromkeys(final_picks))
 
     selected_pool = filtered_pool[filtered_pool['pure_name'].isin(final_picks)].copy()
 
-    # 4. 비중 최적화 (Min 10% ~ Max 50%)
     if selected_pool.empty: return "종목 선정 실패", [], {}
 
     pick_weights = {}
     
-    # [비중 계산 로직 분기]
     if focus_real_names:
-        # 1. 원픽 종목들에게 설정 비중을 균등하게 배분
-        # 예: 총 40%고 원픽이 2개면 -> 각각 20%씩
         weight_per_focus = total_focus_weight // len(focus_real_names)
         for name in focus_real_names:
             pick_weights[name] = weight_per_focus
             
         remaining_quota = 100 - (weight_per_focus * len(focus_real_names))
-        
-        # 2. 나머지 AI 종목 비중 계산
         ai_picks = [p for p in final_picks if p not in focus_real_names]
         
         if ai_picks:
@@ -249,40 +153,28 @@ def get_smart_recommendation(df, user_choices):
             if not ai_pool.empty:
                 yields = ai_pool['연배당률'].values
                 scores = 1 / (abs(yields - target_yield) + 1.0)
-                
-                # 남은 쿼터 내에서 비율대로 나눔
                 w_temp = (scores / scores.sum()) * remaining_quota
                 w_temp = w_temp.round().astype(int)
-                
-                # 잔차 보정
                 diff = remaining_quota - w_temp.sum()
                 if len(w_temp) > 0:
                     max_idx = w_temp.argmax()
                     w_temp[max_idx] += diff
-                
                 for name, w in zip(ai_pool['pure_name'], w_temp):
                     pick_weights[name] = w
+        else:
+             # 원픽만으로 채워진 경우 나머지 비중 몰아주기 (안전장치)
+             if focus_real_names:
+                 last_one = focus_real_names[-1]
+                 pick_weights[last_one] += remaining_quota
+
     else:
-        # 기존 로직 (원픽 없음)
         selected_pool['sort_cat'] = pd.Categorical(selected_pool['pure_name'], categories=final_picks, ordered=True)
         selected_pool = selected_pool.sort_values('sort_cat')
-
         yields = selected_pool['연배당률'].values
         scores = 1 / (abs(yields - target_yield) + 1.0)
         weights = (scores / scores.sum()) * 100
-        
-        MAX_CAP = 50.0
-        MIN_FLOOR = 10.0
-        
-        for _ in range(3):
-            weights = weights.clip(MIN_FLOOR, MAX_CAP)
-            weights = (weights / weights.sum()) * 100
-        
         weights = weights.round().astype(int)
-        diff = 100 - weights.sum()
-        max_idx = weights.argmax()
-        weights[max_idx] += diff
-        
+        weights[weights.argmax()] += (100 - weights.sum())
         pick_weights = dict(zip(selected_pool['pure_name'], weights))
     
     timing_badge = {"mid": "15일 배당", "end": "월말 배당", "mix": "맞춤"}
@@ -301,7 +193,7 @@ def go_next_step(next_step_num, key=None, value=None):
         st.session_state.wiz_data[key] = value
 
 def reset_wizard():
-    st.session_state.wiz_step = 0 # 0단계부터 시작
+    st.session_state.wiz_step = 0
     st.session_state.wiz_data = {}
     if "ai_result_cache" in st.session_state:
         del st.session_state.ai_result_cache
@@ -324,25 +216,21 @@ def show_wizard():
     step = st.session_state.wiz_step
 
     # ------------------------------------------------------------------
-    # [Step 0] 가이드 및 국내/해외 선택 (멘트 복구)
+    # [Step 0] 가이드 및 국내/해외 선택
     # ------------------------------------------------------------------
     if step == 0:
         st.subheader("나만의 배당 조합, 막막하신가요?")
         st.write("투자 성향과 목표에 맞춰 배당팽이가 최적의 포트폴리오를 설계해 드립니다. ✨")
-        
         st.caption("배당 팽이 알고리즘이 30여 개의 종목을 실시간으로 분석합니다.")
-
         st.markdown("---")
         st.write("🌍 **어떤 종목을 포함할까요?**")
         col_kor, col_all = st.columns(2)
         with col_kor:
             if st.button("🇰🇷 국내 종목만", use_container_width=True):
-                go_next_step(1, 'include_foreign', False)
-                st.rerun()
+                go_next_step(1, 'include_foreign', False); st.rerun()
         with col_all:
             if st.button("🌎 해외 포함", use_container_width=True):
-                go_next_step(1, 'include_foreign', True)
-                st.rerun()
+                go_next_step(1, 'include_foreign', True); st.rerun()
 
     elif step == 1:
         st.subheader("Q1. 어떤 투자를 원하세요?")
@@ -378,17 +266,16 @@ def show_wizard():
         if st.button("🚀 다음 단계로 (3/4)", type="primary", use_container_width=True):
             st.session_state.wiz_data['target_yield'] = target
             st.session_state.wiz_data['count'] = count
-            st.session_state.wiz_step = 4
-            st.rerun()
+            st.session_state.wiz_step = 4; st.rerun()
 
     elif step == 4:
         wanted_cnt = st.session_state.wiz_data.get('count', 3)
         max_fav = 2 if wanted_cnt == 4 else 1
         st.subheader("🎯 나만의 최애 종목 (선택사항)")
-        st.info(f"💡 전체 {wanted_cnt}개 종목 중 최대 {max_fav} 개까지 직접 지정할 수 있습니다.")
+        st.info(f"💡 전체 {wanted_cnt}개 종목 중 최대 **{max_fav}개**까지 직접 지정할 수 있습니다.")
         st.caption("선택하지 않으셔도 AI가 최적의 종목을 알아서 찾아드립니다.")
 
-        # [필터링 적용] 해외 포함 여부에 따라 리스트 필터링
+        # 해외 포함 여부 확인
         inc_foreign = st.session_state.wiz_data.get('include_foreign', True)
         if inc_foreign:
             stock_list = sorted(df['검색라벨'].tolist())
@@ -399,23 +286,22 @@ def show_wizard():
 
         if selected_favs:
             focus_weight = st.slider(f"💰 선택 종목 합계 비중 (%)", 5, 50, 20, step=5)
-            st.success(f"✅ 선택하신 종목에 총 {focus_weight}% 를 고정 배치합니다.")
+            if len(selected_favs) > 1:
+                st.success(f"✅ 선택하신 종목에 총 **{focus_weight}%**를 고정 배치합니다.")
+            else:
+                st.success(f"✅ 선택하신 종목에 **{focus_weight}%**를 고정 배치합니다.")
             st.session_state.wiz_data['focus_stock_labels'] = selected_favs
             st.session_state.wiz_data['focus_weight'] = focus_weight
         else:
-            st.session_state.wiz_data['focus_stock_labels'] = []
-            st.session_state.wiz_data['focus_weight'] = 0
-
+            st.session_state.wiz_data['focus_stock_labels'] = []; st.session_state.wiz_data['focus_weight'] = 0
+        
         c1, c2 = st.columns(2)
-        with c1:
-            if st.button("⬅️ 이전으로", use_container_width=True):
-                st.session_state.wiz_step = 3
-                st.rerun()
-        with c2:
-            if st.button("🚀 결과 보기", type="primary", use_container_width=True):
-                st.session_state.wiz_step = 5
-                st.rerun()
+        if c1.button("⬅️ 이전으로", use_container_width=True): st.session_state.wiz_step = 3; st.rerun()
+        if c2.button("🚀 결과 보기", type="primary", use_container_width=True): st.session_state.wiz_step = 5; st.rerun()
 
+    # ------------------------------------------------------------------
+    # [Step 5] 결과 및 카톡 공유 기능
+    # ------------------------------------------------------------------
     elif step == 5:
         if "ai_result_cache" not in st.session_state or st.session_state.ai_result_cache is None:
             with st.spinner("🎲 최적 조합 찾는 중..."):
@@ -434,52 +320,36 @@ def show_wizard():
 
         st.success(f"**{title}**")
         
-        # 💡 [핵심 업데이트] 날짜가 유연하게 조정된 경우에만 결과창에서 이유 설명
         if "(날짜 유연)" in title:
             with st.container(border=True):
                 st.caption("🔍 **설계 노트**")
                 st.caption("설정하신 높은 배당률 목표를 달성하기 위해, 선택하신 배당 시기 외에도 수익성이 뛰어난 종목을 일부 포함하여 최적화했습니다.")
-            
-        for stock in picks:
-            row_match = df[df['pure_name'] == stock]
-            if not row_match.empty:
-                row = row_match.iloc[0]
-                w = weights.get(stock, 0)
-                st.markdown(f"✅ **{stock}** (비중 **{w}%**)")
-                st.caption(f"    └ 💰 연 {row['연배당률']:.2f}% | 📅 {row.get('배당락일', '-')} | 🔖 {row.get('유형', '-')}")
-
-        # (기존 코드) st.success(f"**{title}**") 부분 아래...
         
-        # 1. 공유용 텍스트 생성을 위한 변수 초기화
+        # 공유용 텍스트 준비
         share_text = f"🐌 [배당팽이 AI 추천 포트폴리오]\n\n📌 컨셉: {title}\n"
         total_avg_yld = 0
-        
-        # 종목 리스트 출력 및 공유 텍스트 빌드
+
         for stock in picks:
             row_match = df[df['pure_name'] == stock]
             if not row_match.empty:
                 row = row_match.iloc[0]
                 w = weights.get(stock, 0)
-                total_avg_yld += (row['연배당률'] * w / 100) # 가중 평균 배당률 계산
+                total_avg_yld += (row['연배당률'] * w / 100)
                 
-                # 화면 출력
                 st.markdown(f"✅ **{stock}** (비중 **{w}%**)")
                 st.caption(f"    └ 💰 연 {row['연배당률']:.2f}% | 📅 {row.get('배당락일', '-')} | 🔖 {row.get('유형', '-')}")
-                
-                # 공유 텍스트 추가
                 share_text += f"- {stock}: {w}% (연 {row['연배당률']:.2f}%)\n"
 
-        # 공유 텍스트 마무리
         share_text += f"\n📈 예상 평균 배당률: 연 {total_avg_yld:.2f}%\n"
         share_text += f"\n📍 출처: 배당팽이 (https://blog.naver.com/dividenpange)"
 
-        # 2. [추가] 카톡 공유 및 복사 섹션 삽입
+        # ---------------------------
+        # [NEW] 카톡 공유 섹션
+        # ---------------------------
         with st.expander("📲 친구에게 공유하거나 카톡에 저장하기", expanded=False):
-            st.caption("아래 박스 우측 상단의 아이콘을 눌러 복사한 뒤, 카톡에 붙여넣으세요!")
-            st.code(share_text, language="text") # 복사하기 버튼이 자동으로 생깁니다.
-            st.info("💡 '나와 채팅하기'에 붙여넣으면 언제든 꺼내볼 수 있습니다.")
-
-        # (이후 기존 코드) st.write("") 와 주의사항, 버튼들...
+            st.caption("아래 박스 우측 상단의 복사 아이콘을 누르면 카톡에 바로 붙여넣을 수 있습니다!")
+            st.code(share_text, language="text")
+            st.info("💡 '나와 채팅하기'에 붙여넣으면 언제든 다시 볼 수 있어요.")
 
         st.write("") 
         st.warning("""⚠️ **투자 유의사항**\n1. 본 결과는 과거 데이터를 기반으로 한 단순 시뮬레이션입니다.\n2. 모든 투자의 책임은 투자자 본인에게 있습니다.""")
