@@ -1,7 +1,7 @@
 """
-프로젝트: 배당 팽이 (Dividend Top) v2.3
+프로젝트: 배당 팽이 (Dividend Top) v2.4
 파일명: app.py
-설명: 포트폴리오 로드 시 Multiselect에 선택된 종목(빨간 태그)이 안 뜨는 버그 수정 완료
+설명: 모바일 UX 최적화 (상단 통합 헤더 신설 및 시뮬레이션 섹션 최우선 배치)
 """
 
 import streamlit as st
@@ -194,7 +194,10 @@ def render_login_buttons(key_suffix="default"):
     except: current_session_id = "unknown"
     redirect_url = f"https://dividend-pange.streamlit.app?old_id={current_session_id}"
 
-    st.caption("🔒 기능을 사용하려면 로그인이 필요합니다.")
+    # 상단 헤더용일 때는 문구 생략하고 버튼만 심플하게
+    if key_suffix != "top_header":
+        st.caption("🔒 기능을 사용하려면 로그인이 필요합니다.")
+        
     col1, col2 = st.columns(2)
     with col1:
         try:
@@ -414,33 +417,17 @@ def confirm_overwrite_dialog(final_name, user_id, user_email, save_data, existin
 
 def render_calculator_page(df):
     """💰 배당금 계산기 페이지 렌더링"""
-    all_data = []
-
-    # 6-1. AI 로보어드바이저
-    st.write("")
-    col_rec1, col_rec2 = st.columns([2, 1])
-    with col_rec1:
-        st.info("🤔 **어떤 종목을 담아야 할지 막막하신가요?**\n\nAI가 성향을 분석해 최적의 포트폴리오를 제안합니다.")
-    with col_rec2:
-        st.write("") 
-        if st.button("🕵️ AI 로보어드바이저 실행", use_container_width=True, type="primary"):
-            if st.session_state.get("is_logged_in"):
-                logger.info("🤖 AI 로보어드바이저 세션 시작")
-                st.session_state.ai_modal_open = True
-                st.session_state.wiz_step = 1
-                st.session_state.wiz_data = {}
-                if "ai_result_cache" in st.session_state:
-                    del st.session_state.ai_result_cache
-            else:
-                st.error("🔒 로그인이 필요한 기능입니다. 페이지 최상단에서 로그인을 먼저 해주세요!")
-                st.toast("위에서 로그인을 해주세요!", icon="👆")
-
+    
+    # 📌 [수정됨] AI 로보어드바이저 안내 섹션을 여기서 제거했습니다.
+    # (이미 최상단 헤더로 이동했으므로 중복 노출 방지)
+    
     if st.session_state.get("ai_modal_open", False):
         recommendation.show_wizard()
     
-    st.markdown("---")
-
     # 6-2. 포트폴리오 시뮬레이션
+    all_data = []
+    
+    # 여기서부터 시뮬레이션 섹션이 바로 시작됩니다. (expander default=True)
     with st.expander("🧮 나만의 배당 포트폴리오 시뮬레이션", expanded=True):
         col1, col2 = st.columns([1, 2])
         current_invest_val = int(st.session_state.total_invest / 10000)
@@ -452,10 +439,10 @@ def render_calculator_page(df):
         name_col_name = next((c for c in df.columns if 'pure' in c or '명' in c), '종목명')
 
         # -------------------------------------------------------
-        # [수정된 로직] 바코드(Dictionary) 매핑 시스템 도입
+        # [바코드(Dictionary) 매핑 시스템] (이전 수정사항 유지)
         # -------------------------------------------------------
         
-        # 1. 라벨 생성 함수 (기존 유지)
+        # 1. 라벨 생성 함수
         def clean_label(row):
             c = str(row.get(code_col_name, '')).strip()
             if '.' in c: c = c.split('.')[0]
@@ -463,8 +450,7 @@ def render_calculator_page(df):
             n = str(row.get(name_col_name, '')).strip()
             return f"{n} ({c})"
 
-        # 2. [핵심] 바코드 사전 생성 (라벨 -> 진짜이름 매핑)
-        # 예: {"TIGER 미국(H) (123456)": "TIGER 미국(H)"}
+        # 2. 바코드 사전 생성
         label_to_real_name = {}
         for _, row in df.iterrows():
             lbl = clean_label(row)
@@ -472,8 +458,7 @@ def render_calculator_page(df):
 
         search_options = sorted(list(label_to_real_name.keys()))
         
-        # 3. 초기 선택값(Default) 세팅
-        # 저장된 진짜 이름(saved_stocks)에 해당하는 라벨을 역추적해서 찾아냅니다.
+        # 3. 초기 선택값 세팅
         default_selected_labels = []
         if st.session_state.get('selected_stocks'):
             saved_stocks = st.session_state.selected_stocks
@@ -481,7 +466,7 @@ def render_calculator_page(df):
                 if real_name in saved_stocks:
                     default_selected_labels.append(label)
 
-        # 4. UI 출력 (사용자는 라벨을 봅니다)
+        # 4. UI 출력
         selected_search = col2.multiselect(
             "📊 종목 선택 (이름 또는 코드로 검색)", 
             options=search_options, 
@@ -489,13 +474,11 @@ def render_calculator_page(df):
             help="종목코드(숫자)나 종목명을 입력해 보세요!"
         )
 
-        # 5. [최종 추출] 딕셔너리로 즉시 변환 (Split 사용 X -> 괄호 버그 해결)
-        # 선택된 라벨을 넣으면 사전이 '진짜 이름'을 뱉어냅니다.
+        # 5. 최종 추출
         selected = [label_to_real_name[opt] for opt in selected_search]
-        
-        # 세션 업데이트
         st.session_state.selected_stocks = selected
         # -------------------------------------------------------
+
         if selected:
             # 🚨 [안전한 검사]
             has_foreign_stock = any(df[df['pure_name'] == s_name].iloc[0]['분류'] == '해외' for s_name in selected)
@@ -1111,7 +1094,7 @@ def main():
     ui.load_css() 
     
     # 2. 안전 장치 (COPPA)
-    #check_coppa_compliance() 
+    check_coppa_compliance() 
     
     logger.info("🚀 배당팽이 메인 엔진 가동")
     db.cleanup_old_tokens()
@@ -1132,18 +1115,32 @@ def main():
 
     render_login_ui()
     
-    # 상단 로그인 안내 박스
-    auth_container = st.container(border=True)
-    with auth_container:
-        if not st.session_state.get("is_logged_in", False):
-            if "code" in st.query_params:
-                 st.info("🔄 로그인 확인 중입니다... 잠시만 기다려주세요.")
+    # [수정] 3. 상단 통합 관제 구역 (로그인 & AI)
+    # 로그인 여부에 따라 헤더 구성을 동적으로 변경하여 공간을 절약합니다.
+    with st.container(border=True):
+        col_auth, col_ai = st.columns([2, 1.2])
+        
+        with col_auth:
+            if not st.session_state.get("is_logged_in", False):
+                if "code" in st.query_params:
+                     st.info("🔄 로그인 확인 중입니다...")
+                else:
+                    render_login_buttons(key_suffix="top_header")
             else:
-                render_login_buttons(key_suffix="top_main")
-        else:
-            user = st.session_state.user_info
-            nickname = user.email.split("@")[0] if user.email else "User"
-            st.success(f"👋 **{nickname}**님, 환영합니다! 모든 기능이 활성화되었습니다.")
+                user = st.session_state.user_info
+                nickname = user.email.split("@")[0] if user.email else "User"
+                st.success(f"👋 **{nickname}**님, 환영합니다!")
+
+        with col_ai:
+            if st.button("🕵️ AI 로보어드바이저", use_container_width=True, type="primary"):
+                if st.session_state.get("is_logged_in"):
+                    st.session_state.ai_modal_open = True
+                    st.session_state.wiz_step = 1
+                    st.session_state.wiz_data = {}
+                    if "ai_result_cache" in st.session_state:
+                        del st.session_state.ai_result_cache
+                else:
+                    st.toast("🔒 로그인을 먼저 해주세요!", icon="👆")
 
     df_raw = logic.load_stock_data_from_csv()
     if df_raw.empty: 
