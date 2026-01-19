@@ -565,7 +565,7 @@ def render_calculator_page(df):
                                 cal_url = logic.get_google_cal_url(stock, ex_date_view)
                                 if cal_url:
                                     st.caption(f"{info_text}{date_msg}")
-                                    st.link_button("📅 구글 캘린더 등록", cal_url, use_container_width=True)
+                                    st.link_button("📅 배당 일정 등록", cal_url, use_container_width=True)
                                 else:
                                     st.caption(f"{info_text}{date_msg}")
                             # 2개 이상일 때: 텍스트만 보여주고 하단 ICS 유도
