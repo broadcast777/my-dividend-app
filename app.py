@@ -1,7 +1,7 @@
 """
-프로젝트: 배당 팽이 (Dividend Top) v2.5
+프로젝트: 배당 팽이 (Dividend Top) v2.6
 파일명: app.py
-설명: 모바일 UX 최적화 (금액 기반 Bottom-up 입력 방식 전면 적용)
+설명: 모바일 UX 최적화 (Bottom-up 입력 방식 보완 - 초기값 1/N 자동 배분 로직 추가)
 """
 
 import streamlit as st
@@ -499,10 +499,15 @@ def render_calculator_page(df):
                     default_amt = 0
                     if st.session_state.total_invest > 0:
                         ai_suggested = st.session_state.get('ai_suggested_weights', {})
+                        
                         if stock in ai_suggested:
-                            # 기존: 비중(%) -> 변경: 금액(만원)으로 자동 변환 초기값 세팅
+                            # 기존: 비중(%) -> 변경: 금액(만원)으로 자동 변환
                             w = ai_suggested[stock]
                             default_amt = int((st.session_state.total_invest / 10000) * (w / 100))
+                        else:
+                            # 💡 [FIX] AI 추천이 아닌 '내가 고른 종목'도 공평하게 초기값(1/N)을 할당 (0원 방지)
+                            # 단, 이미 입력된 값이 있다면 그 값을 유지해야 하므로, number_input의 'value' 파라미터는 초기 로드 시에만 영향을 줌.
+                            default_amt = int((st.session_state.total_invest / 10000) // len(selected))
                     
                     # 💰 금액 입력창 (Bottom-up 방식)
                     val = st.number_input(
