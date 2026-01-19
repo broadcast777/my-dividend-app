@@ -431,3 +431,39 @@ def update_dividend_rolling(current_history_str, new_dividend_amount):
     new_annual_total = sum(history)
     new_history_str = "|".join(map(str, history))
     return new_annual_total, new_history_str
+
+# -----------------------------------------------------------
+# [SECTION 7] (추가) 개별 구글 캘린더 링크 생성기
+# -----------------------------------------------------------
+
+def get_google_cal_url(stock_name, date_str):
+    """
+    단일 종목에 대한 구글 캘린더 일정 등록 URL을 생성합니다. (D-3일 기준)
+    """
+    try:
+        # 1. 날짜 파싱 (기존 함수 재활용)
+        target_date = parse_dividend_date(date_str)
+        if not target_date: return None
+        
+        # 2. 안전 매수일 계산 (D-3)
+        # datetime.date 객체인지 확인
+        if isinstance(target_date, datetime.date):
+            safe_date = target_date - datetime.timedelta(days=3)
+        else:
+            return None
+
+        # 주말이면 금요일로 당김
+        while safe_buy_date.weekday() >= 5:
+            safe_buy_date -= datetime.timedelta(days=1)
+
+        # 3. URL 생성
+        start_str = safe_date.strftime("%Y%m%d")
+        end_str = (safe_date + datetime.timedelta(days=1)).strftime("%Y%m%d")
+        
+        base_url = "https://www.google.com/calendar/render?action=TEMPLATE"
+        title = quote(f"💰 [{stock_name}] 매수 알림 (D-3)")
+        details = quote(f"배당 기준일: {date_str}\n안전하게 오늘 매수하세요!")
+        
+        return f"{base_url}&text={title}&dates={start_str}/{end_str}&details={details}"
+    except:
+        return None
