@@ -1,7 +1,7 @@
 """
 프로젝트: 배당 팽이 (Dividend Top) v2.9
 파일명: recommendation.py
-설명: AI 로보어드바이저 엔진 (팝업 꺼짐 현상 완벽 해결 - Direct Rerun 방식 적용)
+설명: AI 로보어드바이저 엔진 (순수 로직만 포함, Dialog 데코레이터 없음)
 업데이트: 2026.01.20
 """
 
@@ -207,7 +207,6 @@ def get_smart_recommendation(df, user_choices):
 # [SECTION 3] 위저드 상태 제어 및 흐름 도우미
 # ===========================================================
 
-# [중요] go_next_step 함수 유지 (다른 부분에서 쓸 수도 있으므로)
 def go_next_step(next_step_num, key=None, value=None):
     st.session_state.wiz_step = next_step_num
     if key is not None:
@@ -224,8 +223,7 @@ def reset_wizard():
 # [SECTION 4] AI 로보어드바이저 UI 위저드
 # ===========================================================
 
-# 🚨 [중요 수정] @st.dialog 데코레이터를 제거했습니다. 
-# (app.py에서 이미 다이얼로그를 생성했으므로 중복 생성 방지)
+# 🚨 [주의] 여기에는 @st.dialog가 없어야 합니다. app.py에서 이미 선언했기 때문입니다.
 def show_wizard():
     df = st.session_state.get('shared_df')
     if df is None or df.empty:
@@ -244,15 +242,15 @@ def show_wizard():
         st.markdown("---")
         st.write("🌍 **어떤 종목을 포함할까요?**")
         col_kor, col_all = st.columns(2)
-        
-        # [수정] 콜백(on_click) 대신 직관적인 if문 구조로 변경하여 꺼짐 현상 방지
         with col_kor:
+            # [수정] 콜백(on_click) 대신 직관적인 if문 구조로 변경하여 꺼짐 현상 방지
             if st.button("🇰🇷 국내 종목만", use_container_width=True):
                 st.session_state.wiz_step = 1
                 st.session_state.wiz_data['include_foreign'] = False
                 st.rerun() # 즉시 갱신
                 
         with col_all:
+            # [수정] 콜백 함수로 페이지 전환 (Rerun 제거)
             if st.button("🌎 해외 포함", use_container_width=True):
                 st.session_state.wiz_step = 1
                 st.session_state.wiz_data['include_foreign'] = True
@@ -302,6 +300,7 @@ def show_wizard():
         
         current_style = st.session_state.wiz_data.get('style')
         
+        # [NEW] 스타일별 맞춤형 조언 및 경고
         if current_style == 'safe':
             st.info("🛡️ **안정 추구:** 변동성이 낮은 국채/우량채 위주로 구성합니다.")
             st.warning("⚠️ **주의:** 채권형 ETF라도 금리 변동에 따라 원금 손실 가능성은 존재합니다.")
@@ -327,7 +326,7 @@ def show_wizard():
     # [Step 4] 나만의 원픽(Focus) 종목 선택
     elif step == 4:
         wanted_cnt = st.session_state.wiz_data.get('count', 3)
-        max_fav = 2 if wanted_cnt == 4 else 1 
+        max_fav = 2 if wanted_cnt == 4 else 1 # 4종목 선택 시에만 2개 허용
         st.subheader("🎯 나만의 최애 종목 (선택사항)")
         st.info(f"💡 전체 {wanted_cnt}개 종목 중 최대 **{max_fav}개**까지 직접 지정할 수 있습니다.")
         
@@ -345,12 +344,8 @@ def show_wizard():
             st.session_state.wiz_data['focus_stock_labels'] = []; st.session_state.wiz_data['focus_weight'] = 0
         
         c1, c2 = st.columns(2)
-        if c1.button("⬅️ 이전으로", use_container_width=True): 
-            st.session_state.wiz_step = 3
-            st.rerun()
-        if c2.button("🚀 결과 보기", type="primary", use_container_width=True): 
-            st.session_state.wiz_step = 5
-            st.rerun()
+        if c1.button("⬅️ 이전으로", use_container_width=True): st.session_state.wiz_step = 3; st.rerun()
+        if c2.button("🚀 결과 보기", type="primary", use_container_width=True): st.session_state.wiz_step = 5; st.rerun()
 
     # [Step 5] 최종 결과 출력 및 카톡 공유
     elif step == 5:
@@ -375,6 +370,7 @@ def show_wizard():
         # 블로그 최신글 연동
         blog_title, blog_url = _get_latest_blog_info()
         
+        # [표현 수정] 중립적인 표현 사용
         share_text = f"🐌 [AI 분석 포트폴리오]\n\n📌 컨셉: {title}\n"
         total_avg_yld = 0
 
@@ -394,6 +390,9 @@ def show_wizard():
             st.code(share_text, language="text")
             st.info("💡 우측 상단 복사 아이콘을 눌러 카톡에 붙여넣으세요!")
 
+        # -----------------------------------------------------------
+        # [NEW] 필수 투자 유의사항 및 수정 가이드 (복구 완료)
+        # -----------------------------------------------------------
         st.write("")
         st.warning("""⚠️ **투자 유의사항 (필독)**
 
