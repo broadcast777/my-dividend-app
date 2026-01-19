@@ -100,12 +100,21 @@ def generate_portfolio_ics(portfolio_data):
                     dt_start = buy_date.strftime("%Y%m%d")
                     dt_end = (buy_date + datetime.timedelta(days=1)).strftime("%Y%m%d")
                     
+                    # [수정] 알림 메시지 및 면책 문구 적용
+                    description = (
+                        f"예상 배당락일: {event_date}\\n\\n"
+                        f"배당 수령을 위해 일정을 체크할 시기입니다.\\n\\n"
+                        f"⚠️ 유의사항:\\n"
+                        f"1. 실제 배당락일은 운용사 사정에 따라 변동될 수 있습니다.\\n"
+                        f"2. 정확한 정보는 반드시 운용사 홈페이지나 공시를 재확인해주세요."
+                    )
+                    
                     ics_content.extend([
                         "BEGIN:VEVENT",
                         f"DTSTART;VALUE=DATE:{dt_start}",
                         f"DTEND;VALUE=DATE:{dt_end}",
-                        f"SUMMARY:💰 [{name}] 매수 알림 (D-3)",
-                        f"DESCRIPTION:배당 기준일(예상): {event_date}\\n안전하게 오늘 매수하세요!",
+                        f"SUMMARY:🔔 [{name}] 배당락 D-3 체크",
+                        f"DESCRIPTION:{description}",
                         "END:VEVENT"
                     ])
                 except ValueError:
@@ -125,7 +134,7 @@ def get_google_cal_url(stock_name, date_str):
         
         # 2. 안전 매수일 계산 (D-3)
         if isinstance(target_date, datetime.date):
-            safe_buy_date = target_date - datetime.timedelta(days=3) # [수정됨] 변수명 통일 (safe_buy_date)
+            safe_buy_date = target_date - datetime.timedelta(days=3) 
         else:
             return None
 
@@ -138,8 +147,19 @@ def get_google_cal_url(stock_name, date_str):
         end_str = (safe_buy_date + datetime.timedelta(days=1)).strftime("%Y%m%d")
         
         base_url = "https://www.google.com/calendar/render?action=TEMPLATE"
-        title = quote(f"💰 [{stock_name}] 매수 알림 (D-3)")
-        details = quote(f"배당 기준일: {date_str}\n안전하게 오늘 매수하세요!\n(배당팽이 알림)")
+        
+        # [수정] 알림 메시지 및 면책 문구 적용
+        title_text = f"🔔 [{stock_name}] 배당락 D-3 체크"
+        details_text = (
+            f"예상 배당락일: {date_str}\n\n"
+            f"안전한 배당 수령을 위해 일정을 확인하세요.\n\n"
+            f"[⚠️ 유의사항]\n"
+            f"실제 일정은 운용사 사정에 따라 변동될 수 있으므로, "
+            f"정확한 정보는 반드시 운용사 홈페이지/공시를 재확인해주세요."
+        )
+
+        title = quote(title_text)
+        details = quote(details_text)
         
         return f"{base_url}&text={title}&dates={start_str}/{end_str}&details={details}"
     except Exception as e:
