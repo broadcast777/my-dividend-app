@@ -448,6 +448,39 @@ def show_wizard():
                 st.markdown(f"✅ **{stock}** (비중 **{w}%**)")
                 st.caption(f"    └ 💰 연 {row['연배당률']:.2f}% | 📅 {row.get('배당락일', '-')} | 🔖 {row.get('유형', '-')}")
 
+        # (기존 코드) st.success(f"**{title}**") 부분 아래...
+        
+        # 1. 공유용 텍스트 생성을 위한 변수 초기화
+        share_text = f"🐌 [배당팽이 AI 추천 포트폴리오]\n\n📌 컨셉: {title}\n"
+        total_avg_yld = 0
+        
+        # 종목 리스트 출력 및 공유 텍스트 빌드
+        for stock in picks:
+            row_match = df[df['pure_name'] == stock]
+            if not row_match.empty:
+                row = row_match.iloc[0]
+                w = weights.get(stock, 0)
+                total_avg_yld += (row['연배당률'] * w / 100) # 가중 평균 배당률 계산
+                
+                # 화면 출력
+                st.markdown(f"✅ **{stock}** (비중 **{w}%**)")
+                st.caption(f"    └ 💰 연 {row['연배당률']:.2f}% | 📅 {row.get('배당락일', '-')} | 🔖 {row.get('유형', '-')}")
+                
+                # 공유 텍스트 추가
+                share_text += f"- {stock}: {w}% (연 {row['연배당률']:.2f}%)\n"
+
+        # 공유 텍스트 마무리
+        share_text += f"\n📈 예상 평균 배당률: 연 {total_avg_yld:.2f}%\n"
+        share_text += f"\n📍 출처: 배당팽이 (https://blog.naver.com/dividenpange)"
+
+        # 2. [추가] 카톡 공유 및 복사 섹션 삽입
+        with st.expander("📲 친구에게 공유하거나 카톡에 저장하기", expanded=False):
+            st.caption("아래 박스 우측 상단의 아이콘을 눌러 복사한 뒤, 카톡에 붙여넣으세요!")
+            st.code(share_text, language="text") # 복사하기 버튼이 자동으로 생깁니다.
+            st.info("💡 '나와 채팅하기'에 붙여넣으면 언제든 꺼내볼 수 있습니다.")
+
+        # (이후 기존 코드) st.write("") 와 주의사항, 버튼들...
+
         st.write("") 
         st.warning("""⚠️ **투자 유의사항**\n1. 본 결과는 과거 데이터를 기반으로 한 단순 시뮬레이션입니다.\n2. 모든 투자의 책임은 투자자 본인에게 있습니다.""")
 
