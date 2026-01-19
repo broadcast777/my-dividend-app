@@ -15,6 +15,22 @@ import numpy as np
 # [SECTION 1] 내부 헬퍼 함수
 # -----------------------------------------------------------
 
+@st.cache_data(ttl=3600) # 1시간 동안 최신글 정보 보관 (매번 네이버 접속 방지)
+def _get_latest_blog_info():
+    """네이버 RSS를 통해 최신 블로그 포스팅 제목과 링크를 가져옵니다."""
+    try:
+        rss_url = "https://rss.blog.naver.com/dividenpange.xml"
+        response = requests.get(rss_url, timeout=5)
+        root = ET.fromstring(response.content)
+        item = root.find(".//item")
+        if item is not None:
+            title = item.find("title").text
+            link = item.find("link").text
+            return title, link
+    except Exception:
+        pass
+    return "배당팽이 투자 일지", "https://blog.naver.com/dividenpange"
+
 def _parse_day_category(date_str):
     s = str(date_str).strip()
     if any(k in s for k in ['말일', '마지막', '30일', '31일', '29일', '28일', '하순']): return 'end'
