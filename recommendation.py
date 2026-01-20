@@ -73,6 +73,7 @@ def get_smart_recommendation(df, user_choices):
     """
     사용자 성향에 맞춰 자산군(채권/리츠/주식 등)을 '쿼터제'로 배분하고,
     상위권 내 랜덤 셔플을 통해 매번 다른 결과를 제안합니다.
+    (종목 수가 적을 때 필터링 대신 가산점 방식 사용)
     """
     target_yield = user_choices.get('target_yield', 7.0)
     style = user_choices.get('style', 'balance')
@@ -90,21 +91,21 @@ def get_smart_recommendation(df, user_choices):
             match = df[df['검색라벨'] == lbl]
             if not match.empty: focus_real_names.append(match.iloc[0]['pure_name'])
 
-    # 2. 전체 유니버스 필터링 (국가/타이밍)
+    # 2. 유니버스 필터링 (국가 필터만 엄격 적용)
     pool = df[df['연배당률'] > 0].copy()
     if not include_foreign:
         pool = pool[pool['분류'] == '국내']
         
-    # 날짜 필터링
     pool['temp_date_str'] = pool['배당락일'].fillna('').astype(str)
-    mask_timing = pool['temp_date_str'].apply(lambda x: _check_timing_match(x, timing))
-    
-    if len(pool[mask_timing]) >= wanted_count:
-        pool = pool[mask_timing].copy()
 
-    # 3. 점수 산정 (랜덤성 추가)
+    # 3. 점수 산정 (기본 점수 + 날짜 가산점 + 랜덤 셔플)
     pool['yield_diff'] = abs(pool['연배당률'] - target_yield)
     pool['score'] = 100 - (pool['yield_diff'] * 10)
+    
+    # [날짜 가산점] 필터링 대신 날짜가 맞으면 점수를 팍팍 줌 (유연성 확보)
+    if timing != 'mix':
+        is_timing_match = pool['temp_date_str'].apply(lambda x: _check_timing_match(x, timing))
+        pool.loc[is_timing_match, 'score'] += 50
     
     # [셔플] 미세한 랜덤 점수 추가로 순위 고착화 방지
     pool['score'] += [random.uniform(0, 5) for _ in range(len(pool))]
@@ -122,7 +123,7 @@ def get_smart_recommendation(df, user_choices):
 
     pool['cluster'] = pool.apply(get_cluster, axis=1)
 
-    # 5. 스타일별 [필수 포함] 쿼터 정의
+    # 5. 스타일별 [필수 포함] 쿼터 정의 (황금 비율 준비)
     quotas = []
     
     if style == 'safe':
@@ -142,7 +143,7 @@ def get_smart_recommendation(df, user_choices):
         pool.loc[pool['cluster'] == 'cov', 'score'] += 30
         pool.loc[pool['cluster'] == 'bond', 'score'] += 10 
 
-    # 6. 종목 선발 (Selection with Shuffle)
+    # 6. 종목 선발 (Selection with Top-N Shuffle)
     final_picks = []
     picked_names = set(focus_real_names)
     picked_core = [_get_core_index_name(n) for n in focus_real_names]
@@ -159,6 +160,7 @@ def get_smart_recommendation(df, user_choices):
             (~pool['pure_name'].isin(picked_names))
         ].sort_values('score', ascending=False)
         
+        # 상위 3개 중 랜덤 (1등이 날짜가 안 맞고, 2등이 날짜가 맞으면 2등이 1등 됨)
         top_candidates = candidates.head(3) 
         if not top_candidates.empty:
             shuffled = top_candidates.sample(frac=1)
@@ -188,7 +190,7 @@ def get_smart_recommendation(df, user_choices):
         else:
             break
 
-    # 7. 비중(Weight) 최적화
+    # 7. 비중(Weight) 최적화 (황금 비율 적용)
     selected_pool = pool[pool['pure_name'].isin(final_picks)].copy()
     pick_weights = {}
     
@@ -222,7 +224,7 @@ def get_smart_recommendation(df, user_choices):
         for p in final_picks:
             cluster = selected_pool[selected_pool['pure_name']==p]['cluster'].iloc[0]
             priority = 0
-            # 스타일별 대장주 우선순위
+            # 스타일별 대장주 우선순위 정렬
             if style == 'safe' and cluster == 'bond': priority = 3
             elif style == 'flow' and cluster == 'cov': priority = 3
             elif style == 'growth' and cluster == 'growth': priority = 3
@@ -233,12 +235,12 @@ def get_smart_recommendation(df, user_choices):
         sorted_picks.sort(key=lambda x: x[1], reverse=True)
         ordered_names = [x[0] for x in sorted_picks]
         
-        # 황금 비율 적용
+        # 💡 비중 배분 (안정형 50:25:25 적용)
         if len(ordered_names) == 3:
             if style == 'safe':
                 ratios = [50, 25, 25] # 🛡️ 안정형: 채권50 + 나머지 균등
             else:
-                ratios = [50, 30, 20] # 기본
+                ratios = [50, 30, 20] # 기본 5:3:2
                 
         elif len(ordered_names) == 2:
             ratios = [60, 40]
@@ -253,9 +255,18 @@ def get_smart_recommendation(df, user_choices):
             else:
                 pick_weights[name] = 0 
 
-    # 8. 결과 반환
+    # 8. 날짜 유연성 검증 및 타이틀 생성
+    is_timing_compromised = False
+    if timing != 'mix':
+        for pick in final_picks:
+            d_str = selected_pool[selected_pool['pure_name'] == pick]['temp_date_str'].iloc[0]
+            if not _check_timing_match(d_str, timing):
+                is_timing_compromised = True
+                break
+
     timing_badge = {"mid": "15일 배당", "end": "월말 배당", "mix": "맞춤"}
-    theme_title = f"{timing_badge.get(timing, '맞춤')} 포트폴리오"
+    prefix = "(날짜 유연) " if is_timing_compromised else ""
+    theme_title = f"{prefix}{timing_badge.get(timing, '맞춤')} 포트폴리오"
         
     return theme_title, final_picks, pick_weights
 
@@ -291,7 +302,7 @@ def show_wizard():
     if "wiz_data" not in st.session_state: st.session_state.wiz_data = {}
     step = st.session_state.wiz_step
 
-    # [Step 0] 도입부 및 국가 필터 선택 (닫기 버튼 삭제됨)
+    # [Step 0] 도입부 (닫기 버튼 삭제됨)
     if step == 0:
         st.subheader("나만의 배당 조합, 막막하신가요?")
         st.write("투자 성향과 목표에 맞춰 배당팽이가 최적의 포트폴리오를 설계해 드립니다. ✨")
@@ -304,17 +315,17 @@ def show_wizard():
         with col_all:
             if st.button("🌎 해외 포함", use_container_width=True): go_next_step(1, 'include_foreign', True); st.rerun()
 
-    # [Step 1] 투자 스타일 결정 (설명 문구 삭제됨)
+    # [Step 1] 투자 스타일 결정 (문구 삭제됨)
     elif step == 1:
         st.subheader("Q1. 어떤 투자를 원하세요?")
         
         st.button("📈 성장 추구 (주가 상승 + 배당)", use_container_width=True, on_click=go_next_step, args=(2, 'style', 'growth'))
         st.write("") 
         
-        st.button("💰 현금 흐름 (월 배당금 추구)", use_container_width=True, on_click=go_next_step, args=(2, 'style', 'flow'))
+        st.button("💰 현금 흐름 (월 배당금 극대화)", use_container_width=True, on_click=go_next_step, args=(2, 'style', 'flow'))
         st.write("") 
         
-        st.button("🛡️ 안정성 (원금 방어 우선)", use_container_width=True, on_click=go_next_step, args=(2, 'style', 'safe'))
+        st.button("🛡️ 안정성 (원금 방어 최우선)", use_container_width=True, on_click=go_next_step, args=(2, 'style', 'safe'))
 
     # [Step 2] 배당 주기 결정
     elif step == 2:
@@ -323,7 +334,7 @@ def show_wizard():
         st.button("🔚 월말/월초 (월급날 전후)", use_container_width=True, on_click=go_next_step, args=(3, 'timing', 'end'))
         st.button("🔄 상관없음 (섞어서 2주마다 받기)", use_container_width=True, on_click=go_next_step, args=(3, 'timing', 'mix'))
 
-    # [Step 3] 목표 수치 및 종목 개수 설정 (조건부 경고 로직 부활)
+    # [Step 3] 목표 수치 및 종목 개수 설정 (조건부 경고/조언 로직 적용)
     elif step == 3:
         st.subheader("Q3. 목표와 규모를 정해주세요")
         target = st.slider("💰 목표 연배당률 (%)", 3.0, 20.0, 7.0, 0.5)
@@ -344,7 +355,7 @@ def show_wizard():
         else: # flow
             st.info("💰 **현금 흐름:** 커버드콜과 안전자산(채권)을 적절히 섞어 **수익과 안정성**을 동시에 추구합니다.")
             if target >= 9.0:
-                st.warning("⚠️ **고위험 경고:** 목표 수익률이 매우 높습니다. 원금 변동성이 큰 커버드콜 종목 비중이 높아질 수 있습니다.")
+                st.warning("⚠️ **고위험 경고:** 목표 수익률이 매우 높습니다. 원금 변동성이 큰 고배당 종목 비중이 높아질 수 있습니다.")
 
         if st.button("🚀 다음 단계로 (3/4)", type="primary", use_container_width=True):
             st.session_state.wiz_data['target_yield'] = target
@@ -439,7 +450,7 @@ def show_wizard():
         if st.button("✅ 내 포트폴리오로 가져오기", type="primary", use_container_width=True):
             st.session_state.selected_stocks = picks
             st.session_state.ai_suggested_weights = weights
-            st.session_state.ai_modal_open = False # 스위치 OFF (팝업 닫힘)
+            st.session_state.ai_modal_open = False 
             if "ai_result_cache" in st.session_state: del st.session_state.ai_result_cache
             st.toast("장바구니에 담았습니다! 🛒", icon="✅")
             time.sleep(0.5)
