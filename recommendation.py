@@ -1,7 +1,7 @@
 """
 프로젝트: 배당 팽이 (Dividend Top) v2.9
 파일명: recommendation.py
-설명: AI 로보어드바이저 엔진 (쿼터제 + 황금비율 + 랜덤 셔플 + 신규상장 감점 삭제 및 태그 표시)
+설명: AI 로보어드바이저 엔진 (최종 완성: 쿼터제 + 황금비율 + 셔플 + 데이터 무결성 강화)
 업데이트: 2026.01.20
 """
 
@@ -90,9 +90,13 @@ def get_smart_recommendation(df, user_choices):
             match = df[df['검색라벨'] == lbl]
             if not match.empty: focus_real_names.append(match.iloc[0]['pure_name'])
 
-    # 2. 유니버스 필터링 (국가/타이밍)
+    # 2. 유니버스 필터링 (데이터 무결성 강화)
+    # 🚨 [필수 개선] 숫자가 아닌 데이터(문자, NaN)가 섞여있으면 에러가 나므로 강제 변환 및 제거
+    df['연배당률'] = pd.to_numeric(df['연배당률'], errors='coerce')
+    pool = df.dropna(subset=['연배당률']) # NaN 데이터 삭제
+    
     # [안전장치] 배당률이 0~35% 사이인 정상 데이터만 사용
-    pool = df[(df['연배당률'] > 0) & (df['연배당률'] <= 35.0)].copy()
+    pool = pool[(pool['연배당률'] > 0) & (pool['연배당률'] <= 35.0)].copy()
     
     if not include_foreign:
         pool = pool[pool['분류'] == '국내']
@@ -108,16 +112,12 @@ def get_smart_recommendation(df, user_choices):
         is_timing_match = pool['temp_date_str'].apply(lambda x: _check_timing_match(x, timing))
         pool.loc[is_timing_match, 'score'] += 50
     
-    # 🚨 [수정 사항] 신규 상장 감점 로직 삭제! (슈퍼 루키 보호)
-    # 대신 결과 화면에서 태그로만 알려줍니다.
-    
     # [셔플] 미세한 랜덤 점수 추가 (순위 고착화 방지)
     pool['score'] += [random.uniform(0, 5) for _ in range(len(pool))]
     
     # 4. 자산군(Cluster) 분류
     def get_cluster(row):
         asset_type = str(row.get('자산유형', ''))
-        
         if '채권' in asset_type: return 'bond'
         if '리츠' in asset_type: return 'reit'
         if '커버드콜' in asset_type: return 'cov'
@@ -228,7 +228,6 @@ def get_smart_recommendation(df, user_choices):
         for p in final_picks:
             cluster = selected_pool[selected_pool['pure_name']==p]['cluster'].iloc[0]
             priority = 0
-            # 스타일별 대장주 우선순위 정렬
             if style == 'safe' and cluster == 'bond': priority = 3
             elif style == 'flow' and cluster == 'cov': priority = 3
             elif style == 'growth' and cluster == 'growth': priority = 3
@@ -239,25 +238,18 @@ def get_smart_recommendation(df, user_choices):
         sorted_picks.sort(key=lambda x: x[1], reverse=True)
         ordered_names = [x[0] for x in sorted_picks]
         
-        # 💡 비중 배분 (안정형 50:25:25 적용)
         if len(ordered_names) == 3:
             if style == 'safe':
-                ratios = [50, 25, 25] # 🛡️ 안정형
+                ratios = [50, 25, 25] 
             else:
-                ratios = [50, 30, 20] # 기본
-                
-        elif len(ordered_names) == 2:
-            ratios = [60, 40]
-        elif len(ordered_names) == 4:
-            ratios = [40, 30, 20, 10]
-        else:
-            ratios = [100]
+                ratios = [50, 30, 20] 
+        elif len(ordered_names) == 2: ratios = [60, 40]
+        elif len(ordered_names) == 4: ratios = [40, 30, 20, 10]
+        else: ratios = [100]
             
         for i, name in enumerate(ordered_names):
-            if i < len(ratios):
-                pick_weights[name] = ratios[i]
-            else:
-                pick_weights[name] = 0 
+            if i < len(ratios): pick_weights[name] = ratios[i]
+            else: pick_weights[name] = 0 
 
     # 8. 날짜 유연성 검증 및 타이틀 생성
     is_timing_compromised = False
@@ -306,7 +298,7 @@ def show_wizard():
     if "wiz_data" not in st.session_state: st.session_state.wiz_data = {}
     step = st.session_state.wiz_step
 
-    # [Step 0] 도입부 (닫기 버튼 삭제됨)
+    # [Step 0] 도입부
     if step == 0:
         st.subheader("나만의 배당 조합, 막막하신가요?")
         st.write("투자 성향과 목표에 맞춰 배당팽이가 최적의 포트폴리오를 설계해 드립니다. ✨")
@@ -319,7 +311,7 @@ def show_wizard():
         with col_all:
             if st.button("🌎 해외 포함", use_container_width=True): go_next_step(1, 'include_foreign', True); st.rerun()
 
-    # [Step 1] 투자 스타일 결정 (문구 삭제됨)
+    # [Step 1] 투자 스타일 결정
     elif step == 1:
         st.subheader("Q1. 어떤 투자를 원하세요?")
         
@@ -338,7 +330,7 @@ def show_wizard():
         st.button("🔚 월말/월초 (월급날 전후)", use_container_width=True, on_click=go_next_step, args=(3, 'timing', 'end'))
         st.button("🔄 상관없음 (섞어서 2주마다 받기)", use_container_width=True, on_click=go_next_step, args=(3, 'timing', 'mix'))
 
-    # [Step 3] 목표 수치 및 종목 개수 설정 (조건부 경고/조언 로직 적용)
+    # [Step 3] 목표 수치 및 종목 개수 설정
     elif step == 3:
         st.subheader("Q3. 목표와 규모를 정해주세요")
         target = st.slider("💰 목표 연배당률 (%)", 3.0, 20.0, 7.0, 0.5)
@@ -356,7 +348,7 @@ def show_wizard():
             if target >= 7.0:
                 st.warning("⚠️ **현실적 조언:** 성장주 위주로는 고배당(7%+) 달성이 어렵습니다. 실제 결과 배당률은 목표보다 낮을 수 있습니다.")
                 
-        else: # flow
+        else: 
             st.info("💰 **현금 흐름:** 커버드콜과 안전자산(채권)을 적절히 섞어 **수익과 안정성**을 동시에 추구합니다.")
             if target >= 9.0:
                 st.warning("⚠️ **고위험 경고:** 목표 수익률이 매우 높습니다. 원금 변동성이 큰 고배당 종목 비중이 높아질 수 있습니다.")
@@ -390,7 +382,7 @@ def show_wizard():
         if c1.button("⬅️ 이전으로", use_container_width=True): st.session_state.wiz_step = 3; st.rerun()
         if c2.button("🚀 결과 보기", type="primary", use_container_width=True): st.session_state.wiz_step = 5; st.rerun()
 
-    # [Step 5] 최종 결과 출력 (닫기 버튼 삭제됨)
+    # [Step 5] 최종 결과 출력
     elif step == 5:
         if "ai_result_cache" not in st.session_state or st.session_state.ai_result_cache is None:
             with st.spinner("🎲 최적 조합 찾는 중..."):
@@ -420,7 +412,7 @@ def show_wizard():
             w = weights.get(stock, 0)
             total_avg_yld += (row['연배당률'] * w / 100)
             
-            # 🚨 [신규 상장 태그] 결과 화면에서 표시
+            # 신규 상장 태그
             months = int(row.get('신규상장개월수', 0))
             new_tag = " | 🌱 신규 상장" if 0 < months < 12 else ""
             
