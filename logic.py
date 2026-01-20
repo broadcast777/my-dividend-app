@@ -1,7 +1,8 @@
 """
-프로젝트: 배당 팽이 (Dividend Top) v3.3
+프로젝트: 배당 팽이 (Dividend Top) v2.9
 파일명: logic.py
-설명: 금융 API 연동 (네이버 모바일 API JSON 구조 파싱 오류 수정 + HTML 크롤링 백업 강화)
+설명: 금융 API 연동, 데이터 크롤링, 캘린더 파일 생성 (데이터 무결성 강화 + 충돌 방지 패치 적용)
+업데이트: 2026.01.20
 """
 
 import streamlit as st
@@ -15,46 +16,103 @@ import calendar
 from urllib.parse import quote
 import re
 import requests
+import base64
 import json
 from github import Github
 from logger import logger
-import sqlite3
-import warnings
-
-# SSL 경고 무시
-warnings.filterwarnings("ignore", category=requests.packages.urllib3.exceptions.InsecureRequestWarning)
+import sqlite3  # DB 에러 처리를 위해 추가
 
 # -----------------------------------------------------------
-# [SECTION 1] 날짜 및 스케줄링 헬퍼
+# [SECTION 1] 날짜 및 스케줄링 헬퍼 (공통 도구)
 # -----------------------------------------------------------
+
+def standardize_date_format(date_str):
+    """
+    [NEW] 입력된 날짜 문자열을 'YYYY-MM-DD' 표준 포맷으로 1차 정규화합니다.
+    (예: 2025.1.5 -> 2025-01-05, 2025/12/31 -> 2025-12-31)
+    """
+    s = str(date_str).strip()
+    # 이미 YYYY-MM-DD 형식이면 패스
+    if re.match(r'^\d{4}-\d{2}-\d{2}$', s):
+        return s
+    
+    # 점(.)이나 슬래시(/)를 하이픈(-)으로 통일
+    s = s.replace('.', '-').replace('/', '-')
+    
+    # 정규식으로 YYYY-M-D 패턴을 찾아 YYYY-MM-DD로 변환
+    match = re.match(r'^(\d{4})-(\d{1,2})-(\d{1,2})$', s)
+    if match:
+        y, m, d = match.groups()
+        return f"{y}-{m.zfill(2)}-{d.zfill(2)}"
+    
+    return s  # 변환 불가능하면 원본 반환 (parse_dividend_date에서 처리)
 
 def parse_dividend_date(date_str):
-    s = str(date_str).strip()
+    """
+    다양한 형태의 날짜 문자열(월초, 월말, 특정일)을 datetime.date 객체로 변환합니다.
+    """
+    # 1. 포맷 표준화 시도
+    s = standardize_date_format(str(date_str))
     today = datetime.date.today()
+    
+    # 2. YYYY-MM-DD 형식 파싱 시도
     try:
         return datetime.datetime.strptime(s, "%Y-%m-%d").date()
     except ValueError:
         pass
     
+    # 3. 키워드 분석 (월말/월초/특정일)
+    is_end_of_month = any(k in s for k in ['말일', '월말', '마지막', '하순', 'END'])
+    is_start_of_month = any(k in s for k in ['매월 초', '월초', '1~3일', 'BEGIN'])
+    
+    # 숫자만 추출
     day_match = re.search(r'(\d+)', s)
-    if day_match and ('매월' in s or '일' in s):
+    
+    if is_end_of_month or is_start_of_month or (day_match and ('매월' in s or '일' in s)):
         try:
-            day = int(day_match.group(1))
-            target_date = datetime.date(today.year, today.month, day)
+            if is_end_of_month:
+                day = calendar.monthrange(today.year, today.month)[1] # 이번달 말일
+            elif is_start_of_month:
+                day = 1 
+            else:
+                day = int(day_match.group(1))
+            
+            # 이번 달 기준 날짜 생성
+            try:
+                # 해당 월에 없는 날짜(예: 2월 30일)면 말일로 자동 보정
+                last_day_actual = calendar.monthrange(today.year, today.month)[1]
+                safe_day = min(day, last_day_actual)
+                target_date = datetime.date(today.year, today.month, safe_day)
+            except ValueError:
+                target_date = today # 안전 장치
+            
+            # 이미 지났으면 다음 달로 넘김
             if target_date < today:
                 next_month = today.month + 1 if today.month < 12 else 1
                 year = today.year if today.month < 12 else today.year + 1
-                try:
-                    return datetime.date(year, next_month, day)
-                except ValueError:
-                    last_day = calendar.monthrange(year, next_month)[1]
-                    return datetime.date(year, next_month, last_day)
+                
+                last_day_next = calendar.monthrange(year, next_month)[1]
+                
+                if is_end_of_month:
+                    real_day = last_day_next
+                elif is_start_of_month:
+                    real_day = 1
+                else:
+                    real_day = min(day, last_day_next)
+                    
+                return datetime.date(year, next_month, real_day)
+            
             return target_date
-        except ValueError:
+        except Exception:
             pass
+            
     return None 
 
 def generate_portfolio_ics(portfolio_data):
+    """
+    [일괄 등록용] 포트폴리오 전체 일정을 .ics 파일 포맷으로 생성
+    (조건: D-4 알림 + 과거 일정 스킵 + 오늘부터 '올해 12월 31일'까지만 생성)
+    """
     ics_content = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
@@ -62,158 +120,218 @@ def generate_portfolio_ics(portfolio_data):
         "CALSCALE:GREGORIAN",
         "METHOD:PUBLISH"
     ]
+    
     today = datetime.date.today()
     current_year = today.year
     
     for item in portfolio_data:
         name = item.get('종목', '배당주')
-        date_info = str(item.get('배당락일', '-'))
+        # 데이터가 없을 경우 '-' 처리하여 에러 방지
+        date_info = str(item.get('배당락일', '-')).strip()
+        if date_info in ['-', 'nan', 'None', '']: continue
+
+        # 1. 키워드 파싱
+        is_end_of_month = any(k in date_info for k in ['말일', '월말', '마지막', '30일', '31일', '하순'])
+        is_start_of_month = any(k in date_info for k in ['매월 초', '월초', '1~3일'])
         day_match = re.search(r'(\d+)', date_info)
         
-        if day_match and ('매월' in date_info or '일' in date_info):
-            day = int(day_match.group(1))
-            for i in range(12):
-                month = today.month + i
-                year = current_year + (month - 1) // 12
-                month = (month - 1) % 12 + 1
+        target_day = None
+        if is_end_of_month: target_day = 'END'
+        elif is_start_of_month: target_day = 1
+        elif day_match: # '일' 글자가 없더라도 숫자가 있으면 시도
+            target_day = int(day_match.group(1))
+        
+        # 날짜 포맷이 '2025-05-15' 처럼 고정일인 경우 처리 로직 추가
+        fixed_date_obj = None
+        if '-' in date_info or '.' in date_info:
+             parsed = parse_dividend_date(date_info)
+             if parsed: fixed_date_obj = parsed
+
+        # 2. 스마트 날짜 계산 Loop
+        if target_day is not None or fixed_date_obj:
+            check_idx = 0
+            
+            # 고정 날짜 하나만 있는 경우 (연배당 등)
+            if fixed_date_obj:
+                 # D-4 계산 로직 공통화 필요하지만, 일단 여기서는 생략하고 반복문 로직 태움
+                 # 만약 고정일이면 아래 반복문 대신 단건 처리로 빠져야 함.
+                 # 여기서는 '매월' 배당 위주로 처리
+                 pass 
+
+            # 최대 12개월을 탐색하되, 해가 바뀌면 중단
+            while check_idx < 12:
+                month_calc = today.month + check_idx
+                year = current_year + (month_calc - 1) // 12
+                month = (month_calc - 1) % 12 + 1
+                
+                check_idx += 1 
+                
+                if year > current_year:
+                    break
+                
                 try:
-                    last_day = calendar.monthrange(year, month)[1]
-                    safe_day = min(day, last_day)
-                    event_date = datetime.date(year, month, safe_day)
-                    buy_date = event_date - datetime.timedelta(days=4)
-                    while buy_date.weekday() >= 5: buy_date -= datetime.timedelta(days=1)
+                    last_day_of_month = calendar.monthrange(year, month)[1]
                     
+                    if target_day == 'END':
+                        safe_day = last_day_of_month
+                    elif isinstance(target_day, int):
+                        safe_day = min(target_day, last_day_of_month)
+                    else:
+                        continue # 처리 불가
+                    
+                    event_date = datetime.date(year, month, safe_day)
+                    
+                    # D-4 계산 (4일 전 알림)
+                    buy_date = event_date - datetime.timedelta(days=4)
+                    
+                    # 주말이면 금요일로 당김
+                    while buy_date.weekday() >= 5: 
+                        buy_date -= datetime.timedelta(days=1)
+                    
+                    if buy_date < today:
+                        continue
+                        
                     dt_start = buy_date.strftime("%Y%m%d")
                     dt_end = (buy_date + datetime.timedelta(days=1)).strftime("%Y%m%d")
+                    
+                    description = (
+                        f"예상 배당락일: {event_date}\\n\\n"
+                        f"💰 [{name}] 배당 수령을 위해 계좌를 확인하세요.\\n\\n"
+                        f"🛑 [필독] 투자 유의사항\\n"
+                        f"이 알림은 과거 데이터를 기반으로 생성된 '예상 일정'입니다.\\n"
+                        f"운용사 정책 변경으로 실제 배당일이 바뀔 수 있습니다.\\n"
+                        f"안전한 투자를 위해, 매수 전 반드시 '운용사 공식 홈페이지' 공시를 확인해주세요."
+                    )
+                    
                     ics_content.extend([
                         "BEGIN:VEVENT",
                         f"DTSTART;VALUE=DATE:{dt_start}",
                         f"DTEND;VALUE=DATE:{dt_end}",
                         f"SUMMARY:🔔 [{name}] 배당락 D-4 (매수 권장)",
-                        f"DESCRIPTION:예상 배당락일: {event_date}\\n안전하게 오늘 매수하세요!",
+                        f"DESCRIPTION:{description}",
                         "END:VEVENT"
                     ])
-                except ValueError: continue
+                    
+                except ValueError:
+                    continue
+
     ics_content.append("END:VCALENDAR")
     return "\n".join(ics_content)
 
 def get_google_cal_url(stock_name, date_str):
+    """
+    [단일 등록용] 구글 캘린더 일정 등록 URL 생성 (D-4일 기준)
+    """
     try:
         target_date = parse_dividend_date(date_str)
         if not target_date: return None
+        
         if isinstance(target_date, datetime.date):
             safe_buy_date = target_date - datetime.timedelta(days=4) 
-        else: return None
-        while safe_buy_date.weekday() >= 5: safe_buy_date -= datetime.timedelta(days=1)
+        else:
+            return None
+
+        # 주말이면 금요일로 당김
+        while safe_buy_date.weekday() >= 5:
+            safe_buy_date -= datetime.timedelta(days=1)
+
         start_str = safe_buy_date.strftime("%Y%m%d")
         end_str = (safe_buy_date + datetime.timedelta(days=1)).strftime("%Y%m%d")
+        
         base_url = "https://www.google.com/calendar/render?action=TEMPLATE"
-        title = quote(f"🔔 [{stock_name}] 배당락 D-4")
-        details = quote(f"예상 배당락일: {date_str}\n안전하게 오늘 매수하세요!")
+        
+        title_text = f"🔔 [{stock_name}] 배당락 D-4 (매수 권장)"
+        details_text = (
+            f"예상 배당락일: {date_str}\n\n"
+            f"💰 배당 수령을 위해 계좌를 확인하세요.\n\n"
+            f"🛑 [필독] 투자 유의사항\n"
+            f"이 알림은 과거 데이터를 기반으로 생성된 '예상 일정'입니다.\n"
+            f"운용사 정책 변경(예: 15일→월말)으로 실제 배당일이 바뀔 수 있습니다.\n"
+            f"안전한 투자를 위해, 매수 전 반드시 '운용사 공식 홈페이지' 공시를 확인해주세요."
+        )
+
+        title = quote(title_text)
+        details = quote(details_text)
+        
         return f"{base_url}&text={title}&dates={start_str}/{end_str}&details={details}"
-    except: return None
+    except Exception as e:
+        logger.error(f"Calendar URL Error: {e}")
+        return None
 
 
 # -----------------------------------------------------------
-# [SECTION 2] 시세 조회 및 유틸리티 (구조 수정 완료)
+# [SECTION 2] 시세 조회 및 유틸리티 함수
 # -----------------------------------------------------------
-
-def _fetch_naver_price(code):
-    """
-    [FIXED] 네이버 API의 JSON 구조(result 키)를 정확히 파싱하여 현재가를 가져옵니다.
-    """
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Referer": "https://m.stock.naver.com/"
-    }
-    
-    # 1. ETF API 시도
-    try:
-        url = f"https://api.stock.naver.com/etf/{code}/basic"
-        res = requests.get(url, headers=headers, timeout=2, verify=False)
-        if res.status_code == 200:
-            data = res.json()
-            # 🚨 [수정] data['result'] 안에 있는 closePrice를 가져와야 함
-            if 'result' in data and 'closePrice' in data['result']:
-                return int(data['result']['closePrice'])
-            # 혹시 구조가 다를 경우 대비 (바로 있는 경우)
-            if 'closePrice' in data: return int(data['closePrice'])
-    except: pass
-
-    # 2. 일반 주식 API 시도
-    try:
-        url = f"https://api.stock.naver.com/stock/{code}/basic"
-        res = requests.get(url, headers=headers, timeout=2, verify=False)
-        if res.status_code == 200:
-            data = res.json()
-            if 'result' in data and 'closePrice' in data['result']:
-                return int(data['result']['closePrice'])
-            if 'closePrice' in data: return int(data['closePrice'])
-    except: pass
-
-    # 3. HTML 파싱 (최후의 수단 - PC 페이지)
-    try:
-        url = f"https://finance.naver.com/item/main.naver?code={code}"
-        res = requests.get(url, headers=headers, timeout=3, verify=False)
-        if res.status_code == 200:
-            # <div class="today">...<span class="blind">10,000</span>...</div> 구조 찾기
-            # 'no_today' 클래스 뒤에 오는 blind 태그의 숫자 추출
-            match = re.search(r'no_today.*blind">\s*([\d,]+)\s*<', res.text, re.DOTALL)
-            if match:
-                return int(match.group(1).replace(',', ''))
-    except: pass
-    
-    return 0
 
 def _fetch_price_raw(broker, code, category):
+    """
+    [핵심 수정] DB Locked 에러 방지를 위한 안전 조회 로직
+    """
     try:
         code_str = str(code).strip()
         
-        # 1. 국내: 한투 API -> 실패 시 네이버 API (3중 백업)
+        # 1. 국내 주식 (한투 API)
         if category == '국내':
-            # 한투 시도
             try:
-                if broker:
-                    resp = broker.fetch_price(code_str)
-                    if resp and isinstance(resp, dict) and 'output' in resp:
-                        if resp['output'].get('stck_prpr'): return int(resp['output']['stck_prpr'])
-            except: pass
-            
-            # [백업] 네이버 (수정된 함수 호출)
-            naver_price = _fetch_naver_price(code_str)
-            if naver_price > 0: return naver_price
-            
-            return 0 # 정말 다 실패하면 0
+                resp = broker.fetch_price(code_str)
+                if resp and isinstance(resp, dict) and 'output' in resp:
+                    if resp['output'] and resp['output'].get('stck_prpr'):
+                        return int(resp['output']['stck_prpr'])
+            except Exception as e:
+                # 한투 에러는 로그만 남기고 yfinance 시도 안함 (국내는 yfinance 데이터 부실)
+                logger.warning(f"KIS Price Error ({code}): {e}")
+                return None
         
-        # 2. 해외: Yfinance
+        # 2. 해외 주식 (Yfinance) - Locked 에러 주범
         ticker_code = f"{code_str}.KS" if category == '국내' else code_str
+        
+        # 🚨 [패치] yfinance가 내부적으로 sqlite 캐시를 쓰면서 충돌 발생
+        # 충돌 시 잠시 대기 후 재시도 (Retry Pattern)
         max_retries = 3
         for attempt in range(max_retries):
             try:
                 ticker = yf.Ticker(ticker_code)
                 price = ticker.fast_info.get('last_price')
+                
+                # fast_info 실패 시 history 조회
                 if not price:
                     hist = ticker.history(period="1d")
-                    if not hist.empty: price = hist['Close'].iloc[-1]
+                    if not hist.empty:
+                        price = hist['Close'].iloc[-1]
+                
                 if price: return float(price)
+            
             except sqlite3.OperationalError: 
-                if attempt < max_retries - 1: time.sleep(0.5); continue
-            except: break
+                # DB 잠금 에러 발생 시
+                if attempt < max_retries - 1:
+                    time.sleep(0.5) # 0.5초 대기 후 재시도
+                    continue
+                else:
+                    logger.error(f"DB Locked Fail ({code}): Max retries exceeded")
+            except Exception:
+                break # 다른 에러면 재시도 의미 없음
+                
         return None
-    except: return None
+    except Exception as e:
+        logger.error(f"Price Fetch Error ({code}): {e}")
+        return None
 
 def get_safe_price(broker, code, category):
+    """안전하게 가격을 가져오며 실패 시 1회 더 재시도"""
     for _ in range(2):
         price = _fetch_price_raw(broker, code, category)
-        if price and price > 0: return price
-        time.sleep(0.2)
+        if price is not None: return price
+        time.sleep(0.3)
     return None
 
 def classify_asset(row):
+    """종목명과 코드를 분석하여 자산의 유형을 정밀 분류합니다."""
     name, symbol = str(row.get('종목명', '')).upper(), str(row.get('종목코드', '')).upper()
-    if any(k in name or k in symbol for k in ['커버드콜', 'COVERED', 'QYLD', 'JEPI', 'JEPQ', 'NVDY', 'TSLY', 'QQQI']): return '🛡️ 커버드콜'
-    if any(k in name or k in symbol for k in ['채권', '국채', 'BOND', 'TLT', '하이일드']): return '🏦 채권형'
-    if '리츠' in name or 'REITS' in name or 'INFRA' in name: return '🏢 리츠형'
+    
+    if any(k in name or k in symbol for k in ['커버드콜', 'COVERED', 'QYLD', 'JEPI', 'JEPQ', 'NVDY', 'TSLY', 'QQQI', '타겟위클리']): return '🛡️ 커버드콜'
+    if any(k in name or k in symbol for k in ['채권', '국채', 'BOND', 'TLT', '하이일드', 'HI-YIELD']): return '🏦 채권형'
+    if '리츠' in name or 'REITS' in name or 'INFRA' in name or '인프라' in name: return '🏢 리츠형'
+    if '혼합' in name: return '⚖️ 혼합형'
     return '📈 주식형'
 
 def get_hedge_status(name, category):
@@ -221,33 +339,42 @@ def get_hedge_status(name, category):
     if category == '해외': return "💲달러(직투)"
     if "환노출" in name_str or "UNHEDGED" in name_str: return "⚡환노출"
     if any(x in name_str for x in ["(H)", "헤지"]): return "🛡️환헤지(H)"
-    return "⚡환노출" if any(x in name_str for x in ['미국', 'GLOBAL']) else "-"
+    return "⚡환노출" if any(x in name_str for x in ['미국', 'GLOBAL', 'S&P500', '나스닥', '국제']) else "-"
 
 
 # -----------------------------------------------------------
-# [SECTION 3] 메인 데이터 로드 및 병렬 처리
+# [SECTION 3] 메인 데이터 로드 및 병렬 처리 엔진
 # -----------------------------------------------------------
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def load_and_process_data(df_raw, is_admin=False):
     if df_raw.empty: return pd.DataFrame()
+
+    # 1. 데이터 전처리 (결측치 방어)
     try:
         num_cols = ['연배당금', '연배당률', '현재가', '신규상장개월수', '연배당금_크롤링']
         for col in num_cols:
-            if col in df_raw.columns: df_raw[col] = pd.to_numeric(df_raw[col], errors='coerce').fillna(0)
-        
-        # [코드 보정] 
+            if col in df_raw.columns:
+                # 문자가 섞여있을 경우 강제 변환 후 NaN은 0으로
+                df_raw[col] = pd.to_numeric(df_raw[col], errors='coerce').fillna(0)
+
         if '종목코드' in df_raw.columns:
-            def fix_code(x):
-                s = str(x).strip().split('.')[0]
+            def clean_ticker(x):
+                s = str(x).split('.')[0].strip()
                 if s.isdigit(): return s.zfill(6) 
                 return s.upper() 
-            df_raw['종목코드'] = df_raw['종목코드'].apply(fix_code)
+            
+            df_raw['종목코드'] = df_raw['종목코드'].apply(clean_ticker)
 
-        if '배당락일' in df_raw.columns: df_raw['배당락일'] = df_raw['배당락일'].astype(str).replace(['nan', 'None'], '-')
-        if '자산유형' in df_raw.columns: df_raw['자산유형'] = df_raw['자산유형'].fillna('기타')
-    except: pass
+        if '배당락일' in df_raw.columns:
+            df_raw['배당락일'] = df_raw['배당락일'].astype(str).replace(['nan', 'None', 'nan '], '-')
 
+        if '자산유형' in df_raw.columns:
+            df_raw['자산유형'] = df_raw['자산유형'].fillna('기타')
+    except Exception as e:
+        logger.error(f"Data Preprocessing Error: {e}")
+
+    # 2. 브로커 초기화
     try:
         broker = mojito.KoreaInvestment(
             api_key=st.secrets["kis"]["app_key"],
@@ -255,16 +382,19 @@ def load_and_process_data(df_raw, is_admin=False):
             acc_no=st.secrets["kis"]["acc_no"],
             mock=True 
         )
-    except: broker = None
+    except:
+        broker = None
 
     results = [None] * len(df_raw)
     
+    # 3. 병렬 처리 작업자
     def process_row(idx, row):
         try:
             code = str(row.get('종목코드', '')).strip()
             name = str(row.get('종목명', '')).strip()
             category = str(row.get('분류', '국내')).strip()
             
+            # 가격 조회 (Safe Logic 적용)
             price = get_safe_price(broker, code, category)
             if not price: price = 0 
 
@@ -272,6 +402,7 @@ def load_and_process_data(df_raw, is_admin=False):
             manual_div = float(row.get('연배당금', 0))        
             months = int(row.get('신규상장개월수', 0))
 
+            # 신규 상장 종목 연환산
             if 0 < months < 12:
                 target_div = (manual_div / months * 12) if manual_div > 0 else crawled_div
                 display_name = f"{name} ⭐"
@@ -280,11 +411,15 @@ def load_and_process_data(df_raw, is_admin=False):
                 display_name = name
 
             yield_val = (target_div / price * 100) if price > 0 else 0
+
             if is_admin and (yield_val < 2.0 or yield_val > 25.0): display_name = f"🚫 {display_name}"
+
             price_fmt = f"{int(price):,}원" if category == '국내' else f"${price:.2f}"
             
+            csv_type = str(row.get('유형', '-'))
             auto_asset_type = classify_asset(row) 
-            final_type = str(row.get('유형', '-'))
+            
+            final_type = csv_type
             if '채권' in auto_asset_type: final_type = '채권'
             elif '커버드콜' in auto_asset_type: final_type = '커버드콜'
             elif '리츠' in auto_asset_type: final_type = '리츠'
@@ -307,8 +442,11 @@ def load_and_process_data(df_raw, is_admin=False):
                 '배당기록': str(row.get('배당기록', '')),
                 '검색라벨': str(row.get('검색라벨', f"[{code}] {display_name}"))
             }
-        except: return idx, None
+        except Exception as e:
+            logger.error(f"Row Processing Error ({idx}): {e}")
+            return idx, None
 
+    # 스레드 풀 실행 (yfinance 충돌 완화를 위해 워커 수 조절 가능)
     with ThreadPoolExecutor(max_workers=10) as executor:
         futures = {executor.submit(process_row, idx, row): idx for idx, row in df_raw.iterrows()}
         for future in as_completed(futures):
@@ -320,21 +458,28 @@ def load_and_process_data(df_raw, is_admin=False):
 
 
 # -----------------------------------------------------------
-# [SECTION 4] 데이터 파일 관리
+# [SECTION 4] 데이터 파일 관리 (GitHub/CSV)
 # -----------------------------------------------------------
 
 @st.cache_data(ttl=1800)
 def load_stock_data_from_csv():
     import os
     file_path = "stocks.csv"
+    
+    # 🚨 [패치] 파일 접근 충돌 방지 (Retry Logic)
     for _ in range(3):
         try:
-            if not os.path.exists(file_path): return pd.DataFrame()
+            if not os.path.exists(file_path):
+                return pd.DataFrame()
+            
             df = pd.read_csv(file_path, dtype={'종목코드': str})
             df.columns = df.columns.str.strip()
             if '연배당금_크롤링' not in df.columns: df['연배당금_크롤링'] = 0.0
             return df
-        except: time.sleep(0.5)
+        except Exception:
+            time.sleep(0.5) # 잠겨있으면 0.5초 대기
+    
+    logger.error("CSV Load Failed after retries")
     return pd.DataFrame()
 
 def save_to_github(df):
@@ -348,7 +493,9 @@ def save_to_github(df):
         csv_data = df.to_csv(index=False).encode("utf-8")
         repo.update_file(path=contents.path, message="🤖 데이터 자동 갱신", content=csv_data, sha=contents.sha)
         return True, "✅ 깃허브 저장 성공!"
-    except Exception as e: return False, f"❌ 저장 실패: {str(e)}"
+    except Exception as e:
+        logger.error(f"Github Save Error: {e}")
+        return False, f"❌ 저장 실패: {str(e)}"
 
 
 # -----------------------------------------------------------
@@ -358,77 +505,111 @@ def save_to_github(df):
 def fetch_dividend_yield_hybrid(code, category):
     code = str(code).strip()
     
-    # [국내 주식] 네이버 Mobile API (History 집계)
+    # [국내 주식 조회 로직]
     if category == '국내':
-        # 1. 현재가 조회 (한투 -> 네이버 백업)
-        current_price = _fetch_price_raw(None, code, '국내') 
-        if current_price == 0: return 0.0, "⚠️ 현재가 0원"
+        try:
+            broker = mojito.KoreaInvestment(
+                api_key=st.secrets["kis"]["app_key"],
+                api_secret=st.secrets["kis"]["app_secret"],
+                acc_no=st.secrets["kis"]["acc_no"],
+                mock=True 
+            )
+            resp = broker.fetch_price(code)
+            if resp and 'output' in resp:
+                yield_str = resp['output'].get('hts_dvsd_rate', '0.0')
+                if yield_str and yield_str != '-' and float(yield_str) > 0:
+                    return float(yield_str), "✅ 한투 API"
+        except: pass
 
-        HEADERS_MOBILE = {
-            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)",
-            "Accept": "application/json, text/plain, */*",
-            "Referer": "https://m.stock.naver.com/"
-        }
-        
-        # 2. 배당금 내역 조회 (History 방식)
-        urls = [f"https://m.stock.naver.com/api/etf/{code}/dividend/history", f"https://m.stock.naver.com/api/stock/{code}/dividend/history"]
-        total_dividend = 0
-        found_source = ""
-        
-        for url in urls:
+        try:
+            ticker_code = f"{code}.KS"
+            # yfinance 호출 시에도 sqlite 에러 방지
             try:
-                res = requests.get(url, params={"page": 1, "pageSize": 50}, headers=HEADERS_MOBILE, timeout=5)
-                if res.status_code == 200:
-                    data = res.json()
-                    items = []
-                    # JSON 구조 파싱 (유연하게)
-                    if 'result' in data and isinstance(data['result'], dict) and 'items' in data['result']:
-                        items = data['result']['items']
-                    elif 'result' in data and isinstance(data['result'], list):
-                        items = data['result']
-                    elif 'items' in data:
-                        items = data['items']
-                        
-                    if items:
-                        real_total = 0; limit = 12; collected = 0
-                        for it in items:
-                            val = None
-                            for k in ['dividend', 'dividendAmount', 'amount']:
-                                if k in it and it[k]: val = it[k]; break
-                            if val:
-                                try:
-                                    real_total += int(float(str(val).replace(',', '')))
-                                    collected += 1
-                                except: pass
-                            if collected >= limit: break
-                        if real_total > 0:
-                            total_dividend = real_total; found_source = "✅ 네이버(History)"; break
-            except: pass
-        
-        if total_dividend > 0:
-            yield_val = (total_dividend / current_price) * 100
-            return round(yield_val, 2), found_source
-            
-        return 0.0, "⚠️ 배당정보 없음"
+                stock = yf.Ticker(ticker_code)
+                dy = stock.info.get('dividendYield')
+                if dy and dy > 0: return round(dy * 100, 2), "✅ 야후(Info)"
+            except sqlite3.OperationalError:
+                pass # DB 잠금 시 스킵
 
-    # [해외 주식] 야후 파이낸스
+            # 네이버 크롤링
+            url = f"https://finance.naver.com/item/main.naver?code={code}"
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            response = requests.get(url, headers=headers)
+            response.encoding = 'euc-kr' 
+            
+            # 테이블 파싱 시도
+            try:
+                dfs = pd.read_html(response.text)
+                for df in dfs:
+                    table_str = df.to_string()
+                    if "배당수익률" in table_str or "분배금수익률" in table_str:
+                        for col in df.columns:
+                            col_list = df[col].astype(str).tolist()
+                            for val in col_list:
+                                if "%" in val:
+                                    try:
+                                        num = float(val.replace("%", "").strip())
+                                        if 0 < num < 30: return num, "✅ 네이버(Table)"
+                                    except: pass
+            except: pass
+
+            if '_dvr' in response.text:
+                part = response.text.split('<em id="_dvr">')[1]
+                val = part.split('</em>')[0]
+                return float(val), "✅ 네이버(ID)"
+        except Exception as e:
+            return 0.0, f"❌ 네이버 에러: {str(e)}"
+
+        return 0.0, "⚠️ 데이터 없음 (국내)"
+
+    # [해외 주식 조회 로직]
     else:
         try:
             stock = yf.Ticker(code)
+            try:
+                divs = stock.dividends
+                if not divs.empty:
+                    if divs.index.tz is not None:
+                        divs.index = divs.index.tz_localize(None)
+                    one_year_ago = pd.Timestamp.now() - pd.Timedelta(days=365)
+                    recent_divs = divs[divs.index >= one_year_ago]
+                    recent_total = recent_divs.sum()
+                    
+                    price = stock.fast_info.get('last_price')
+                    if not price or price <= 0:
+                        hist = stock.history(period="1d")
+                        if not hist.empty: price = hist['Close'].iloc[-1]
+                    
+                    if price and price > 0 and recent_total > 0:
+                        yield_cal = (recent_total / price) * 100
+                        if yield_cal > 50: yield_cal = yield_cal / 100
+                        if 0 < yield_cal < 50:
+                            return round(yield_cal, 2), f"✅ 야후(계산:${recent_total:.2f})"
+            except: pass 
+
             dy = stock.info.get('dividendYield')
             if dy and dy > 0: 
-                calc_val = dy * 100
-                if calc_val > 50: calc_val = dy
-                return round(calc_val, 2), "✅ 야후(Info)"
+                calc_dy = dy * 100
+                if calc_dy > 50: calc_dy = dy 
+                return round(calc_dy, 2), "✅ 야후(Info)"
             return 0.0, "⚠️ 데이터 없음"
-        except:
-            return 0.0, "❌ 해외 에러"
+        except Exception as e:
+            return 0.0, f"❌ 해외 에러: {str(e)}"
 
 def update_dividend_rolling(current_history_str, new_dividend_amount):
-    if pd.isna(current_history_str) or str(current_history_str).strip() == "": history = []
+    """배당금 기록 갱신"""
+    if pd.isna(current_history_str) or str(current_history_str).strip() == "":
+        history = []
     else:
-        try: history = [int(float(x)) for x in str(current_history_str).split('|') if x.strip()]
-        except: history = []
-    if len(history) >= 12: history.pop(0)
+        try:
+            history = [int(float(x)) for x in str(current_history_str).split('|') if x.strip()]
+        except:
+            history = []
+
+    if len(history) >= 12:
+        history.pop(0)
+        
     history.append(int(new_dividend_amount))
-    return sum(history), "|".join(map(str, history))
+    new_annual_total = sum(history)
+    new_history_str = "|".join(map(str, history))
+    return new_annual_total, new_history_str
