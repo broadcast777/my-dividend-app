@@ -1072,8 +1072,8 @@ def main():
         render_sidebar_footer()
 
     if menu == "💰 배당금 계산기": render_calculator_page(df)
-    elif menu == "📅 월별 로드맵": render_roadmap_page(df)
-    elif menu == "📃 전체 종목 리스트": render_stocklist_page(df)
+    elif menu == "📅 월별 로드맵": ui.render_roadmap_page(df)
+    elif menu == "📃 전체 종목 리스트": ui.render_stocklist_page(df)
 
     st.divider()
     st.caption("© 2025 **배당 팽이** | 실시간 데이터 기반 배당 대시보드")
