@@ -1,8 +1,8 @@
 """
 프로젝트: 배당 팽이 (Dividend Top) v2.9
 파일명: recommendation.py
-설명: AI 로보어드바이저 엔진 (안정형 리스크 필터링 + 투자 유의사항/수정 가이드 복구 완료 + 스위치 OFF 기능)
-업데이트: 2026.01.19
+설명: AI 로보어드바이저 엔진 (안정형 리스크 필터링 + 투자 유의사항 + 좀비 팝업 방지 안전 종료 추가)
+업데이트: 2026.01.20
 """
 
 import streamlit as st
@@ -246,6 +246,12 @@ def show_wizard():
             if st.button("🇰🇷 국내 종목만", use_container_width=True): go_next_step(1, 'include_foreign', False); st.rerun()
         with col_all:
             if st.button("🌎 해외 포함", use_container_width=True): go_next_step(1, 'include_foreign', True); st.rerun()
+        
+        # 🚨 [안전 장치] 시작 화면에서 나가기 버튼 (좀비 팝업 방지)
+        st.write("")
+        if st.button("닫기", use_container_width=True):
+            st.session_state.ai_modal_open = False
+            st.rerun()
 
     # [Step 1] 투자 스타일 결정
     elif step == 1:
@@ -367,19 +373,26 @@ def show_wizard():
 
 3. 과거의 수익이 미래의 수익을 보장하지 않으므로, 모든 투자의 책임은 본인에게 있습니다.""")
         
-        st.info("💡 **팁:** AI 제안 결과는 단순 참고용입니다. [이대로 담기]를 누르신 후, 아래 [💰 배당금 계산기]에서 각 유형별 종목을 직접 교체하거나 비중을 자유롭게 수정하실 수 있습니다.")
+        st.info("💡 **팁:** AI 제안 결과는 단순 참고용입니다. [가져오기]를 누르신 후, 아래 [💰 배당금 계산기]에서 종목이나 비중을 자유롭게 수정하실 수 있습니다.")
 
         st.divider()
         c1, c2 = st.columns(2)
         if c1.button("🎲 다른 조합", use_container_width=True): del st.session_state.ai_result_cache; st.rerun()
         if c2.button("🔄 처음부터", on_click=reset_wizard, use_container_width=True): st.rerun()
         
-        # 💡 [핵심] 스위치 끄기 로직 (회로 차단)
-        if st.button("✅ 이대로 담기", type="primary", use_container_width=True):
+        # 💡 [핵심] 스위치 끄기 로직 (회로 차단) & Toss 스타일 문구
+        if st.button("✅ 내 포트폴리오로 가져오기", type="primary", use_container_width=True):
             st.session_state.selected_stocks = picks
             st.session_state.ai_suggested_weights = weights
             st.session_state.ai_modal_open = False # 스위치 OFF (팝업 닫힘)
             if "ai_result_cache" in st.session_state: del st.session_state.ai_result_cache
             st.toast("장바구니에 담았습니다! 🛒", icon="✅")
             time.sleep(0.5)
+            st.rerun()
+            
+        # 🚨 [안전 장치] 결과 화면에서 그냥 닫고 싶을 때 (좀비 팝업 방지)
+        st.write("")
+        if st.button("닫기 (저장 안 함)", use_container_width=True):
+            st.session_state.ai_modal_open = False
+            if "ai_result_cache" in st.session_state: del st.session_state.ai_result_cache
             st.rerun()
