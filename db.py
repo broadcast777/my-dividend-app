@@ -1,10 +1,10 @@
 """
-프로젝트: 배당 팽이 (Dividend Top) v1.5
+프로젝트: 배당 팽이 (Dividend Top) v1.6
 파일명: db.py
-설명: Supabase DB 연동 및 암호화된 사용자 세션 관리
+설명: Supabase DB 연동 및 암호화된 사용자 세션 관리 (내구성 강화 패치 적용)
 핵심 기능: 
  1. 토큰 암호화(Fernet) 적용 (보안 규격 준수)
- 2. 사용자 포트폴리오 CRUD (저장, 조회, 수정, 삭제)
+ 2. 사용자 포트폴리오 CRUD (저장, 조회, 수정, 삭제) - 예외 처리 강화
  3. 방문자 통계 및 로그 기록
 """
 
@@ -48,15 +48,20 @@ class StreamlitFileStorageFixed:
     def _encrypt(self, value: str) -> str:
         """데이터를 암호화하여 외계어로 바꿉니다."""
         if not value: return value
-        return self.cipher_suite.encrypt(value.encode()).decode()
+        try:
+            return self.cipher_suite.encrypt(value.encode()).decode()
+        except Exception as e:
+            print(f"Encryption Error: {e}")
+            return ""
 
     def _decrypt(self, encrypted_value: str) -> str:
         """외계어를 다시 읽을 수 있는 문자로 해독합니다."""
-        if not encrypted_value: return encrypted_value
+        if not encrypted_value: return ""
         try:
             return self.cipher_suite.decrypt(encrypted_value.encode()).decode()
-        except:
-            return encrypted_value
+        except Exception:
+            # 복호화 실패 시 (키 불일치 등) 안전하게 빈 문자열 반환
+            return ""
 
     def _read_json(self, file_path):
         """파일을 읽을 때 자동으로 암호를 해독합니다."""
@@ -64,8 +69,9 @@ class StreamlitFileStorageFixed:
             try:
                 with open(file_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                    return {k: self._decrypt(v) for k, v in data.items()}
-            except:
+                    # 복호화 실패한 항목은 제외하고 로드
+                    return {k: self._decrypt(v) for k, v in data.items() if self._decrypt(v)}
+            except Exception:
                 return {}
         return {}
 
@@ -118,7 +124,8 @@ def init_supabase():
             )
         )
     except Exception as e:
-        st.error(f"🚨 Supabase 연결 오류: {e}")
+        # 연결 실패 시 앱 전체가 죽지 않도록 None 반환 후 UI에서 처리
+        st.error(f"🚨 데이터베이스 연결 실패: 잠시 후 다시 시도해주세요.")
         return None
 
 # ---------------------------------------------------------
@@ -126,50 +133,90 @@ def init_supabase():
 # ---------------------------------------------------------
 
 def cleanup_old_tokens():
+    """오래된 세션 파일 정리 (에러 무시)"""
     try:
         now = time.time()
+        # glob 패턴 매칭 시 발생할 수 있는 에러 방어
         for file_path in Path(".").glob("auth_token_*.json"):
-            if now - file_path.stat().st_mtime > 86400: # 24시간
-                try: file_path.unlink()
-                except: pass
-    except: pass
+            try:
+                if now - file_path.stat().st_mtime > 86400: # 24시간
+                    file_path.unlink()
+            except OSError:
+                continue # 파일 삭제 실패 시(권한 등) 무시하고 계속 진행
+    except Exception:
+        pass
 
 # ---------------------------------------------------------
 # [SECTION 4] 데이터베이스 CRUD 기능 (창고 로봇)
 # ---------------------------------------------------------
 
+def safe_execute(query):
+    """CRUD 공통 예외 처리 래퍼"""
+    try:
+        return query.execute()
+    except Exception as e:
+        st.error(f"데이터 처리 중 오류 발생: {e}")
+        return None
+
 def get_user_portfolios(supabase: Client, user_id: str):
     """사용자의 포트폴리오 리스트 조회"""
-    return supabase.table("portfolios").select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
+    try:
+        return supabase.table("portfolios").select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
+    except Exception:
+        return None
 
 def delete_portfolio(supabase: Client, portfolio_id: str):
     """특정 포트폴리오 삭제"""
-    return supabase.table("portfolios").delete().eq("id", portfolio_id).execute()
+    try:
+        return supabase.table("portfolios").delete().eq("id", portfolio_id).execute()
+    except Exception as e:
+        st.error(f"삭제 실패: {e}")
+        raise e # 상위 로직에서 알 수 있게 던짐
 
 def get_portfolio_count(supabase: Client, user_id: str):
     """포트폴리오 총 개수 확인"""
-    return supabase.table("portfolios").select("id", count="exact").eq("user_id", user_id).execute()
+    try:
+        return supabase.table("portfolios").select("id", count="exact").eq("user_id", user_id).execute()
+    except Exception:
+        return None
 
 def insert_portfolio(supabase: Client, data: dict):
     """새 포트폴리오 저장"""
-    return supabase.table("portfolios").insert(data).execute()
+    try:
+        return supabase.table("portfolios").insert(data).execute()
+    except Exception as e:
+        st.error(f"저장 실패: {e}")
+        raise e
 
 def update_portfolio(supabase: Client, portfolio_id: str, data: dict):
     """기존 포트폴리오 수정"""
-    return supabase.table("portfolios").update(data).eq("id", portfolio_id).execute()
+    try:
+        return supabase.table("portfolios").update(data).eq("id", portfolio_id).execute()
+    except Exception as e:
+        st.error(f"수정 실패: {e}")
+        raise e
 
 # ---------------------------------------------------------
 # [SECTION 5] 분석 및 로그 기능 (출입 명부)
 # ---------------------------------------------------------
 
 def log_visit(supabase: Client, source_tag: str):
-    """방문 기록 로그 작성"""
-    return supabase.table("visit_logs").insert({"referer": source_tag}).execute()
+    """방문 기록 로그 작성 (실패해도 무시 - 사용자 경험 우선)"""
+    try:
+        supabase.table("visit_logs").insert({"referer": source_tag}).execute()
+    except:
+        pass
 
 def get_visit_count(supabase: Client):
     """누적 방문자 수 조회"""
-    return supabase.table("visit_counts").select("count").eq("id", 1).execute()
+    try:
+        return supabase.table("visit_counts").select("count").eq("id", 1).execute()
+    except:
+        return None
 
 def update_visit_count(supabase: Client, new_count: int):
     """누적 방문자 수 업데이트"""
-    return supabase.table("visit_counts").update({"count": new_count}).eq("id", 1).execute()
+    try:
+        return supabase.table("visit_counts").update({"count": new_count}).eq("id", 1).execute()
+    except:
+        return None
