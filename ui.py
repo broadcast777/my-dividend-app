@@ -3,58 +3,122 @@ import html
 import re
 
 # ---------------------------------------------------------
-# [SECTION] UI 렌더링 모듈 (공백 제거 패치 완료)
+# [SECTION] UI 렌더링 모듈 (CSS 내장형 - 파일 로드 문제 원천 차단)
 # ---------------------------------------------------------
 
 def load_css():
-    """외부 스타일 파일 로드 및 비상용 기본 스타일 적용"""
-    # 1. 파일에서 스타일 읽기 시도
-    css_content = ""
-    try:
-        with open("style.css", "r", encoding="utf-8") as f:
-            css_content = f.read()
-    except FileNotFoundError:
-        pass 
-
-    # 2. [안전장치] 모바일용 필수 CSS (들여쓰기 제거됨)
-    mobile_css = """<style>
-.table-wrapper {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    margin-bottom: 1rem;
-    border-radius: 8px;
-    border: 1px solid #f0f2f6;
-}
-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 14px;
-    white-space: nowrap;
-}
-th {
-    background-color: #f8f9fa;
-    color: #495057;
-    font-weight: 600;
-    padding: 12px 8px;
-    text-align: center;
-    border-bottom: 2px solid #e9ecef;
-}
-td {
-    padding: 10px 8px;
-    text-align: center;
-    border-bottom: 1px solid #f1f3f5;
-    vertical-align: middle;
-}
-.name-cell {
-    text-align: left !important;
-    padding-left: 12px !important;
-    font-weight: 500;
-    color: #333;
-}
-</style>"""
+    """
+    [핵심 변경] 외부 파일 읽기를 제거하고, 스타일을 여기에 직접 심었습니다.
+    이제 파일 경로 문제나 태그 꼬임 현상이 발생하지 않습니다.
+    """
     
-    # CSS 결합 및 렌더링
-    st.markdown(f"{mobile_css}<style>{css_content}</style>", unsafe_allow_html=True)
+    # 모든 디자인 요소를 여기에 통합 (후원버튼, 카카오, 테이블 반응형)
+    custom_css = """
+    <style>
+        /* 1. 후원 버튼 디자인 (아이콘 크기 강제 고정 포함) */
+        .bmc-button {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #FFDD00;
+            color: #000000 !important;
+            padding: 10px 15px;
+            border-radius: 10px;
+            text-decoration: none !important;
+            font-weight: bold;
+            font-size: 14px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            transition: transform 0.2s;
+            width: 100%;
+            margin-bottom: 10px;
+        }
+        .bmc-button:hover {
+            transform: translateY(-2px);
+            background-color: #FADA00;
+            text-decoration: none !important;
+            color: #000000 !important;
+        }
+        .bmc-logo {
+            width: 20px !important;
+            height: 20px !important;
+            margin-right: 8px;
+            margin-bottom: 0px !important;
+            vertical-align: middle;
+        }
+
+        /* 2. 카카오 로그인 버튼 */
+        .kakao-login-btn {
+            display: inline-flex;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+            background-color: #FEE500;
+            color: #000000 !important;
+            text-decoration: none !important;
+            border: 1px solid rgba(0,0,0,0.05);
+            padding: 0.5rem;
+            border-radius: 0.5rem;
+            font-weight: bold;
+            font-size: 1rem;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+            height: 2.6rem;
+        }
+        .kakao-login-btn:hover {
+            color: #000000 !important;
+            text-decoration: none !important;
+        }
+
+        /* 3. 모바일 반응형 테이블 (가로 스크롤) */
+        .table-wrapper {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            margin-bottom: 1rem;
+            border-radius: 8px;
+            border: 1px solid #f0f2f6;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+            white-space: nowrap; /* 줄바꿈 방지 */
+            min-width: 600px; /* 표 최소 너비 확보 */
+        }
+        th {
+            background-color: #f8f9fa;
+            color: #495057;
+            font-weight: 600;
+            padding: 12px 8px;
+            text-align: center;
+            border-bottom: 2px solid #e9ecef;
+        }
+        td {
+            padding: 10px 8px;
+            text-align: center;
+            border-bottom: 1px solid #f1f3f5;
+            vertical-align: middle;
+            background-color: #ffffff;
+        }
+        /* 종목명 왼쪽 고정 스타일 */
+        .name-cell {
+            text-align: left !important;
+            padding-left: 12px !important;
+            font-weight: 500;
+            color: #333;
+            position: sticky;
+            left: 0;
+            background-color: #fff;
+            z-index: 1;
+            border-right: 2px solid #f0f0f0;
+            min-width: 140px;
+        }
+        tr:hover td {
+            background-color: #fcfcfc;
+        }
+    </style>
+    """
+    
+    # 화면에 렌더링
+    st.markdown(custom_css, unsafe_allow_html=True)
 
 def sanitize_url(url):
     """[보안] 안전한 링크만 허용하는 검문소"""
@@ -66,13 +130,12 @@ def sanitize_url(url):
 def render_custom_table(data_frame):
     """
     데이터프레임을 모바일 반응형 HTML 테이블로 변환
-    (HTML 조립 공정 최적화 및 들여쓰기 문제 해결)
     """
     if data_frame.empty:
         st.info("📭 표시할 데이터가 없습니다.")
         return
 
-    # [핵심] HTML 행(Row) 조립 시작
+    # HTML 행(Row) 조립
     rows_buffer = ""
     
     for row in data_frame.to_dict('records'):
@@ -90,7 +153,7 @@ def render_custom_table(data_frame):
         
         finance_link = str(row.get('금융링크', '#'))
         
-        # 3. HTML 조각 조립 (한 줄로 작성하여 공백 문제 차단)
+        # 3. HTML 조각 조립
         code_html = f"<a href='{blog_link}' target='_blank' rel='noopener noreferrer' style='color:#0068c9; text-decoration:none; font-weight:bold; background-color:#f0f7ff; padding:2px 6px; border-radius:4px;'>{safe_code}</a>"
         
         # 배당률 스타일링
@@ -110,14 +173,13 @@ def render_custom_table(data_frame):
         
         yield_html = f"<span style='color:{yield_color}; font-weight:{yield_weight};'>{dividend_yield:.2f}%{suffix}</span>"
         
-        # 정보 링크 (아이콘화)
+        # 정보 링크
         info_html = f"<a href='{finance_link}' target='_blank' rel='noopener noreferrer' style='text-decoration:none; font-size:1.1em;'>🔗</a>"
         
-        # 행(Row) 조립 - 불필요한 공백 제거
+        # 행(Row) 조립
         rows_buffer += f"<tr><td>{code_html}</td><td class='name-cell'>{safe_name}</td><td>{safe_price}</td><td>{yield_html}</td><td>{safe_exch}</td><td style='color:#555;'>{safe_ex_date}</td><td>{info_html}</td></tr>"
 
-    # 4. 테이블 전체 렌더링 (div.table-wrapper로 감싸서 가로 스크롤 허용)
-    # [중요] f-string 대신 format 사용하고, 태그 앞 공백 제거
+    # 4. 테이블 전체 렌더링
     table_html = """<div class="table-wrapper">
     <table>
         <thead>
