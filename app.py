@@ -61,7 +61,8 @@ def init_session_state():
         "selected_stocks": [],
         "monthly_expense": 200, 
         "ai_result_cache": None,
-        "show_ai_login": False
+        "show_ai_login": False,
+        "portfolio_map": {} # 데이터 유실 방지 금고
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -465,26 +466,39 @@ def render_calculator_page(df):
         # 3. [동기화 로직 정의]
         def sync_from_individual():
             """개별 종목 수정 -> 총액 자동 합산 (Bottom-up)"""
-            new_sum = sum([st.session_state.get(f"amt_{i}", 0) for i in range(len(selected))])
+            new_sum = 0
+            amounts_map = {}
+            for i, stock in enumerate(st.session_state.selected_stocks):
+                val = st.session_state.get(f"amt_{i}", 0)
+                new_sum += val
+                amounts_map[stock] = val
+            
             st.session_state.total_invest = new_sum * 10000
             st.session_state.total_invest_input = new_sum 
+            st.session_state.portfolio_map = amounts_map # 금고 실시간 동기화
 
         def sync_from_total():
             """총액 수정 -> 개별 종목 비율대로 배분 (Top-down)"""
             new_total = st.session_state.total_invest_input
             st.session_state.total_invest = new_total * 10000
             
-            if not selected: return
+            if not st.session_state.selected_stocks: return
 
-            current_amts = [st.session_state.get(f"amt_{i}", 0) for i in range(len(selected))]
+            current_amts = [st.session_state.get(f"amt_{i}", 0) for i in range(len(st.session_state.selected_stocks))]
             current_sum = sum(current_amts)
             
-            for i in range(len(selected)):
+            amounts_map = {}
+            for i, stock in enumerate(st.session_state.selected_stocks):
                 if current_sum > 0:
                     ratio = current_amts[i] / current_sum
-                    st.session_state[f"amt_{i}"] = int(new_total * ratio)
+                    val = int(new_total * ratio)
                 else:
-                    st.session_state[f"amt_{i}"] = int(new_total // len(selected))
+                    val = int(new_total // len(st.session_state.selected_stocks))
+                
+                st.session_state[f"amt_{i}"] = val
+                amounts_map[stock] = val
+            
+            st.session_state.portfolio_map = amounts_map # 금고 실시간 동기화
 
         # 4. 선행 초기화 (Pre-Initialization)
         if selected:
@@ -975,7 +989,9 @@ def render_calculator_page(df):
                 col_info1, col_info2, col_info3 = st.columns(3)
                 col_info1.metric("📊 평균 연배당률", f"{avg_y:.2f}%")
                 # [수정] 위에서 호이스팅한 monthly_input 변수 사용 (UnboundLocalError 해결)
-                col_info2.metric("💰 매월 추가적립", f"{monthly_input/10000:,.0f}만원")
+                # 월급 탭에서는 세션에 저장된 값을 실시간 반영
+                monthly_input_view = st.session_state.get("shared_monthly_input", 150)
+                col_info2.metric("💰 매월 추가적립", f"{monthly_input_view:,.0f}만원")
                 col_info3.metric("📦 선택 종목 수", f"{len(selected)}개")
                 st.caption(f"🔎 **적용 종목:** {', '.join(selected)}")
 
@@ -1002,9 +1018,12 @@ def render_calculator_page(df):
                 )
                 st.caption(f"보유: {total_invest/10000:,.0f}만원")
 
-            # [계산 로직] - 물가상승(inflation) 제거됨
+            # [계산 로직]
             current_bal_goal = total_invest if use_start_money else 0
             actual_start_bal = current_bal_goal 
+            
+            # 여기서도 공유된 적립금 값을 실시간으로 다시 읽음
+            calc_monthly_input = st.session_state.get("shared_monthly_input", 150) * 10000
             
             tax_factor = 0.846
             monthly_yld = avg_y / 100 / 12  
@@ -1023,7 +1042,7 @@ def render_calculator_page(df):
                     break
                     
                 div_reinvest = current_bal_goal * monthly_yld * tax_factor
-                current_bal_goal += monthly_input + div_reinvest
+                current_bal_goal += calc_monthly_input + div_reinvest
                 months_passed += 1
 
             st.markdown("---")
@@ -1275,6 +1294,7 @@ def main():
             min_value=10, 
             value=st.session_state.monthly_expense, 
             step=10,
+            key="sidebar_expense_input", # 키값 부여하여 동기화 속도 개선
             help="이 수치는 배당 방어율 계산의 기준이 됩니다."
         )
         st.session_state.monthly_expense = expense_input
