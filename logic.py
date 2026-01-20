@@ -271,34 +271,28 @@ def save_to_github(df):
 # [SECTION 4] 실시간 배당 정보 크롤링 (핵심 수정 완료)
 # -----------------------------------------------------------
 
-# logic.py 내부 함수 교체
-
-# logic.py의 fetch_dividend_yield_hybrid 함수를 이걸로 통째로 교체하세요!
-
 def fetch_dividend_yield_hybrid(code, category):
     code = str(code).strip()
     
     # -----------------------------------------------------------
-    # [1] 국내 주식: (최근 배당금 * 12) / 현재가 = 실시간 배당률 계산
+    # [1] 국내 주식: (최근 분배금/배당금 * 12) / 현재가 = 실시간 배당률 계산
     # -----------------------------------------------------------
     if category == '국내':
         current_price = 0
         
         # [Step 1] 현재가 확보 (3중 안전장치)
-        
-        # 1-1. 네이버 모바일 API (가장 빠름)
+        # 1-1. 네이버 모바일 API
         try:
             p_url = f"https://api.stock.naver.com/stock/{code}/basic"
-            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36'}
+            headers = {'User-Agent': 'Mozilla/5.0'}
             p_res = requests.get(p_url, headers=headers, timeout=2)
             if p_res.status_code == 200:
                 data = p_res.json()
-                # 'closePrice'가 보통 현재가입니다.
                 if 'closePrice' in data and data['closePrice']:
                     current_price = float(data['closePrice'].replace(',', ''))
         except: pass
 
-        # 1-2. 야후 파이낸스 (네이버 실패 시)
+        # 1-2. 야후 파이낸스
         if current_price == 0:
             try:
                 ticker = yf.Ticker(f"{code}.KS")
@@ -306,7 +300,7 @@ def fetch_dividend_yield_hybrid(code, category):
                 if price: current_price = price
             except: pass
 
-        # 1-3. KIS API (최후의 수단, 키가 있을 때만)
+        # 1-3. KIS API
         if current_price == 0:
             try:
                 broker = mojito.KoreaInvestment(
@@ -320,48 +314,63 @@ def fetch_dividend_yield_hybrid(code, category):
                     current_price = float(resp['output'].get('stck_prpr', 0))
             except: pass
 
-        # --- 가격 확보 실패 시 종료 ---
         if current_price == 0:
             return 0.0, "⚠️ 현재가 조회 실패"
 
+        # [Step 2] 배당금(주식) 또는 분배금(ETF) 내역 조회
+        # 사장님 공식: (최근금액 * 12) / 현재가 * 100
+        
+        last_amount = 0
+        source_type = ""
 
-        # [Step 2] 최근 배당금 내역 조회 (네이버 모바일 리스트 API)
-        # 사장님이 보셨던 그 '리스트 맨 위' 데이터를 가져옵니다.
+        # 시도 A: 일반 주식 배당금 (Stock Dividend)
         try:
-            # page=1, pageSize=1로 설정하여 '가장 최근 1개'만 가져옵니다.
-            div_url = f"https://api.stock.naver.com/stock/{code}/dividend/list?page=1&pageSize=1"
+            url_stock = f"https://api.stock.naver.com/stock/{code}/dividend/list?page=1&pageSize=1"
             headers = {'User-Agent': 'Mozilla/5.0'}
-            
-            res = requests.get(div_url, headers=headers, timeout=5)
+            res = requests.get(url_stock, headers=headers, timeout=3)
             if res.status_code == 200:
                 data = res.json()
-                # 리스트 안에 데이터가 있는지 확인
                 if 'content' in data and len(data['content']) > 0:
-                    # 가장 최근 배당금 추출 (dividendPerShare: 주당배당금)
-                    last_div = float(data['content'][0].get('dividendPerShare', 0))
-                    
-                    if last_div > 0:
-                        # 3. [사장님 공식] (최근 배당금 * 12) / 현재가 * 100
-                        calc_yield = (last_div * 12 / current_price) * 100
-                        return round(calc_yield, 2), f"✅ 직접계산({int(last_div)}원)"
-                        
-        except Exception as e:
-            pass # 실패 시 아래 PC 크롤링 백업으로 이동
+                    # 일반 주식은 dividendPerShare 사용
+                    last_amount = float(data['content'][0].get('dividendPerShare', 0))
+                    if last_amount > 0: source_type = "주식배당"
+        except: pass
 
-        # [Step 3] (백업) PC 버전 크롤링
+        # 시도 B: ETF 분배금 (ETF Distribution) - 여기가 핵심!
+        # 주식 배당금이 없으면(0이면) ETF 분배금을 확인합니다.
+        if last_amount == 0:
+            try:
+                url_etf = f"https://api.stock.naver.com/etf/{code}/distribution/list?page=1&pageSize=1"
+                headers = {'User-Agent': 'Mozilla/5.0'}
+                res = requests.get(url_etf, headers=headers, timeout=3)
+                if res.status_code == 200:
+                    data = res.json()
+                    if 'content' in data and len(data['content']) > 0:
+                        # ETF는 amountPerShare 또는 amount 사용
+                        item = data['content'][0]
+                        # ETF 데이터 필드명이 다를 수 있어 안전하게 체크
+                        last_amount = float(item.get('amountPerShare', item.get('amount', 0)))
+                        if last_amount > 0: source_type = "ETF분배"
+            except: pass
+            
+        # [Step 3] 최종 계산 및 반환
+        if last_amount > 0:
+            calc_yield = (last_amount * 12 / current_price) * 100
+            return round(calc_yield, 2), f"✅ {source_type}({int(last_amount)}원x12)"
+
+        # [Step 4] (백업) PC 버전 크롤링 (HTML 파싱)
         try:
             url = f"https://finance.naver.com/item/main.naver?code={code}"
             headers = {'User-Agent': 'Mozilla/5.0'}
             response = requests.get(url, headers=headers, timeout=5)
             response.encoding = 'euc-kr' 
-            
             dvr_match = re.search(r'<em id="_dvr">\s*([\d\.]+)\s*</em>', response.text)
             if dvr_match:
                 val = float(dvr_match.group(1))
                 if val > 0: return val, "✅ 네이버(PC)"
         except: pass
 
-        return 0.0, "⚠️ 배당 내역 없음 (국내)"
+        return 0.0, "⚠️ 배당/분배 내역 없음"
 
     # -----------------------------------------------------------
     # [2] 해외 주식 (기존 유지)
@@ -369,11 +378,8 @@ def fetch_dividend_yield_hybrid(code, category):
     else:
         try:
             stock = yf.Ticker(code)
-            # 1순위: 야후가 주는 배당률
             dy = stock.info.get('dividendYield')
             if dy and dy > 0: return round(dy * 100, 2), "✅ 야후(Info)"
-            
-            # 2순위: 내역으로 역산
             divs = stock.dividends
             if not divs.empty:
                 recent_total = divs.iloc[-12:].sum() if len(divs) > 12 else divs.sum()
@@ -384,7 +390,7 @@ def fetch_dividend_yield_hybrid(code, category):
             return 0.0, "⚠️ 데이터 없음"
         except Exception as e:
             return 0.0, f"❌ 해외 에러: {str(e)}"
-
+            
 def update_dividend_rolling(current_history_str, new_dividend_amount):
     """배당금 기록 갱신"""
     if pd.isna(current_history_str) or str(current_history_str).strip() == "":
