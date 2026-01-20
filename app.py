@@ -1,7 +1,7 @@
 """
 프로젝트: 배당 팽이 (Dividend Top) v2.9
 파일명: app.py
-설명: 모바일 UX 최적화 + 팝업(Dialog) 기능 복구 + UnboundLocalError 해결 + 자기유지 회로 적용
+설명: 모바일 UX 최적화 + 팝업(Dialog) 기능 복구 + UnboundLocalError 해결 + 자기유지 회로 적용 + 캘린더 UX 개선
 """
 
 import streamlit as st
@@ -566,19 +566,49 @@ def render_calculator_page(df):
             st.altair_chart(chart_compare, use_container_width=True)
 
             st.divider()
-            ics_data = logic.generate_portfolio_ics(all_data)
-            st.subheader("📅 배당 일정 등록")
+            
+            # ---------------------------------------------------------
+            # [Toss Style UX] 12개월(연말까지) Default + 강력한 면책 조항
+            # ---------------------------------------------------------
+            st.subheader("📅 배당 일정 캘린더 구독")
+            
             col_d1, col_d2 = st.columns([1.5, 1])
+            
             with col_d1:
-                st.caption("매번 버튼을 누르기 귀찮으신가요?")
-                st.caption("아래 버튼으로 **모든 종목의 알림**을 한 번에 내 폰/PC 캘린더에 넣으세요.")
+                st.markdown("**매달 들어와서 확인하기 번거로우시죠?**")
+                st.caption("버튼 한 번만 누르면, **올해 남은 배당 예상일**을 고객님의 폰/PC 캘린더에 자동으로 넣어드립니다.")
+                
+                # 🚨 [핵심] 면책 조항 (Warning Box)
+                st.warning("""
+                ⚠️ **잠깐! 일정은 변동될 수 있습니다.**
+                
+                본 캘린더는 과거 데이터를 기반으로 추산된 **'예상 일정'**입니다. 
+                운용사 정책에 따라 **배당 기준일이 변경(예: 15일 → 월말)**될 수 있으니, 
+                매수 전 반드시 **각 운용사 공식 홈페이지**를 확인해주세요.
+                """)
+
             with col_d2:
+                # 함수 호출 (인자 없이 호출하면 자동으로 올해 연말까지만 생성됨)
+                ics_data = logic.generate_portfolio_ics(all_data)
+                
+                # 현재 연도 가져오기 (버튼 텍스트용)
+                cur_year = datetime.now().year
+                
+                st.write("") 
                 if st.session_state.get("is_logged_in", False):
-                    st.download_button(label="📥 전체 일정 파일 받기 (.ics)", data=ics_data, file_name="dividend_calendar.ics", mime="text/calendar", use_container_width=True, type="primary")
+                    st.download_button(
+                        # [UX Writing] 명확한 기간 명시
+                        label=f"📅 {cur_year}년 남은 배당 일정 받기", 
+                        data=ics_data, 
+                        file_name=f"dividend_calendar_{cur_year}.ics", 
+                        mime="text/calendar", 
+                        use_container_width=True, 
+                        type="primary"
+                    )
                 else:
-                    if st.button("📥 전체 일정 파일 받기 (.ics)", key="ics_lock_btn", use_container_width=True):
+                    if st.button(f"📅 {cur_year}년 남은 배당 일정 받기", key="ics_lock_btn", use_container_width=True):
                         st.error("🔒 로그인 회원 전용 기능입니다. 로그인을 완료해 주세요!")
-                        st.toast("로그인이 필요합니다!", icon="🔒")
+                        st.toast("로그인 후 내 캘린더에 저장할 수 있어요!", icon="🔒")
 
             with st.expander("❓ 다운로드 받은 파일은 어떻게 쓰나요? (사용법 보기)"):
                 st.markdown("""
