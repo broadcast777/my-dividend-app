@@ -1,7 +1,8 @@
 """
 프로젝트: 배당 팽이 (Dividend Top) v2.9
 파일명: logic.py
-설명: 금융 API 연동, 데이터 크롤링, 캘린더 파일 생성 (월말/월초 로직 + 올해 한정 생성 + 면책조항 강화)
+설명: 금융 API 연동, 데이터 크롤링, 캘린더 파일 생성 (D-4 알림 + 월말/월초 로직 + 올해 한정 생성)
+업데이트: 2026.01.20
 """
 
 import streamlit as st
@@ -84,7 +85,7 @@ def parse_dividend_date(date_str):
 def generate_portfolio_ics(portfolio_data):
     """
     [일괄 등록용] 포트폴리오 전체 일정을 .ics 파일 포맷으로 생성
-    (조건: 과거 일정 스킵 + 오늘부터 '올해 12월 31일'까지만 생성)
+    (조건: D-4 알림 + 과거 일정 스킵 + 오늘부터 '올해 12월 31일'까지만 생성)
     """
     ics_content = [
         "BEGIN:VCALENDAR",
@@ -138,19 +139,21 @@ def generate_portfolio_ics(portfolio_data):
                     
                     event_date = datetime.date(year, month, safe_day)
                     
-                    # D-3 계산 (주말이면 금요일로 당김)
-                    buy_date = event_date - datetime.timedelta(days=3)
+                    # 🚨 [수정 완료] D-4 계산 (4일 전 알림)
+                    buy_date = event_date - datetime.timedelta(days=4)
+                    
+                    # 주말이면 금요일로 당김 (매수 기회 확보)
                     while buy_date.weekday() >= 5: 
                         buy_date -= datetime.timedelta(days=1)
                     
-                    # 🚨 [핵심] 이미 지난 과거 알림은 건너뜀
+                    # 이미 지난 과거 알림은 건너뜀
                     if buy_date < today:
                         continue
                         
                     dt_start = buy_date.strftime("%Y%m%d")
                     dt_end = (buy_date + datetime.timedelta(days=1)).strftime("%Y%m%d")
                     
-                    # [수정] 면책 조항 강화 (토스 스타일)
+                    # 면책 조항 (토스 스타일)
                     description = (
                         f"예상 배당락일: {event_date}\\n\\n"
                         f"💰 [{name}] 배당 수령을 위해 계좌를 확인하세요.\\n\\n"
@@ -160,11 +163,12 @@ def generate_portfolio_ics(portfolio_data):
                         f"안전한 투자를 위해, 매수 전 반드시 '운용사 공식 홈페이지' 공시를 확인해주세요."
                     )
                     
+                    # 🚨 [수정 완료] 제목에 D-4 명시
                     ics_content.extend([
                         "BEGIN:VEVENT",
                         f"DTSTART;VALUE=DATE:{dt_start}",
                         f"DTEND;VALUE=DATE:{dt_end}",
-                        f"SUMMARY:🔔 [{name}] 배당락 D-3 (변동 주의)",
+                        f"SUMMARY:🔔 [{name}] 배당락 D-4 (매수 권장)",
                         f"DESCRIPTION:{description}",
                         "END:VEVENT"
                     ])
@@ -177,16 +181,16 @@ def generate_portfolio_ics(portfolio_data):
 
 def get_google_cal_url(stock_name, date_str):
     """
-    [단일 등록용] 구글 캘린더 일정 등록 URL 생성 (D-3일 기준)
+    [단일 등록용] 구글 캘린더 일정 등록 URL 생성 (D-4일 기준)
     """
     try:
-        # 1. 날짜 파싱 (parse_dividend_date가 업데이트되었으므로 월말/월초 로직 자동 적용됨)
+        # 1. 날짜 파싱
         target_date = parse_dividend_date(date_str)
         if not target_date: return None
         
-        # 2. 안전 매수일 계산 (D-3)
+        # 🚨 [수정 완료] D-4 안전 매수일 계산
         if isinstance(target_date, datetime.date):
-            safe_buy_date = target_date - datetime.timedelta(days=3) 
+            safe_buy_date = target_date - datetime.timedelta(days=4) 
         else:
             return None
 
@@ -200,8 +204,8 @@ def get_google_cal_url(stock_name, date_str):
         
         base_url = "https://www.google.com/calendar/render?action=TEMPLATE"
         
-        # [수정] 제목 및 면책 조항 동기화
-        title_text = f"🔔 [{stock_name}] 배당락 D-3 (변동 주의)"
+        # 🚨 [수정 완료] 제목 및 면책 조항 동기화
+        title_text = f"🔔 [{stock_name}] 배당락 D-4 (매수 권장)"
         details_text = (
             f"예상 배당락일: {date_str}\n\n"
             f"💰 배당 수령을 위해 계좌를 확인하세요.\n\n"
