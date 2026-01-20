@@ -964,81 +964,6 @@ def render_calculator_page(df):
                 st.warning(f"🚨 **현실적 조언:** 목표 달성 시 연간 배당소득(세전)이 2,000만원을 초과하여 **금융소득종합과세** 대상이 될 수 있습니다.")
             st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**\n1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 단순 결과입니다.\n2. 재투자가 매월 이루어진다는 가정하에 계산된 복리 결과입니다.""")
 
-# ==========================================
-# [SECTION 4.5] 누락된 페이지 렌더링 함수 (복원)
-# ==========================================
-
-def render_roadmap_page(df):
-    """📅 월별 로드맵 페이지"""
-    st.header("📅 월별 배당 로드맵")
-    st.caption("선택한 포트폴리오의 월별 예상 배당금 분포를 확인합니다.")
-    
-    if not st.session_state.get('selected_stocks'):
-        st.warning("⚠️ 먼저 **[💰 배당금 계산기]** 메뉴에서 종목을 선택하고 포트폴리오를 구성해주세요!")
-        st.info("👈 왼쪽 사이드바(모바일은 상단 메뉴)에서 계산기로 이동할 수 있습니다.")
-        return
-
-    # timeline 모듈 연동
-    if hasattr(timeline, 'display_main_roadmap'): 
-        timeline.display_main_roadmap(df, st.session_state.ai_suggested_weights, st.session_state.total_invest)
-    else:
-        st.info("🚧 로드맵 차트 기능을 불러오는 중입니다.")
-        st.write(f"현재 선택된 종목: {', '.join(st.session_state.selected_stocks)}")
-
-def render_stocklist_page(df):
-    """📃 전체 종목 리스트 페이지"""
-    st.header("📃 전체 배당주 리스트")
-    
-    with st.expander("🔍 검색 및 필터 옵션", expanded=True):
-        col1, col2 = st.columns([2, 1])
-        with col1:
-            search_query = st.text_input("종목명 또는 코드 검색", placeholder="예: SCHD, 336570")
-        with col2:
-            type_opts = ["주식형", "채권형", "리츠형", "커버드콜"]
-            if '자산유형' in df.columns:
-                unique_types = df['자산유형'].unique().tolist()
-                if unique_types: type_opts = unique_types
-            type_filter = st.multiselect("자산 유형", options=type_opts, default=[])
-
-    # 필터링 로직
-    filtered_df = df.copy()
-    if search_query:
-        mask = filtered_df['종목명'].astype(str).str.contains(search_query, case=False) | \
-               filtered_df['종목코드'].astype(str).str.contains(search_query)
-        if '검색라벨' in filtered_df.columns:
-            mask |= filtered_df['검색라벨'].astype(str).str.contains(search_query, case=False)
-        filtered_df = filtered_df[mask]
-    
-    if type_filter:
-        if '자산유형' in filtered_df.columns:
-            mask = filtered_df['자산유형'].apply(lambda x: any(t in str(x) for t in type_filter))
-            filtered_df = filtered_df[mask]
-
-    st.markdown(f"**총 {len(filtered_df)}개 종목**")
-    
-    # 테이블 출력
-    cols_to_show = ["종목코드", "종목명", "현재가", "연배당률", "배당락일", "자산유형", "금융링크"]
-    final_cols = [c for c in cols_to_show if c in filtered_df.columns]
-
-    st.dataframe(
-        filtered_df,
-        column_config={
-            "종목명": st.column_config.TextColumn("종목명", width="medium"),
-            "현재가": st.column_config.TextColumn("현재가"),
-            "연배당률": st.column_config.NumberColumn("연배당률", format="%.2f%%"),
-            "배당락일": st.column_config.TextColumn("배당 기준일"),
-            "금융링크": st.column_config.LinkColumn("상세 정보")
-        },
-        column_order=final_cols,
-        hide_index=True,
-        use_container_width=True
-    )
-
-
-# ==========================================
-# [SECTION 5] 메인 실행 함수
-# ==========================================
-
 def main():
     inject_ga()
     init_session_state() 
@@ -1074,16 +999,19 @@ def main():
                 st.success(f"👋 **{nickname}**님, 환영합니다!")
 
         with col_ai:
+            # 💡 [수정] 버튼 클릭 시 팝업을 바로 띄우지 않고 '스위치'만 켭니다.
             if st.button("🕵️ AI 로보어드바이저", use_container_width=True, type="primary"):
                 if st.session_state.get("is_logged_in"):
                     st.session_state.wiz_step = 0 
                     st.session_state.wiz_data = {}
                     if "ai_result_cache" in st.session_state: del st.session_state.ai_result_cache
-                    st.session_state.ai_modal_open = True 
+                    st.session_state.ai_modal_open = True # 스위치 ON
                     st.rerun()
                 else:
                     st.toast("🔒 로그인을 먼저 해주세요!", icon="👆")
 
+    # 📡 [핵심] 자기유지 회로 작동부
+    # 앱이 새로고침되더라도 스위치가 켜져 있으면 팝업을 계속 호출합니다.
     if st.session_state.get("ai_modal_open", False):
         open_ai_wizard_dialog()
 
@@ -1159,5 +1087,4 @@ def main():
     st.caption("First Released: 2025.12.31 | [📝 배당팽이 투자 일지 ](https://blog.naver.com/dividenpange) | [💌 앱 개선 의견 남기기](https://docs.google.com/forms/d/e/1FAIpQLSdEJWd4sYx-09wZk7gl86Sf7bMliT4X9R0eWTAqxjv_Mal8Jg/viewform?usp=header)")
 
 if __name__ == "__main__":
-    main()
     main()
