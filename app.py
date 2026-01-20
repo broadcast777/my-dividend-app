@@ -1,7 +1,7 @@
 """
 프로젝트: 배당 팽이 (Dividend Top) v2.9
 파일명: app.py
-설명: 모바일 UX 최적화 + 팝업(Dialog) 기능 복구 + UnboundLocalError 해결 + 자기유지 회로 + 캘린더 UX 최종 완성
+설명: 모바일 UX 최적화 + 팝업(Dialog) 기능 복구 + UnboundLocalError 해결
 """
 
 import streamlit as st
@@ -53,7 +53,7 @@ def init_session_state():
         "is_logged_in": False,
         "user_info": None,
         "code_processed": False,
-        "ai_modal_open": False,  # 💡 [핵심] 팝업 유지 스위치
+        "ai_modal_open": False,
         "age_verified": False,
         "total_invest": 30000000, 
         "selected_stocks": [],
@@ -64,6 +64,27 @@ def init_session_state():
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
+
+# ---------------------------------------------------------
+# [추가 과제] 4과제: COPPA 나이 확인
+# ---------------------------------------------------------
+def check_coppa_compliance():
+    if (st.session_state.get("age_verified") or 
+        st.query_params.get("age_verified") == "1" or 
+        st.session_state.get("is_logged_in")):
+        st.session_state.age_verified = True
+        return
+
+    with st.expander("📋 서비스 이용 안내 (필수)", expanded=True):
+        st.warning("본 서비스는 만 13세 이상 사용자만 이용 가능합니다.")
+        if st.checkbox("나는 만 13세 이상이며, 이용 약관 및 개인정보 처리방침에 동의합니다."):
+            st.session_state.age_verified = True
+            st.components.v1.html("<script>localStorage.setItem('age_verified','1');</script>", height=0)
+            st.query_params["age_verified"] = "1"
+            time.sleep(0.5)
+            st.rerun()
+        else:
+            st.stop()
 
 supabase = db.init_supabase()
 
@@ -372,8 +393,8 @@ def confirm_overwrite_dialog(final_name, user_id, user_email, save_data, existin
     if col_ov2.button("아니요, 취소", use_container_width=True):
         st.rerun()
 
-# [3] AI 로보어드바이저 팝업 호출 함수
-# 💡 [중요] 여기서 @st.dialog 데코레이터를 제거했습니다. (중첩 에러 해결)
+# [3] AI 로보어드바이저 팝업 (🚨 중요: @st.dialog 여기 있어야 함!)
+@st.dialog("🕵️ AI 로보어드바이저", width="large")
 def open_ai_wizard_dialog():
     recommendation.show_wizard()
 
@@ -566,41 +587,19 @@ def render_calculator_page(df):
             st.altair_chart(chart_compare, use_container_width=True)
 
             st.divider()
-            
-            # ---------------------------------------------------------
-            # [수정됨] 화면은 깔끔하게, 경고문은 캘린더 파일 내부로 숨김
-            # ---------------------------------------------------------
-            st.subheader("📅 배당 일정 캘린더 구독")
-            
+            ics_data = logic.generate_portfolio_ics(all_data)
+            st.subheader("📅 배당 일정 등록")
             col_d1, col_d2 = st.columns([1.5, 1])
-            
             with col_d1:
-                st.markdown("**매달 들어와서 확인하기 번거로우시죠?**")
-                st.caption("버튼 한 번만 누르면, **올해 남은 배당 예상일**을 고객님의 폰/PC 캘린더에 자동으로 넣어드립니다.")
-                st.caption("※ 상세한 투자 유의사항은 캘린더 일정 내 '메모'란에 자동 기재됩니다.")
-
+                st.caption("매번 버튼을 누르기 귀찮으신가요?")
+                st.caption("아래 버튼으로 **모든 종목의 알림**을 한 번에 내 폰/PC 캘린더에 넣으세요.")
             with col_d2:
-                # 함수 호출 (인자 없이 호출하면 자동으로 올해 연말까지만 생성됨)
-                ics_data = logic.generate_portfolio_ics(all_data)
-                
-                # 현재 연도 가져오기 (버튼 텍스트용)
-                cur_year = datetime.now().year
-                
-                st.write("") 
                 if st.session_state.get("is_logged_in", False):
-                    st.download_button(
-                        # [UX Writing] 명확한 기간 명시
-                        label=f"📅 {cur_year}년 남은 배당 일정 받기", 
-                        data=ics_data, 
-                        file_name=f"dividend_calendar_{cur_year}.ics", 
-                        mime="text/calendar", 
-                        use_container_width=True, 
-                        type="primary"
-                    )
+                    st.download_button(label="📥 전체 일정 파일 받기 (.ics)", data=ics_data, file_name="dividend_calendar.ics", mime="text/calendar", use_container_width=True, type="primary")
                 else:
-                    if st.button(f"📅 {cur_year}년 남은 배당 일정 받기", key="ics_lock_btn", use_container_width=True):
+                    if st.button("📥 전체 일정 파일 받기 (.ics)", key="ics_lock_btn", use_container_width=True):
                         st.error("🔒 로그인 회원 전용 기능입니다. 로그인을 완료해 주세요!")
-                        st.toast("로그인 후 내 캘린더에 저장할 수 있어요!", icon="🔒")
+                        st.toast("로그인이 필요합니다!", icon="🔒")
 
             with st.expander("❓ 다운로드 받은 파일은 어떻게 쓰나요? (사용법 보기)"):
                 st.markdown("""
@@ -999,21 +998,15 @@ def main():
                 st.success(f"👋 **{nickname}**님, 환영합니다!")
 
         with col_ai:
-            # 💡 [수정] 버튼 클릭 시 팝업을 바로 띄우지 않고 '스위치'만 켭니다.
+            # 🚨 [여기서 팝업 함수를 호출합니다]
             if st.button("🕵️ AI 로보어드바이저", use_container_width=True, type="primary"):
                 if st.session_state.get("is_logged_in"):
                     st.session_state.wiz_step = 0 
                     st.session_state.wiz_data = {}
                     if "ai_result_cache" in st.session_state: del st.session_state.ai_result_cache
-                    st.session_state.ai_modal_open = True # 스위치 ON
-                    st.rerun()
+                    open_ai_wizard_dialog() # 팝업 열기
                 else:
                     st.toast("🔒 로그인을 먼저 해주세요!", icon="👆")
-
-    # 📡 [핵심] 자기유지 회로 작동부
-    # 앱이 새로고침되더라도 스위치가 켜져 있으면 팝업을 계속 호출합니다.
-    if st.session_state.get("ai_modal_open", False):
-        open_ai_wizard_dialog()
 
     df_raw = logic.load_stock_data_from_csv()
     if df_raw.empty: 
