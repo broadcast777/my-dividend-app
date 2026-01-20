@@ -1,7 +1,7 @@
 """
 프로젝트: 배당 팽이 (Dividend Top) v2.9
 파일명: recommendation.py
-설명: AI 로보어드바이저 엔진 (쿼터제 자산배분 + 황금비율 + 랜덤 셔플 + 조건부 경고 + 심플 UI)
+설명: AI 로보어드바이저 엔진 (쿼터제 + 황금비율 + 랜덤 셔플 + 신규상장 감점 삭제 및 태그 표시)
 업데이트: 2026.01.20
 """
 
@@ -66,14 +66,13 @@ def _get_core_index_name(name):
 
 
 # ===========================================================
-# [SECTION 2] AI 스마트 추천 엔진 (The Brain: Quota + Shuffle)
+# [SECTION 2] AI 스마트 추천 엔진 (The Brain)
 # ===========================================================
 
 def get_smart_recommendation(df, user_choices):
     """
     사용자 성향에 맞춰 자산군(채권/리츠/주식 등)을 '쿼터제'로 배분하고,
     상위권 내 랜덤 셔플을 통해 매번 다른 결과를 제안합니다.
-    (종목 수가 적을 때 필터링 대신 가산점 방식 사용)
     """
     target_yield = user_choices.get('target_yield', 7.0)
     style = user_choices.get('style', 'balance')
@@ -91,23 +90,28 @@ def get_smart_recommendation(df, user_choices):
             match = df[df['검색라벨'] == lbl]
             if not match.empty: focus_real_names.append(match.iloc[0]['pure_name'])
 
-    # 2. 유니버스 필터링 (국가 필터만 엄격 적용)
-    pool = df[df['연배당률'] > 0].copy()
+    # 2. 유니버스 필터링 (국가/타이밍)
+    # [안전장치] 배당률이 0~35% 사이인 정상 데이터만 사용
+    pool = df[(df['연배당률'] > 0) & (df['연배당률'] <= 35.0)].copy()
+    
     if not include_foreign:
         pool = pool[pool['분류'] == '국내']
         
     pool['temp_date_str'] = pool['배당락일'].fillna('').astype(str)
 
-    # 3. 점수 산정 (기본 점수 + 날짜 가산점 + 랜덤 셔플)
+    # 3. 점수 산정 (기본 점수 + 랜덤성)
     pool['yield_diff'] = abs(pool['연배당률'] - target_yield)
     pool['score'] = 100 - (pool['yield_diff'] * 10)
     
-    # [날짜 가산점] 필터링 대신 날짜가 맞으면 점수를 팍팍 줌 (유연성 확보)
+    # [날짜 가산점]
     if timing != 'mix':
         is_timing_match = pool['temp_date_str'].apply(lambda x: _check_timing_match(x, timing))
         pool.loc[is_timing_match, 'score'] += 50
     
-    # [셔플] 미세한 랜덤 점수 추가로 순위 고착화 방지
+    # 🚨 [수정 사항] 신규 상장 감점 로직 삭제! (슈퍼 루키 보호)
+    # 대신 결과 화면에서 태그로만 알려줍니다.
+    
+    # [셔플] 미세한 랜덤 점수 추가 (순위 고착화 방지)
     pool['score'] += [random.uniform(0, 5) for _ in range(len(pool))]
     
     # 4. 자산군(Cluster) 분류
@@ -123,7 +127,7 @@ def get_smart_recommendation(df, user_choices):
 
     pool['cluster'] = pool.apply(get_cluster, axis=1)
 
-    # 5. 스타일별 [필수 포함] 쿼터 정의 (황금 비율 준비)
+    # 5. 스타일별 [필수 포함] 쿼터 정의
     quotas = []
     
     if style == 'safe':
@@ -148,10 +152,9 @@ def get_smart_recommendation(df, user_choices):
     picked_names = set(focus_real_names)
     picked_core = [_get_core_index_name(n) for n in focus_real_names]
     
-    # (1) 원픽 먼저 담기
     final_picks.extend(focus_real_names)
     
-    # (2) 쿼터(필수 자산군) 우선 선발 (Top-3 Random)
+    # (1) 쿼터 우선 선발
     for q_type in quotas:
         if len(final_picks) >= wanted_count: break
         
@@ -160,7 +163,7 @@ def get_smart_recommendation(df, user_choices):
             (~pool['pure_name'].isin(picked_names))
         ].sort_values('score', ascending=False)
         
-        # 상위 3개 중 랜덤 (1등이 날짜가 안 맞고, 2등이 날짜가 맞으면 2등이 1등 됨)
+        # 상위 3개 중 랜덤
         top_candidates = candidates.head(3) 
         if not top_candidates.empty:
             shuffled = top_candidates.sample(frac=1)
@@ -172,11 +175,12 @@ def get_smart_recommendation(df, user_choices):
                     picked_core.append(core)
                     break 
 
-    # (3) 남은 자리 채우기 (Top-5 Random)
+    # (2) 남은 자리 채우기
     while len(final_picks) < wanted_count:
         candidates = pool[~pool['pure_name'].isin(picked_names)].sort_values('score', ascending=False)
         if candidates.empty: break
         
+        # 상위 5개 중 랜덤
         top_n = candidates.head(5) 
         shuffled = top_n.sample(frac=1)
         
@@ -190,7 +194,7 @@ def get_smart_recommendation(df, user_choices):
         else:
             break
 
-    # 7. 비중(Weight) 최적화 (황금 비율 적용)
+    # 7. 비중(Weight) 최적화
     selected_pool = pool[pool['pure_name'].isin(final_picks)].copy()
     pick_weights = {}
     
@@ -238,9 +242,9 @@ def get_smart_recommendation(df, user_choices):
         # 💡 비중 배분 (안정형 50:25:25 적용)
         if len(ordered_names) == 3:
             if style == 'safe':
-                ratios = [50, 25, 25] # 🛡️ 안정형: 채권50 + 나머지 균등
+                ratios = [50, 25, 25] # 🛡️ 안정형
             else:
-                ratios = [50, 30, 20] # 기본 5:3:2
+                ratios = [50, 30, 20] # 기본
                 
         elif len(ordered_names) == 2:
             ratios = [60, 40]
@@ -355,7 +359,7 @@ def show_wizard():
         else: # flow
             st.info("💰 **현금 흐름:** 커버드콜과 안전자산(채권)을 적절히 섞어 **수익과 안정성**을 동시에 추구합니다.")
             if target >= 9.0:
-                st.warning("⚠️ **고위험 경고:** 목표 배당률이 매우 높습니다. 원금 변동성이 커버드콜 종목 비중이 높아질 수 있습니다.")
+                st.warning("⚠️ **고위험 경고:** 목표 수익률이 매우 높습니다. 원금 변동성이 큰 고배당 종목 비중이 높아질 수 있습니다.")
 
         if st.button("🚀 다음 단계로 (3/4)", type="primary", use_container_width=True):
             st.session_state.wiz_data['target_yield'] = target
@@ -415,8 +419,13 @@ def show_wizard():
             row = df[df['pure_name'] == stock].iloc[0]
             w = weights.get(stock, 0)
             total_avg_yld += (row['연배당률'] * w / 100)
+            
+            # 🚨 [신규 상장 태그] 결과 화면에서 표시
+            months = int(row.get('신규상장개월수', 0))
+            new_tag = " | 🌱 신규 상장" if 0 < months < 12 else ""
+            
             st.markdown(f"✅ **{stock}** (비중 **{w}%**)")
-            st.caption(f"    └ 💰 연 {row['연배당률']:.2f}% | 📅 {row.get('배당락일', '-')} | 🔖 {row.get('유형', '-')}")
+            st.caption(f"    └ 💰 연 {row['연배당률']:.2f}% | 📅 {row.get('배당락일', '-')} | 🔖 {row.get('유형', '-')}{new_tag}")
             share_text += f"- {stock}: {w}% (연 {row['연배당률']:.2f}%)\n"
 
         share_text += f"\n📈 예상 평균 배당률: 연 {total_avg_yld:.2f}%\n"
@@ -454,4 +463,10 @@ def show_wizard():
             if "ai_result_cache" in st.session_state: del st.session_state.ai_result_cache
             st.toast("장바구니에 담았습니다! 🛒", icon="✅")
             time.sleep(0.5)
+            st.rerun()
+            
+        st.write("")
+        if st.button("닫기 (저장 안 함)", use_container_width=True):
+            st.session_state.ai_modal_open = False
+            if "ai_result_cache" in st.session_state: del st.session_state.ai_result_cache
             st.rerun()
