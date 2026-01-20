@@ -1,7 +1,7 @@
 """
 프로젝트: 배당 팽이 (Dividend Top) v2.9
 파일명: recommendation.py
-설명: AI 로보어드바이저 엔진 (최종 완성: 쿼터제 + 황금비율 + 셔플 + 데이터 무결성 강화)
+설명: AI 로보어드바이저 엔진 (쿼터제 + 황금비율 + 셔플 + 안정형 리스크 필터링 강화)
 업데이트: 2026.01.20
 """
 
@@ -91,7 +91,7 @@ def get_smart_recommendation(df, user_choices):
             if not match.empty: focus_real_names.append(match.iloc[0]['pure_name'])
 
     # 2. 유니버스 필터링 (데이터 무결성 강화)
-    # 🚨 [필수 개선] 숫자가 아닌 데이터(문자, NaN)가 섞여있으면 에러가 나므로 강제 변환 및 제거
+    # [필수 개선] 숫자가 아닌 데이터 에러 방지
     df['연배당률'] = pd.to_numeric(df['연배당률'], errors='coerce')
     pool = df.dropna(subset=['연배당률']) # NaN 데이터 삭제
     
@@ -133,9 +133,26 @@ def get_smart_recommendation(df, user_choices):
     if style == 'safe':
         # 안정형: 채권 필수 + 리츠(물가방어) 필수
         quotas = ['bond', 'reit'] 
+        
+        # 기본 가산점
         pool.loc[pool['cluster'] == 'bond', 'score'] += 30 
         pool.loc[pool['cluster'] == 'reit', 'score'] += 20
         
+        # 🚨 [안정형 특화 필터링] 
+        # 하이일드/정크본드는 '채권'이어도 감점(-100) -> 추천 제외
+        # 국채/단기채는 가산점(+30) -> 무조건 추천
+        for idx, row in pool.iterrows():
+            if row['cluster'] == 'bond':
+                name_upper = (str(row.get('pure_name', '')) + " " + str(row.get('종목명', ''))).upper()
+                
+                # 위험 채권 감점 (하이일드, SPHY, 액티브 등)
+                if any(k in name_upper for k in ['하이일드', 'HIGH YIELD', 'SPHY', '액티브', 'ACTIVE']):
+                    pool.at[idx, 'score'] -= 100 
+                
+                # 안전 채권 우대 (국채, Treasury, 단기, SGOV, T-Bill)
+                if any(k in name_upper for k in ['국채', 'TREASURY', 'SGOV', '단기', 'BILL', '초단기']):
+                    pool.at[idx, 'score'] += 30
+
     elif style == 'growth':
         # 성장형: 배당성장 필수 + 리츠/고배당 중 하나
         quotas = ['growth', 'income'] 
@@ -152,9 +169,10 @@ def get_smart_recommendation(df, user_choices):
     picked_names = set(focus_real_names)
     picked_core = [_get_core_index_name(n) for n in focus_real_names]
     
+    # (1) 원픽 먼저 담기
     final_picks.extend(focus_real_names)
     
-    # (1) 쿼터 우선 선발
+    # (2) 쿼터(필수 자산군) 우선 선발
     for q_type in quotas:
         if len(final_picks) >= wanted_count: break
         
@@ -175,7 +193,7 @@ def get_smart_recommendation(df, user_choices):
                     picked_core.append(core)
                     break 
 
-    # (2) 남은 자리 채우기
+    # (3) 남은 자리 채우기
     while len(final_picks) < wanted_count:
         candidates = pool[~pool['pure_name'].isin(picked_names)].sort_values('score', ascending=False)
         if candidates.empty: break
@@ -228,6 +246,7 @@ def get_smart_recommendation(df, user_choices):
         for p in final_picks:
             cluster = selected_pool[selected_pool['pure_name']==p]['cluster'].iloc[0]
             priority = 0
+            # 스타일별 대장주 우선순위
             if style == 'safe' and cluster == 'bond': priority = 3
             elif style == 'flow' and cluster == 'cov': priority = 3
             elif style == 'growth' and cluster == 'growth': priority = 3
@@ -238,6 +257,7 @@ def get_smart_recommendation(df, user_choices):
         sorted_picks.sort(key=lambda x: x[1], reverse=True)
         ordered_names = [x[0] for x in sorted_picks]
         
+        # 💡 비중 배분 (안정형 50:25:25)
         if len(ordered_names) == 3:
             if style == 'safe':
                 ratios = [50, 25, 25] 
@@ -298,7 +318,7 @@ def show_wizard():
     if "wiz_data" not in st.session_state: st.session_state.wiz_data = {}
     step = st.session_state.wiz_step
 
-    # [Step 0] 도입부
+    # [Step 0] 도입부 (닫기 버튼 삭제됨)
     if step == 0:
         st.subheader("나만의 배당 조합, 막막하신가요?")
         st.write("투자 성향과 목표에 맞춰 배당팽이가 최적의 포트폴리오를 설계해 드립니다. ✨")
@@ -316,10 +336,10 @@ def show_wizard():
         st.subheader("Q1. 어떤 투자를 원하세요?")
         
         st.button("📈 성장 추구 (주가 상승 + 배당)", use_container_width=True, on_click=go_next_step, args=(2, 'style', 'growth'))
-        st.write("") 
+       
         
         st.button("💰 현금 흐름 (월 배당금 극대화)", use_container_width=True, on_click=go_next_step, args=(2, 'style', 'flow'))
-        st.write("") 
+        
         
         st.button("🛡️ 안정성 (원금 방어 최우선)", use_container_width=True, on_click=go_next_step, args=(2, 'style', 'safe'))
 
@@ -348,7 +368,7 @@ def show_wizard():
             if target >= 7.0:
                 st.warning("⚠️ **현실적 조언:** 성장주 위주로는 고배당(7%+) 달성이 어렵습니다. 실제 결과 배당률은 목표보다 낮을 수 있습니다.")
                 
-        else: 
+        else: # flow
             st.info("💰 **현금 흐름:** 커버드콜과 안전자산(채권)을 적절히 섞어 **수익과 안정성**을 동시에 추구합니다.")
             if target >= 9.0:
                 st.warning("⚠️ **고위험 경고:** 목표 수익률이 매우 높습니다. 원금 변동성이 큰 고배당 종목 비중이 높아질 수 있습니다.")
@@ -382,7 +402,7 @@ def show_wizard():
         if c1.button("⬅️ 이전으로", use_container_width=True): st.session_state.wiz_step = 3; st.rerun()
         if c2.button("🚀 결과 보기", type="primary", use_container_width=True): st.session_state.wiz_step = 5; st.rerun()
 
-    # [Step 5] 최종 결과 출력
+    # [Step 5] 최종 결과 출력 (닫기 버튼 삭제됨)
     elif step == 5:
         if "ai_result_cache" not in st.session_state or st.session_state.ai_result_cache is None:
             with st.spinner("🎲 최적 조합 찾는 중..."):
