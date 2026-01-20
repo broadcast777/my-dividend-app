@@ -766,13 +766,25 @@ def render_calculator_page(df):
     df_ana = pd.DataFrame(all_data)
     if not df_ana.empty:
         st.write("")
-        tab_analysis, tab_simulation, tab_goal = st.tabs(["💎 자산 구성 분석", "💰 10년 뒤 자산 미리보기", "🎯 목표 배당 달성"])
-        
-        # [핵심 추가 2] UnboundLocalError 방지를 위한 변수 선언 위치 이동 (Safety Hoisting)
+        # [핵심 변경] st.tabs -> st.segmented_control 복구 (UI 및 상태 유지)
+        tab_options = ["💎 자산 구성 분석", "💰 10년 뒤 자산 미리보기", "🎯 목표 배당 달성"]
+        selected_tab = st.segmented_control(
+            "main_tab_nav",
+            options=tab_options,
+            default=tab_options[0],
+            selection_mode="single",
+            label_visibility="collapsed"
+        )
+        if not selected_tab: selected_tab = tab_options[0]
+
+        # [키 포인트] 변수 Hoisting (UnboundLocalError 해결 - 탭 내부 변수를 밖으로 꺼냄)
         # 세션에 저장된 값이 있으면 불러오고, 없으면 150(150만원)을 기본값으로 사용
         saved_monthly = st.session_state.get("shared_monthly_input", 150)
         
-        with tab_analysis:
+        st.write("")
+
+        # 1. 자산 구성 분석
+        if selected_tab == "💎 자산 구성 분석":
             chart_col, table_col = st.columns([1.2, 1])
             def classify_currency(row):
                 try:
@@ -805,7 +817,8 @@ def render_calculator_page(df):
             ui.render_custom_table(df_ana)
             st.error("""**⚠️ 포트폴리오 분석 시 유의사항**\n1. 과거의 데이터를 기반으로 한 단순 결과값이며, 실제 투자 수익을 보장하지 않습니다.\n2. '달러 자산' 비율 실제 환노출 여부와 다를 수 있습니다 투자 전 확인이 필요합니다.\n3. 실제 배당금 지급일과 금액은 운용사의 사정에 따라 변경될 수 있습니다.""")
 
-        with tab_simulation:
+        # 2. 10년 뒤 자산 미리보기
+        elif selected_tab == "💰 10년 뒤 자산 미리보기":
             start_money = total_invest
             is_over_100m = start_money > 100000000
             st.info(f"📊 상단에서 설정한 **초기 자산 {start_money/10000:,.0f}만원**으로 시뮬레이션을 시작합니다.")
@@ -961,26 +974,28 @@ def render_calculator_page(df):
                 general_ratio_msg = f"<div style='color: #6c757d; font-size: 0.85em; margin-top: 15px; border-top: 1px dashed #d0e8ff; padding-top: 10px;'>💡 최종 자산 중 <b>약 {gen_val_manwon:,.0f}만원</b>은 ISA 한도 초과로 인해<br>일반 계좌(15.4% 과세)로 운용된 결과입니다.</div>"
 
             st.markdown(f"""
-<div style="background-color: #e7f3ff; border: 1.5px solid #d0e8ff; border-radius: 16px; padding: 25px; text-align: center; box-shadow: 0 4px 10px rgba(0,104,201,0.05);">
-    <p style="color: #666; font-size: 0.95em; margin: 0 0 8px 0;">{years_sim}년 뒤 모이는 돈 (세후)</p>
-    <h2 style="color: #0068c9; font-size: 2.2em; margin: 0; font-weight: 800; line-height: 1.2;">약 {real_money/10000:,.0f}만원{inflation_msg_money}</h2>
-    <p style="color: #777; font-size: 0.9em; margin: 8px 0 0 0;">(투자원금 {final_principal/10000:,.0f}만원 / {tax_msg})</p>
-    <div style="height: 1px; background-color: #d0e8ff; margin: 25px auto; width: 85%;"></div>
-    <p style="color: #0068c9; font-weight: bold; font-size: 1.1em; margin: 0 0 12px 0;">📅 월 예상 배당금: {monthly_pocket/10000:,.1f}만원 {inflation_msg_monthly}</p>
-    <div style="background-color: rgba(255,255,255,0.5); padding: 15px; border-radius: 12px; display: inline-block; min-width: 80%;">
-        <p style="color: #333; font-size: 1.1em; margin: 0; line-height: 1.6;">
-            매달 <b>{selected_item['emoji']} {selected_item['name']} {msg_count}{selected_item['unit']}</b><br>
-            마음껏 즐기기 가능! 😋
-        </p>{general_ratio_msg}
-    </div>
-</div>
-""", unsafe_allow_html=True)
+            <div style="background-color: #e7f3ff; border: 1.5px solid #d0e8ff; border-radius: 16px; padding: 25px; text-align: center; box-shadow: 0 4px 10px rgba(0,104,201,0.05);">
+                <p style="color: #666; font-size: 0.95em; margin: 0 0 8px 0;">{years_sim}년 뒤 모이는 돈 (세후)</p>
+                <h2 style="color: #0068c9; font-size: 2.2em; margin: 0; font-weight: 800; line-height: 1.2;">약 {real_money/10000:,.0f}만원{inflation_msg_money}</h2>
+                <p style="color: #777; font-size: 0.9em; margin: 8px 0 0 0;">(투자원금 {final_principal/10000:,.0f}만원 / {tax_msg})</p>
+                <div style="height: 1px; background-color: #d0e8ff; margin: 25px auto; width: 85%;"></div>
+                <p style="color: #0068c9; font-weight: bold; font-size: 1.1em; margin: 0 0 12px 0;">📅 월 예상 배당금: {monthly_pocket/10000:,.1f}만원 {inflation_msg_monthly}</p>
+                <div style="background-color: rgba(255,255,255,0.5); padding: 15px; border-radius: 12px; display: inline-block; min-width: 80%;">
+                    <p style="color: #333; font-size: 1.1em; margin: 0; line-height: 1.6;">
+                        매달 <b>{selected_item['emoji']} {selected_item['name']} {msg_count}{selected_item['unit']}</b><br>
+                        마음껏 즐기기 가능! 😋
+                    </p>{general_ratio_msg}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
             
             annual_div_income = monthly_div_final * 12
             if annual_div_income > 20000000: st.warning(f"🚨 **주의:** {years_sim}년 뒤 연간 배당금이 2,000만원을 초과하여 금융소득종합과세 대상이 될 수 있습니다.")
             st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**\n1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 단순 결과입니다.
                     2. 재투자가 매월 이루어진다는 가정하에 계산된 복리 결과입니다.""")
-        with tab_goal:
+
+        # 3. 목표 배당 달성
+        elif selected_tab == "🎯 목표 배당 달성":
             st.subheader("🎯 목표 배당금 역산기 (은퇴 시뮬레이터)")
             st.caption("내가 원하는 월급을 받기 위해 얼마를 더 모아야 할지 정밀하게 계산합니다.")
 
@@ -989,7 +1004,6 @@ def render_calculator_page(df):
                 col_info1, col_info2, col_info3 = st.columns(3)
                 col_info1.metric("📊 평균 연배당률", f"{avg_y:.2f}%")
                 # [수정] 위에서 호이스팅한 monthly_input 변수 사용 (UnboundLocalError 해결)
-                # 월급 탭에서는 세션에 저장된 값을 실시간 반영
                 monthly_input_view = st.session_state.get("shared_monthly_input", 150)
                 col_info2.metric("💰 매월 추가적립", f"{monthly_input_view:,.0f}만원")
                 col_info3.metric("📦 선택 종목 수", f"{len(selected)}개")
