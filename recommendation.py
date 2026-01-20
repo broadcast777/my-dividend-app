@@ -1,7 +1,7 @@
 """
 프로젝트: 배당 팽이 (Dividend Top) v2.9
 파일명: recommendation.py
-설명: AI 로보어드바이저 엔진 (안정형 리스크 필터링 + 투자 유의사항/수정 가이드 복구 완료)
+설명: AI 로보어드바이저 엔진 (안정형 리스크 필터링 + 투자 유의사항/수정 가이드 복구 완료 + 스위치 OFF 기능)
 업데이트: 2026.01.19
 """
 
@@ -358,11 +358,7 @@ def show_wizard():
             st.code(share_text, language="text")
             st.info("💡 우측 상단 복사 아이콘을 눌러 카톡에 붙여넣으세요!")
 
-        # -----------------------------------------------------------
-        # [NEW] 필수 투자 유의사항 및 수정 가이드 (복구 완료)
-        # -----------------------------------------------------------
         st.write("")
-        # 💡 줄바꿈을 위해 항목 사이에 빈 줄을 하나씩 더 넣었습니다.
         st.warning("""⚠️ **투자 유의사항 (필독)**
 
 1. 본 결과는 매수/매도 추천이 아니며, 과거 데이터를 기반으로 한 단순 시뮬레이션입니다.
@@ -371,8 +367,6 @@ def show_wizard():
 
 3. 과거의 수익이 미래의 수익을 보장하지 않으므로, 모든 투자의 책임은 본인에게 있습니다.""")
         
-     
-        
         st.info("💡 **팁:** AI 제안 결과는 단순 참고용입니다. [이대로 담기]를 누르신 후, 아래 [💰 배당금 계산기]에서 각 유형별 종목을 직접 교체하거나 비중을 자유롭게 수정하실 수 있습니다.")
 
         st.divider()
@@ -380,9 +374,12 @@ def show_wizard():
         if c1.button("🎲 다른 조합", use_container_width=True): del st.session_state.ai_result_cache; st.rerun()
         if c2.button("🔄 처음부터", on_click=reset_wizard, use_container_width=True): st.rerun()
         
+        # 💡 [핵심] 스위치 끄기 로직 (회로 차단)
         if st.button("✅ 이대로 담기", type="primary", use_container_width=True):
             st.session_state.selected_stocks = picks
             st.session_state.ai_suggested_weights = weights
-            st.session_state.ai_modal_open = False
+            st.session_state.ai_modal_open = False # 스위치 OFF (팝업 닫힘)
             if "ai_result_cache" in st.session_state: del st.session_state.ai_result_cache
-            st.toast("장바구니에 담았습니다! 🛒", icon="✅"); time.sleep(0.5); st.rerun()
+            st.toast("장바구니에 담았습니다! 🛒", icon="✅")
+            time.sleep(0.5)
+            st.rerun()
