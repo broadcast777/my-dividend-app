@@ -311,10 +311,10 @@ def show_wizard():
         st.button("📈 성장 추구 (주가 상승 + 배당)", use_container_width=True, on_click=go_next_step, args=(2, 'style', 'growth'))
         st.write("") 
         
-        st.button("💰 현금 흐름 (월 배당금 극대화)", use_container_width=True, on_click=go_next_step, args=(2, 'style', 'flow'))
+        st.button("💰 현금 흐름 (월 배당금 추구)", use_container_width=True, on_click=go_next_step, args=(2, 'style', 'flow'))
         st.write("") 
         
-        st.button("🛡️ 안정성 (원금 방어 최우선)", use_container_width=True, on_click=go_next_step, args=(2, 'style', 'safe'))
+        st.button("🛡️ 안정성 (원금 방어 우선)", use_container_width=True, on_click=go_next_step, args=(2, 'style', 'safe'))
 
     # [Step 2] 배당 주기 결정
     elif step == 2:
@@ -344,7 +344,7 @@ def show_wizard():
         else: # flow
             st.info("💰 **현금 흐름:** 커버드콜과 안전자산(채권)을 적절히 섞어 **수익과 안정성**을 동시에 추구합니다.")
             if target >= 9.0:
-                st.warning("⚠️ **고위험 경고:** 목표 수익률이 매우 높습니다. 원금 변동성이 큰 고배당 종목 비중이 높아질 수 있습니다.")
+                st.warning("⚠️ **고위험 경고:** 목표 수익률이 매우 높습니다. 원금 변동성이 큰 커버드콜 종목 비중이 높아질 수 있습니다.")
 
         if st.button("🚀 다음 단계로 (3/4)", type="primary", use_container_width=True):
             st.session_state.wiz_data['target_yield'] = target
