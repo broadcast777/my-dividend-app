@@ -78,3 +78,33 @@ def render_custom_table(data_frame):
         </table>
     </div>
     """, unsafe_allow_html=True)
+
+# ui.py 파일 하단에 추가
+
+def render_stocklist_page(df):
+    """📃 전체 종목 리스트 페이지 렌더링"""
+    st.header("📃 전체 종목 리스트")
+    st.write("배당 팽이가 관리하는 전체 배당 종목 리스트입니다.")
+    
+    # 검색 기능 추가
+    search_query = st.text_input("🔍 종목명 또는 코드로 검색", placeholder="예: 삼성전자, 005930")
+    
+    display_df = df.copy()
+    if search_query:
+        display_df = display_df[
+            display_df['종목명'].str.contains(search_query, case=False) | 
+            display_df['코드'].str.contains(search_query, case=False)
+        ]
+    
+    # 이미 ui.py에 정의된 테이블 렌더링 함수 호출
+    render_custom_table(display_df)
+
+def render_roadmap_page(df):
+    """📅 월별 로드맵 페이지 렌더링"""
+    st.header("📅 월별 로드맵")
+    st.info("선택하신 종목들의 월별 예상 배당 흐름을 한눈에 확인하세요.")
+    
+    # 로드맵 로직 (기존에 작성하셨던 timeline 모듈 등을 활용하거나 기본 안내 출력)
+    st.warning("로드맵 상세 기능은 timeline 모듈과 연동이 필요합니다.")
+    # 예시: 간단한 데이터프레임 출력
+    st.dataframe(df[['종목명', '배당락일', '연배당률']], use_container_width=True)
