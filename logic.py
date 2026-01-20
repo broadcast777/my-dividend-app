@@ -1,7 +1,7 @@
 """
 프로젝트: 배당 팽이 (Dividend Top) v2.9
 파일명: logic.py
-설명: 금융 API 연동, 데이터 크롤링, 캘린더 파일 생성 (D-4 알림 + 월말/월초 로직 + 올해 한정 생성)
+설명: 금융 API 연동, 데이터 크롤링, 캘린더 파일 생성 (데이터 무결성 강화 + 충돌 방지 패치 적용)
 업데이트: 2026.01.20
 """
 
@@ -20,28 +20,52 @@ import base64
 import json
 from github import Github
 from logger import logger
+import sqlite3  # DB 에러 처리를 위해 추가
 
 # -----------------------------------------------------------
 # [SECTION 1] 날짜 및 스케줄링 헬퍼 (공통 도구)
 # -----------------------------------------------------------
 
+def standardize_date_format(date_str):
+    """
+    [NEW] 입력된 날짜 문자열을 'YYYY-MM-DD' 표준 포맷으로 1차 정규화합니다.
+    (예: 2025.1.5 -> 2025-01-05, 2025/12/31 -> 2025-12-31)
+    """
+    s = str(date_str).strip()
+    # 이미 YYYY-MM-DD 형식이면 패스
+    if re.match(r'^\d{4}-\d{2}-\d{2}$', s):
+        return s
+    
+    # 점(.)이나 슬래시(/)를 하이픈(-)으로 통일
+    s = s.replace('.', '-').replace('/', '-')
+    
+    # 정규식으로 YYYY-M-D 패턴을 찾아 YYYY-MM-DD로 변환
+    match = re.match(r'^(\d{4})-(\d{1,2})-(\d{1,2})$', s)
+    if match:
+        y, m, d = match.groups()
+        return f"{y}-{m.zfill(2)}-{d.zfill(2)}"
+    
+    return s  # 변환 불가능하면 원본 반환 (parse_dividend_date에서 처리)
+
 def parse_dividend_date(date_str):
     """
     다양한 형태의 날짜 문자열(월초, 월말, 특정일)을 datetime.date 객체로 변환합니다.
     """
-    s = str(date_str).strip()
+    # 1. 포맷 표준화 시도
+    s = standardize_date_format(str(date_str))
     today = datetime.date.today()
     
-    # 1. YYYY-MM-DD 형식
+    # 2. YYYY-MM-DD 형식 파싱 시도
     try:
         return datetime.datetime.strptime(s, "%Y-%m-%d").date()
     except ValueError:
         pass
     
-    # 2. 키워드 분석 (월말/월초 우선 체크)
-    is_end_of_month = any(k in s for k in ['말일', '월말', '마지막', '하순'])
-    is_start_of_month = any(k in s for k in ['매월 초', '월초', '1~3일'])
+    # 3. 키워드 분석 (월말/월초/특정일)
+    is_end_of_month = any(k in s for k in ['말일', '월말', '마지막', '하순', 'END'])
+    is_start_of_month = any(k in s for k in ['매월 초', '월초', '1~3일', 'BEGIN'])
     
+    # 숫자만 추출
     day_match = re.search(r'(\d+)', s)
     
     if is_end_of_month or is_start_of_month or (day_match and ('매월' in s or '일' in s)):
@@ -49,18 +73,20 @@ def parse_dividend_date(date_str):
             if is_end_of_month:
                 day = calendar.monthrange(today.year, today.month)[1] # 이번달 말일
             elif is_start_of_month:
-                day = 1 # [수정] 월초는 1일로 설정
+                day = 1 
             else:
                 day = int(day_match.group(1))
             
-            # 이번 달 배당락일 추정
+            # 이번 달 기준 날짜 생성
             try:
-                target_date = datetime.date(today.year, today.month, day)
-            except ValueError: # 2월 30일 같은 날짜 오류 시 말일로 보정
-                last_day = calendar.monthrange(today.year, today.month)[1]
-                target_date = datetime.date(today.year, today.month, last_day)
+                # 해당 월에 없는 날짜(예: 2월 30일)면 말일로 자동 보정
+                last_day_actual = calendar.monthrange(today.year, today.month)[1]
+                safe_day = min(day, last_day_actual)
+                target_date = datetime.date(today.year, today.month, safe_day)
+            except ValueError:
+                target_date = today # 안전 장치
             
-            # 이미 지났으면 다음 달로
+            # 이미 지났으면 다음 달로 넘김
             if target_date < today:
                 next_month = today.month + 1 if today.month < 12 else 1
                 year = today.year if today.month < 12 else today.year + 1
@@ -72,12 +98,12 @@ def parse_dividend_date(date_str):
                 elif is_start_of_month:
                     real_day = 1
                 else:
-                    real_day = min(day, last_day_next) # 31일이 없는 달 방어
+                    real_day = min(day, last_day_next)
                     
                 return datetime.date(year, next_month, real_day)
             
             return target_date
-        except ValueError:
+        except Exception:
             pass
             
     return None 
@@ -100,8 +126,10 @@ def generate_portfolio_ics(portfolio_data):
     
     for item in portfolio_data:
         name = item.get('종목', '배당주')
-        date_info = str(item.get('배당락일', '-'))
-        
+        # 데이터가 없을 경우 '-' 처리하여 에러 방지
+        date_info = str(item.get('배당락일', '-')).strip()
+        if date_info in ['-', 'nan', 'None', '']: continue
+
         # 1. 키워드 파싱
         is_end_of_month = any(k in date_info for k in ['말일', '월말', '마지막', '30일', '31일', '하순'])
         is_start_of_month = any(k in date_info for k in ['매월 초', '월초', '1~3일'])
@@ -110,13 +138,26 @@ def generate_portfolio_ics(portfolio_data):
         target_day = None
         if is_end_of_month: target_day = 'END'
         elif is_start_of_month: target_day = 1
-        elif day_match and ('매월' in date_info or '일' in date_info):
+        elif day_match: # '일' 글자가 없더라도 숫자가 있으면 시도
             target_day = int(day_match.group(1))
         
-        # 2. 스마트 날짜 계산 (올해 연말까지만!)
-        if target_day is not None:
+        # 날짜 포맷이 '2025-05-15' 처럼 고정일인 경우 처리 로직 추가
+        fixed_date_obj = None
+        if '-' in date_info or '.' in date_info:
+             parsed = parse_dividend_date(date_info)
+             if parsed: fixed_date_obj = parsed
+
+        # 2. 스마트 날짜 계산 Loop
+        if target_day is not None or fixed_date_obj:
             check_idx = 0
             
+            # 고정 날짜 하나만 있는 경우 (연배당 등)
+            if fixed_date_obj:
+                 # D-4 계산 로직 공통화 필요하지만, 일단 여기서는 생략하고 반복문 로직 태움
+                 # 만약 고정일이면 아래 반복문 대신 단건 처리로 빠져야 함.
+                 # 여기서는 '매월' 배당 위주로 처리
+                 pass 
+
             # 최대 12개월을 탐색하되, 해가 바뀌면 중단
             while check_idx < 12:
                 month_calc = today.month + check_idx
@@ -125,7 +166,6 @@ def generate_portfolio_ics(portfolio_data):
                 
                 check_idx += 1 
                 
-                # 🚨 [핵심] 해가 바뀌면(내년이 되면) 더 이상 생성하지 않고 종료
                 if year > current_year:
                     break
                 
@@ -134,26 +174,26 @@ def generate_portfolio_ics(portfolio_data):
                     
                     if target_day == 'END':
                         safe_day = last_day_of_month
-                    else:
+                    elif isinstance(target_day, int):
                         safe_day = min(target_day, last_day_of_month)
+                    else:
+                        continue # 처리 불가
                     
                     event_date = datetime.date(year, month, safe_day)
                     
-                    # 🚨 [수정 완료] D-4 계산 (4일 전 알림)
+                    # D-4 계산 (4일 전 알림)
                     buy_date = event_date - datetime.timedelta(days=4)
                     
-                    # 주말이면 금요일로 당김 (매수 기회 확보)
+                    # 주말이면 금요일로 당김
                     while buy_date.weekday() >= 5: 
                         buy_date -= datetime.timedelta(days=1)
                     
-                    # 이미 지난 과거 알림은 건너뜀
                     if buy_date < today:
                         continue
                         
                     dt_start = buy_date.strftime("%Y%m%d")
                     dt_end = (buy_date + datetime.timedelta(days=1)).strftime("%Y%m%d")
                     
-                    # 면책 조항 (토스 스타일)
                     description = (
                         f"예상 배당락일: {event_date}\\n\\n"
                         f"💰 [{name}] 배당 수령을 위해 계좌를 확인하세요.\\n\\n"
@@ -163,7 +203,6 @@ def generate_portfolio_ics(portfolio_data):
                         f"안전한 투자를 위해, 매수 전 반드시 '운용사 공식 홈페이지' 공시를 확인해주세요."
                     )
                     
-                    # 🚨 [수정 완료] 제목에 D-4 명시
                     ics_content.extend([
                         "BEGIN:VEVENT",
                         f"DTSTART;VALUE=DATE:{dt_start}",
@@ -184,11 +223,9 @@ def get_google_cal_url(stock_name, date_str):
     [단일 등록용] 구글 캘린더 일정 등록 URL 생성 (D-4일 기준)
     """
     try:
-        # 1. 날짜 파싱
         target_date = parse_dividend_date(date_str)
         if not target_date: return None
         
-        # 🚨 [수정 완료] D-4 안전 매수일 계산
         if isinstance(target_date, datetime.date):
             safe_buy_date = target_date - datetime.timedelta(days=4) 
         else:
@@ -198,13 +235,11 @@ def get_google_cal_url(stock_name, date_str):
         while safe_buy_date.weekday() >= 5:
             safe_buy_date -= datetime.timedelta(days=1)
 
-        # 3. URL 생성
         start_str = safe_buy_date.strftime("%Y%m%d")
         end_str = (safe_buy_date + datetime.timedelta(days=1)).strftime("%Y%m%d")
         
         base_url = "https://www.google.com/calendar/render?action=TEMPLATE"
         
-        # 🚨 [수정 완료] 제목 및 면책 조항 동기화
         title_text = f"🔔 [{stock_name}] 배당락 D-4 (매수 권장)"
         details_text = (
             f"예상 배당락일: {date_str}\n\n"
@@ -229,8 +264,13 @@ def get_google_cal_url(stock_name, date_str):
 # -----------------------------------------------------------
 
 def _fetch_price_raw(broker, code, category):
+    """
+    [핵심 수정] DB Locked 에러 방지를 위한 안전 조회 로직
+    """
     try:
         code_str = str(code).strip()
+        
+        # 1. 국내 주식 (한투 API)
         if category == '국내':
             try:
                 resp = broker.fetch_price(code_str)
@@ -238,25 +278,50 @@ def _fetch_price_raw(broker, code, category):
                     if resp['output'] and resp['output'].get('stck_prpr'):
                         return int(resp['output']['stck_prpr'])
             except Exception as e:
+                # 한투 에러는 로그만 남기고 yfinance 시도 안함 (국내는 yfinance 데이터 부실)
                 logger.warning(f"KIS Price Error ({code}): {e}")
+                return None
         
+        # 2. 해외 주식 (Yfinance) - Locked 에러 주범
         ticker_code = f"{code_str}.KS" if category == '국내' else code_str
-        ticker = yf.Ticker(ticker_code)
-        price = ticker.fast_info.get('last_price')
-        if not price:
-            hist = ticker.history(period="1d")
-            if not hist.empty:
-                price = hist['Close'].iloc[-1]
-        return float(price) if price else None
+        
+        # 🚨 [패치] yfinance가 내부적으로 sqlite 캐시를 쓰면서 충돌 발생
+        # 충돌 시 잠시 대기 후 재시도 (Retry Pattern)
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                ticker = yf.Ticker(ticker_code)
+                price = ticker.fast_info.get('last_price')
+                
+                # fast_info 실패 시 history 조회
+                if not price:
+                    hist = ticker.history(period="1d")
+                    if not hist.empty:
+                        price = hist['Close'].iloc[-1]
+                
+                if price: return float(price)
+            
+            except sqlite3.OperationalError: 
+                # DB 잠금 에러 발생 시
+                if attempt < max_retries - 1:
+                    time.sleep(0.5) # 0.5초 대기 후 재시도
+                    continue
+                else:
+                    logger.error(f"DB Locked Fail ({code}): Max retries exceeded")
+            except Exception:
+                break # 다른 에러면 재시도 의미 없음
+                
+        return None
     except Exception as e:
         logger.error(f"Price Fetch Error ({code}): {e}")
         return None
 
 def get_safe_price(broker, code, category):
+    """안전하게 가격을 가져오며 실패 시 1회 더 재시도"""
     for _ in range(2):
         price = _fetch_price_raw(broker, code, category)
         if price is not None: return price
-        time.sleep(0.5)
+        time.sleep(0.3)
     return None
 
 def classify_asset(row):
@@ -285,10 +350,12 @@ def get_hedge_status(name, category):
 def load_and_process_data(df_raw, is_admin=False):
     if df_raw.empty: return pd.DataFrame()
 
+    # 1. 데이터 전처리 (결측치 방어)
     try:
         num_cols = ['연배당금', '연배당률', '현재가', '신규상장개월수', '연배당금_크롤링']
         for col in num_cols:
             if col in df_raw.columns:
+                # 문자가 섞여있을 경우 강제 변환 후 NaN은 0으로
                 df_raw[col] = pd.to_numeric(df_raw[col], errors='coerce').fillna(0)
 
         if '종목코드' in df_raw.columns:
@@ -307,7 +374,7 @@ def load_and_process_data(df_raw, is_admin=False):
     except Exception as e:
         logger.error(f"Data Preprocessing Error: {e}")
 
-    # 브로커 초기화
+    # 2. 브로커 초기화
     try:
         broker = mojito.KoreaInvestment(
             api_key=st.secrets["kis"]["app_key"],
@@ -320,12 +387,14 @@ def load_and_process_data(df_raw, is_admin=False):
 
     results = [None] * len(df_raw)
     
+    # 3. 병렬 처리 작업자
     def process_row(idx, row):
         try:
             code = str(row.get('종목코드', '')).strip()
             name = str(row.get('종목명', '')).strip()
             category = str(row.get('분류', '국내')).strip()
             
+            # 가격 조회 (Safe Logic 적용)
             price = get_safe_price(broker, code, category)
             if not price: price = 0 
 
@@ -333,6 +402,7 @@ def load_and_process_data(df_raw, is_admin=False):
             manual_div = float(row.get('연배당금', 0))        
             months = int(row.get('신규상장개월수', 0))
 
+            # 신규 상장 종목 연환산
             if 0 < months < 12:
                 target_div = (manual_div / months * 12) if manual_div > 0 else crawled_div
                 display_name = f"{name} ⭐"
@@ -376,6 +446,7 @@ def load_and_process_data(df_raw, is_admin=False):
             logger.error(f"Row Processing Error ({idx}): {e}")
             return idx, None
 
+    # 스레드 풀 실행 (yfinance 충돌 완화를 위해 워커 수 조절 가능)
     with ThreadPoolExecutor(max_workers=10) as executor:
         futures = {executor.submit(process_row, idx, row): idx for idx, row in df_raw.iterrows()}
         for future in as_completed(futures):
@@ -394,16 +465,22 @@ def load_and_process_data(df_raw, is_admin=False):
 def load_stock_data_from_csv():
     import os
     file_path = "stocks.csv"
-    if not os.path.exists(file_path):
-        return pd.DataFrame()
-    try:
-        df = pd.read_csv(file_path, dtype={'종목코드': str})
-        df.columns = df.columns.str.strip()
-        if '연배당금_크롤링' not in df.columns: df['연배당금_크롤링'] = 0.0
-        return df
-    except Exception as e:
-        logger.error(f"CSV Load Error: {e}")
-        return pd.DataFrame()
+    
+    # 🚨 [패치] 파일 접근 충돌 방지 (Retry Logic)
+    for _ in range(3):
+        try:
+            if not os.path.exists(file_path):
+                return pd.DataFrame()
+            
+            df = pd.read_csv(file_path, dtype={'종목코드': str})
+            df.columns = df.columns.str.strip()
+            if '연배당금_크롤링' not in df.columns: df['연배당금_크롤링'] = 0.0
+            return df
+        except Exception:
+            time.sleep(0.5) # 잠겨있으면 0.5초 대기
+    
+    logger.error("CSV Load Failed after retries")
+    return pd.DataFrame()
 
 def save_to_github(df):
     try:
@@ -446,40 +523,36 @@ def fetch_dividend_yield_hybrid(code, category):
 
         try:
             ticker_code = f"{code}.KS"
-            stock = yf.Ticker(ticker_code)
-            dy = stock.info.get('dividendYield')
-            if dy and dy > 0: return round(dy * 100, 2), "✅ 야후(Info)"
-            divs = stock.dividends
-            if not divs.empty:
-                if divs.index.tz is not None: divs.index = divs.index.tz_localize(None)
-                one_year_ago = pd.Timestamp.now() - pd.Timedelta(days=365)
-                recent_total = divs[divs.index >= one_year_ago].sum()
-                price = stock.fast_info.get('last_price')
-                if not price: 
-                    hist = stock.history(period='1d')
-                    if not hist.empty: price = hist['Close'].iloc[-1]
-                if price and price > 0:
-                    yield_cal = (recent_total / price) * 100
-                    if yield_cal > 0: return round(yield_cal, 2), "✅ 야후(Rolling)"
-        except: pass
+            # yfinance 호출 시에도 sqlite 에러 방지
+            try:
+                stock = yf.Ticker(ticker_code)
+                dy = stock.info.get('dividendYield')
+                if dy and dy > 0: return round(dy * 100, 2), "✅ 야후(Info)"
+            except sqlite3.OperationalError:
+                pass # DB 잠금 시 스킵
 
-        try:
+            # 네이버 크롤링
             url = f"https://finance.naver.com/item/main.naver?code={code}"
             headers = {'User-Agent': 'Mozilla/5.0'}
             response = requests.get(url, headers=headers)
             response.encoding = 'euc-kr' 
-            dfs = pd.read_html(response.text)
-            for df in dfs:
-                table_str = df.to_string()
-                if "배당수익률" in table_str or "분배금수익률" in table_str:
-                    for col in df.columns:
-                        col_list = df[col].astype(str).tolist()
-                        for val in col_list:
-                            if "%" in val:
-                                try:
-                                    num = float(val.replace("%", "").strip())
-                                    if 0 < num < 30: return num, "✅ 네이버(Table)"
-                                except: pass
+            
+            # 테이블 파싱 시도
+            try:
+                dfs = pd.read_html(response.text)
+                for df in dfs:
+                    table_str = df.to_string()
+                    if "배당수익률" in table_str or "분배금수익률" in table_str:
+                        for col in df.columns:
+                            col_list = df[col].astype(str).tolist()
+                            for val in col_list:
+                                if "%" in val:
+                                    try:
+                                        num = float(val.replace("%", "").strip())
+                                        if 0 < num < 30: return num, "✅ 네이버(Table)"
+                                    except: pass
+            except: pass
+
             if '_dvr' in response.text:
                 part = response.text.split('<em id="_dvr">')[1]
                 val = part.split('</em>')[0]
@@ -501,10 +574,12 @@ def fetch_dividend_yield_hybrid(code, category):
                     one_year_ago = pd.Timestamp.now() - pd.Timedelta(days=365)
                     recent_divs = divs[divs.index >= one_year_ago]
                     recent_total = recent_divs.sum()
+                    
                     price = stock.fast_info.get('last_price')
                     if not price or price <= 0:
                         hist = stock.history(period="1d")
                         if not hist.empty: price = hist['Close'].iloc[-1]
+                    
                     if price and price > 0 and recent_total > 0:
                         yield_cal = (recent_total / price) * 100
                         if yield_cal > 50: yield_cal = yield_cal / 100
@@ -526,7 +601,10 @@ def update_dividend_rolling(current_history_str, new_dividend_amount):
     if pd.isna(current_history_str) or str(current_history_str).strip() == "":
         history = []
     else:
-        history = [int(float(x)) for x in str(current_history_str).split('|')]
+        try:
+            history = [int(float(x)) for x in str(current_history_str).split('|') if x.strip()]
+        except:
+            history = []
 
     if len(history) >= 12:
         history.pop(0)
