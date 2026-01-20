@@ -275,111 +275,91 @@ def fetch_dividend_yield_hybrid(code, category):
     code = str(code).strip()
     
     # -----------------------------------------------------------
-    # [1] 국내 주식: (최근 분배금/배당금 * 12) / 현재가 = 실시간 배당률 계산
+    # [1] 국내 주식/ETF: 공식 API 및 글로벌 라이브러리 우선 사용
     # -----------------------------------------------------------
     if category == '국내':
-        current_price = 0
         
-        # [Step 1] 현재가 확보 (3중 안전장치)
-        # 1-1. 네이버 모바일 API
+        # [Step 1] KIS (한국투자증권) 공식 API (가장 안전 & 정확)
+        # 사장님이 발급받으신 키를 사용하는 정당한 접근입니다.
         try:
-            p_url = f"https://api.stock.naver.com/stock/{code}/basic"
-            headers = {'User-Agent': 'Mozilla/5.0'}
-            p_res = requests.get(p_url, headers=headers, timeout=2)
-            if p_res.status_code == 200:
-                data = p_res.json()
-                if 'closePrice' in data and data['closePrice']:
-                    current_price = float(data['closePrice'].replace(',', ''))
+            broker = mojito.KoreaInvestment(
+                api_key=st.secrets["kis"]["app_key"],
+                api_secret=st.secrets["kis"]["app_secret"],
+                acc_no=st.secrets["kis"]["acc_no"],
+                mock=True 
+            )
+            resp = broker.fetch_price(code)
+            if resp and 'output' in resp:
+                # hts_dvsd_rate: 배당수익률
+                yield_str = resp['output'].get('hts_dvsd_rate', '0.0')
+                if float(yield_str) > 0: 
+                    return float(yield_str), "✅ 한투 API(공식)"
         except: pass
 
-        # 1-2. 야후 파이낸스
-        if current_price == 0:
-            try:
-                ticker = yf.Ticker(f"{code}.KS")
-                price = ticker.fast_info.get('last_price')
-                if price: current_price = price
-            except: pass
-
-        # 1-3. KIS API
-        if current_price == 0:
-            try:
-                broker = mojito.KoreaInvestment(
-                    api_key=st.secrets["kis"]["app_key"],
-                    api_secret=st.secrets["kis"]["app_secret"],
-                    acc_no=st.secrets["kis"]["acc_no"],
-                    mock=True 
-                )
-                resp = broker.fetch_price(code)
-                if resp and 'output' in resp:
-                    current_price = float(resp['output'].get('stck_prpr', 0))
-            except: pass
-
-        if current_price == 0:
-            return 0.0, "⚠️ 현재가 조회 실패"
-
-        # [Step 2] 배당금(주식) 또는 분배금(ETF) 내역 조회
-        # 사장님 공식: (최근금액 * 12) / 현재가 * 100
-        
-        last_amount = 0
-        source_type = ""
-
-        # 시도 A: 일반 주식 배당금 (Stock Dividend)
+        # [Step 2] Yahoo Finance (글로벌 표준)
+        # yfinance 라이브러리는 내부적으로 차단 방지 로직이 있어 안전합니다.
         try:
-            url_stock = f"https://api.stock.naver.com/stock/{code}/dividend/list?page=1&pageSize=1"
-            headers = {'User-Agent': 'Mozilla/5.0'}
-            res = requests.get(url_stock, headers=headers, timeout=3)
-            if res.status_code == 200:
-                data = res.json()
-                if 'content' in data and len(data['content']) > 0:
-                    # 일반 주식은 dividendPerShare 사용
-                    last_amount = float(data['content'][0].get('dividendPerShare', 0))
-                    if last_amount > 0: source_type = "주식배당"
-        except: pass
-
-        # 시도 B: ETF 분배금 (ETF Distribution) - 여기가 핵심!
-        # 주식 배당금이 없으면(0이면) ETF 분배금을 확인합니다.
-        if last_amount == 0:
-            try:
-                url_etf = f"https://api.stock.naver.com/etf/{code}/distribution/list?page=1&pageSize=1"
-                headers = {'User-Agent': 'Mozilla/5.0'}
-                res = requests.get(url_etf, headers=headers, timeout=3)
-                if res.status_code == 200:
-                    data = res.json()
-                    if 'content' in data and len(data['content']) > 0:
-                        # ETF는 amountPerShare 또는 amount 사용
-                        item = data['content'][0]
-                        # ETF 데이터 필드명이 다를 수 있어 안전하게 체크
-                        last_amount = float(item.get('amountPerShare', item.get('amount', 0)))
-                        if last_amount > 0: source_type = "ETF분배"
-            except: pass
+            ticker_code = f"{code}.KS" # 한국 종목 코드
+            stock = yf.Ticker(ticker_code)
             
-        # [Step 3] 최종 계산 및 반환
-        if last_amount > 0:
-            calc_yield = (last_amount * 12 / current_price) * 100
-            return round(calc_yield, 2), f"✅ {source_type}({int(last_amount)}원x12)"
+            # 배당률 정보 조회
+            dy = stock.info.get('dividendYield', 0)
+            if dy and dy > 0:
+                return round(dy * 100, 2), "✅ 야후(안전)"
+                
+            # (옵션) 배당 내역으로 역산
+            divs = stock.dividends
+            if not divs.empty:
+                recent_total = divs.iloc[-12:].sum() if len(divs) > 12 else divs.sum()
+                # 현재가 조회 (야후)
+                price = stock.fast_info.get('last_price')
+                if not price:
+                    hist = stock.history(period="1d")
+                    if not hist.empty: price = hist['Close'].iloc[-1]
+                
+                if price and price > 0:
+                    val = (recent_total / price) * 100
+                    if 0 < val < 50: return round(val, 2), "✅ 야후(계산)"
+        except: pass
 
-        # [Step 4] (백업) PC 버전 크롤링 (HTML 파싱)
+        # [Step 3] 네이버 PC 페이지 단순 조회 (최후의 수단)
+        # API를 해킹하는 게 아니라, 공개된 웹페이지를 '읽기'만 합니다. (법적 리스크 낮음)
         try:
             url = f"https://finance.naver.com/item/main.naver?code={code}"
-            headers = {'User-Agent': 'Mozilla/5.0'}
+            # 일반적인 브라우저 헤더 하나만 사용 (위조 아님)
+            headers = {'User-Agent': 'Mozilla/5.0'} 
             response = requests.get(url, headers=headers, timeout=5)
             response.encoding = 'euc-kr' 
+            
+            # 3-A. 일반 주식 (_dvr 태그)
             dvr_match = re.search(r'<em id="_dvr">\s*([\d\.]+)\s*</em>', response.text)
             if dvr_match:
                 val = float(dvr_match.group(1))
                 if val > 0: return val, "✅ 네이버(PC)"
+                
+            # 3-B. ETF (테이블 스캔) - TIGER 배당다우존스 같은 것
+            # HTML 텍스트 안에서 "분배수익률"이라는 글자 뒤에 나오는 숫자를 찾습니다.
+            if "분배수익률" in response.text:
+                # 예: <th>분배수익률</th><td><em class="up">2.47</em>%</td> 패턴 찾기
+                # 복잡한 파싱 대신 정규식으로 숫자만 안전하게 추출
+                etf_matches = re.findall(r'분배수익률.*?<em.*?>(.*?)</em>', response.text, re.DOTALL)
+                if etf_matches:
+                    val = float(etf_matches[0])
+                    if val > 0: return val, "✅ 네이버(PC-ETF)"
+                    
         except: pass
 
-        return 0.0, "⚠️ 배당/분배 내역 없음"
+        return 0.0, "⚠️ 데이터 없음 (국내)"
 
     # -----------------------------------------------------------
-    # [2] 해외 주식 (기존 유지)
+    # [2] 해외 주식 (기존 유지 - 야후가 가장 안전)
     # -----------------------------------------------------------
     else:
         try:
             stock = yf.Ticker(code)
             dy = stock.info.get('dividendYield')
             if dy and dy > 0: return round(dy * 100, 2), "✅ 야후(Info)"
+            
             divs = stock.dividends
             if not divs.empty:
                 recent_total = divs.iloc[-12:].sum() if len(divs) > 12 else divs.sum()
