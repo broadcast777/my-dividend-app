@@ -580,7 +580,9 @@ def render_calculator_page(df):
                                 st.caption(f"{info_text}{date_msg}")
                         else:
                             st.caption(f"{info_text} | 📅 날짜 미정")
-                
+            
+            # [핵심 추가 1] 페이지 이동 시 데이터 증발 방지를 위한 안전 저장
+            st.session_state['portfolio_map'] = amounts_map
 
             # 🔄 최종 동기화 (오차 보정)
             if temp_total_sum * 10000 != st.session_state.total_invest:
@@ -647,7 +649,6 @@ def render_calculator_page(df):
 
             st.divider()
             ics_data = logic.generate_portfolio_ics(all_data)
-            
             # [수정 완료] 캘린더 일괄 등록 -> 배당 일정 등록
             st.subheader("📅 배당 일정 등록")
             col_d1, col_d2 = st.columns([1.5, 1])
@@ -751,25 +752,13 @@ def render_calculator_page(df):
     df_ana = pd.DataFrame(all_data)
     if not df_ana.empty:
         st.write("")
-        # [핵심 변경] st.tabs -> st.segmented_control 교체 (Rerun 시 탭 초기화 방지)
-        tab_options = ["💎 자산 구성 분석", "💰 10년 뒤 자산 미리보기", "🎯 목표 배당 달성"]
-        selected_tab = st.segmented_control(
-            "main_tab_nav",
-            options=tab_options,
-            default=tab_options[0],
-            selection_mode="single",
-            label_visibility="collapsed"
-        )
-        if not selected_tab: selected_tab = tab_options[0]
-
-        # [키 포인트] 변수 Hoisting (UnboundLocalError 해결 - 탭 내부 변수를 밖으로 꺼냄)
+        tab_analysis, tab_simulation, tab_goal = st.tabs(["💎 자산 구성 분석", "💰 10년 뒤 자산 미리보기", "🎯 목표 배당 달성"])
+        
+        # [핵심 추가 2] UnboundLocalError 방지를 위한 변수 선언 위치 이동 (Safety Hoisting)
         # 세션에 저장된 값이 있으면 불러오고, 없으면 150(150만원)을 기본값으로 사용
         saved_monthly = st.session_state.get("shared_monthly_input", 150)
-        monthly_input = saved_monthly * 10000 
-
-        st.write("")
-
-        if selected_tab == "💎 자산 구성 분석":
+        
+        with tab_analysis:
             chart_col, table_col = st.columns([1.2, 1])
             def classify_currency(row):
                 try:
@@ -802,7 +791,7 @@ def render_calculator_page(df):
             ui.render_custom_table(df_ana)
             st.error("""**⚠️ 포트폴리오 분석 시 유의사항**\n1. 과거의 데이터를 기반으로 한 단순 결과값이며, 실제 투자 수익을 보장하지 않습니다.\n2. '달러 자산' 비율 실제 환노출 여부와 다를 수 있습니다 투자 전 확인이 필요합니다.\n3. 실제 배당금 지급일과 금액은 운용사의 사정에 따라 변경될 수 있습니다.""")
 
-        elif selected_tab == "💰 10년 뒤 자산 미리보기":
+        with tab_simulation:
             start_money = total_invest
             is_over_100m = start_money > 100000000
             st.info(f"📊 상단에서 설정한 **초기 자산 {start_money/10000:,.0f}만원**으로 시뮬레이션을 시작합니다.")
@@ -831,7 +820,7 @@ def render_calculator_page(df):
             
             st.markdown("---")
             
-            # [입력값] session_state에 저장 (키값 shared_monthly_input)
+            # [수정] 공유된 변수(saved_monthly)를 사용하여 값 유지
             monthly_input_val = st.number_input(
                 "➕ 매월 추가 적립 (만원)", min_value=0, max_value=3000, value=saved_monthly, step=10, key="shared_monthly_input"
             )
@@ -843,6 +832,7 @@ def render_calculator_page(df):
             
             months_sim = years_sim * 12
             monthly_yld = avg_y / 100 / 12
+            
             ISA_YEARLY_CAP = 20000000
             ISA_TOTAL_CAP = 100000000
             
@@ -871,11 +861,14 @@ def render_calculator_page(df):
                 if is_isa_mode:
                     remaining_isa_yearly = max(0, ISA_YEARLY_CAP - yearly_contribution)
                     remaining_isa_total = max(0, ISA_TOTAL_CAP - isa_principal)
+                    
                     actual_isa_add = min(monthly_add, remaining_isa_yearly, remaining_isa_total)
                     actual_general_add = monthly_add - actual_isa_add
+                    
                     isa_bal += actual_isa_add
                     isa_principal += actual_isa_add
                     yearly_contribution += actual_isa_add
+                    
                     general_bal += actual_general_add
                     general_principal += actual_general_add
                 else:
@@ -884,14 +877,18 @@ def render_calculator_page(df):
 
                 div_isa = isa_bal * monthly_yld
                 isa_bal += div_isa
+                
                 div_gen = general_bal * monthly_yld
                 this_tax = div_gen * 0.154
                 total_tax_paid_general += this_tax
                 reinvest_gen = (div_gen - this_tax) * (reinvest_ratio / 100)
                 general_bal += reinvest_gen
+                
                 sim_data.append({
-                    "년차": m / 12, "자산총액": (isa_bal + general_bal) / 10000, 
-                    "총원금": (isa_principal + general_principal) / 10000, "실제월배당": div_isa + div_gen
+                    "년차": m / 12, 
+                    "자산총액": (isa_bal + general_bal) / 10000, 
+                    "총원금": (isa_principal + general_principal) / 10000, 
+                    "실제월배당": div_isa + div_gen
                 })
             
             df_sim_chart = pd.DataFrame(sim_data)
@@ -950,82 +947,96 @@ def render_calculator_page(df):
                 general_ratio_msg = f"<div style='color: #6c757d; font-size: 0.85em; margin-top: 15px; border-top: 1px dashed #d0e8ff; padding-top: 10px;'>💡 최종 자산 중 <b>약 {gen_val_manwon:,.0f}만원</b>은 ISA 한도 초과로 인해<br>일반 계좌(15.4% 과세)로 운용된 결과입니다.</div>"
 
             st.markdown(f"""
-            <div style="background-color: #e7f3ff; border: 1.5px solid #d0e8ff; border-radius: 16px; padding: 25px; text-align: center; box-shadow: 0 4px 10px rgba(0,104,201,0.05);">
-                <p style="color: #666; font-size: 0.95em; margin: 0 0 8px 0;">{years_sim}년 뒤 모이는 돈 (세후)</p>
-                <h2 style="color: #0068c9; font-size: 2.2em; margin: 0; font-weight: 800; line-height: 1.2;">약 {real_money/10000:,.0f}만원{inflation_msg_money}</h2>
-                <p style="color: #777; font-size: 0.9em; margin: 8px 0 0 0;">(투자원금 {final_principal/10000:,.0f}만원 / {tax_msg})</p>
-                <div style="height: 1px; background-color: #d0e8ff; margin: 25px auto; width: 85%;"></div>
-                <p style="color: #0068c9; font-weight: bold; font-size: 1.1em; margin: 0 0 12px 0;">📅 월 예상 배당금: {monthly_pocket/10000:,.1f}만원 {inflation_msg_monthly}</p>
-                <div style="background-color: rgba(255,255,255,0.5); padding: 15px; border-radius: 12px; display: inline-block; min-width: 80%;">
-                    <p style="color: #333; font-size: 1.1em; margin: 0; line-height: 1.6;">
-                        매달 <b>{selected_item['emoji']} {selected_item['name']} {msg_count}{selected_item['unit']}</b><br>
-                        마음껏 즐기기 가능! 😋
-                    </p>{general_ratio_msg}
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+<div style="background-color: #e7f3ff; border: 1.5px solid #d0e8ff; border-radius: 16px; padding: 25px; text-align: center; box-shadow: 0 4px 10px rgba(0,104,201,0.05);">
+    <p style="color: #666; font-size: 0.95em; margin: 0 0 8px 0;">{years_sim}년 뒤 모이는 돈 (세후)</p>
+    <h2 style="color: #0068c9; font-size: 2.2em; margin: 0; font-weight: 800; line-height: 1.2;">약 {real_money/10000:,.0f}만원{inflation_msg_money}</h2>
+    <p style="color: #777; font-size: 0.9em; margin: 8px 0 0 0;">(투자원금 {final_principal/10000:,.0f}만원 / {tax_msg})</p>
+    <div style="height: 1px; background-color: #d0e8ff; margin: 25px auto; width: 85%;"></div>
+    <p style="color: #0068c9; font-weight: bold; font-size: 1.1em; margin: 0 0 12px 0;">📅 월 예상 배당금: {monthly_pocket/10000:,.1f}만원 {inflation_msg_monthly}</p>
+    <div style="background-color: rgba(255,255,255,0.5); padding: 15px; border-radius: 12px; display: inline-block; min-width: 80%;">
+        <p style="color: #333; font-size: 1.1em; margin: 0; line-height: 1.6;">
+            매달 <b>{selected_item['emoji']} {selected_item['name']} {msg_count}{selected_item['unit']}</b><br>
+            마음껏 즐기기 가능! 😋
+        </p>{general_ratio_msg}
+    </div>
+</div>
+""", unsafe_allow_html=True)
             
             annual_div_income = monthly_div_final * 12
             if annual_div_income > 20000000: st.warning(f"🚨 **주의:** {years_sim}년 뒤 연간 배당금이 2,000만원을 초과하여 금융소득종합과세 대상이 될 수 있습니다.")
-            st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**\n1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 단순 결과입니다.\n2. 재투자가 매월 이루어진다는 가정하에 계산된 복리 결과입니다.""")
-
-        elif selected_tab == "🎯 목표 배당 달성":
+            st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**\n1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 단순 결과입니다.
+                    2. 재투자가 매월 이루어진다는 가정하에 계산된 복리 결과입니다.""")
+        with tab_goal:
             st.subheader("🎯 목표 배당금 역산기 (은퇴 시뮬레이터)")
             st.caption("내가 원하는 월급을 받기 위해 얼마를 더 모아야 할지 정밀하게 계산합니다.")
 
-            # [수정] monthly_input_val (session_state 활용)
-            monthly_input_val = st.number_input(
-                "➕ 매월 추가 적립 (만원)", min_value=0, max_value=3000, value=saved_monthly, step=10, key="shared_monthly_input"
-            )
-            monthly_input = monthly_input_val * 10000
-
+            # [정보 요약 박스] - 유지
             with st.container(border=True):
                 col_info1, col_info2, col_info3 = st.columns(3)
                 col_info1.metric("📊 평균 연배당률", f"{avg_y:.2f}%")
+                # [수정] 위에서 호이스팅한 monthly_input 변수 사용 (UnboundLocalError 해결)
                 col_info2.metric("💰 매월 추가적립", f"{monthly_input/10000:,.0f}만원")
                 col_info3.metric("📦 선택 종목 수", f"{len(selected)}개")
                 st.caption(f"🔎 **적용 종목:** {', '.join(selected)}")
 
             st.write("")
+
+            # [입력창] - 물가상승 제거 및 간소화
             col_g1, col_g2 = st.columns(2)
             with col_g1:
                 target_monthly_goal = st.number_input(
-                    "목표 월 배당금 (만원, 세후)", min_value=10, value=166, step=10, key="target_monthly_goal_input"
+                    "목표 월 배당금 (만원, 세후)", 
+                    min_value=10, value=166, step=10, 
+                    key="target_monthly_goal_input"
                 ) * 10000
                 st.caption(f"💡 '세후' 월 141만원 설정 시 연간 세전 약 2,000만원 이내로 절세가 가능합니다.")
             
             with col_g2:
                 st.write("") 
                 st.write("") 
-                use_start_money = st.checkbox("현재 설정된 초기 자산을 포함하여 계산", value=True, help="체크 해제 시 '0원'에서 시작하는 제로베이스 시뮬레이션이 진행됩니다.", key="use_start_money_chk")
+                use_start_money = st.checkbox(
+                    "현재 설정된 초기 자산을 포함하여 계산", 
+                    value=True, 
+                    help="체크 해제 시 '0원'에서 시작하는 제로베이스 시뮬레이션이 진행됩니다.",
+                    key="use_start_money_chk"
+                )
                 st.caption(f"보유: {total_invest/10000:,.0f}만원")
 
+            # [계산 로직] - 물가상승(inflation) 제거됨
             current_bal_goal = total_invest if use_start_money else 0
             actual_start_bal = current_bal_goal 
+            
             tax_factor = 0.846
             monthly_yld = avg_y / 100 / 12  
             months_passed = 0
             max_months = 720                
             
+            # 목표 자산(고정값) 계산
             if avg_y > 0:
                 required_asset_at_time = (target_monthly_goal / tax_factor) * 12 / (avg_y / 100)
             else:
                 required_asset_at_time = 0
             
+            # 시뮬레이션 루프
             while months_passed < max_months:
                 if current_bal_goal >= required_asset_at_time:
                     break
+                    
                 div_reinvest = current_bal_goal * monthly_yld * tax_factor
                 current_bal_goal += monthly_input + div_reinvest
                 months_passed += 1
 
             st.markdown("---")
+
+            # [결과 표시] - 진행률 및 초록색 차감 표시
             gap_money = max(0, required_asset_at_time - actual_start_bal)
             progress_rate = (actual_start_bal / required_asset_at_time) * 100 if required_asset_at_time > 0 else 0
 
+            # 1. 진행률 바
             st.write(f"📊 **목표 달성 진행률: {min(progress_rate, 100):.1f}%**")
             st.progress(min(progress_rate / 100, 1.0))
 
+            # 2. 3단 결과
             if months_passed >= max_months:
                 st.error("⚠️ 현재 적립액으로는 60년 내 달성이 어렵습니다. 적립금을 높여주세요.")
             else:
@@ -1036,7 +1047,12 @@ def render_calculator_page(df):
                 
                 with c_res2:
                     if gap_money > 0:
-                        st.metric("앞으로 모을 금액", f"{gap_money/100000000:,.2f} 억원", delta=f"✅ {actual_start_bal/10000:,.0f}만원 보유 중", delta_color="normal")
+                        st.metric(
+                            "앞으로 모을 금액", 
+                            f"{gap_money/100000000:,.2f} 억원", 
+                            delta=f"✅ {actual_start_bal/10000:,.0f}만원 보유 중", 
+                            delta_color="normal"
+                        )
                     else:
                         st.success("🎉 이미 목표 달성!")
                 
@@ -1044,13 +1060,17 @@ def render_calculator_page(df):
                     st.metric("목표 달성까지 소요 기간", f"{months_passed // 12}년 {months_passed % 12}개월")
                     st.caption("월 복리 재투자 기준")
 
+            # [하단 문구 정리]
             st.write("") 
             final_annual_income = target_monthly_goal * 12
             if (final_annual_income / tax_factor) > 20000000:
                 st.warning(f"🚨 **현실적 조언:** 목표 달성 시 연간 배당소득(세전)이 2,000만원을 초과하여 **금융소득종합과세** 대상이 될 수 있습니다.")
-            st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**\n1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 단순 결과입니다.\n2. 재투자가 매월 이루어진다는 가정하에 계산된 복리 결과입니다.""")
-
- 
+                
+            st.error("""
+                    **⚠️ 시뮬레이션 활용 시 유의사항**
+                    1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 단순 결과입니다.
+                    2. 재투자가 매월 이루어진다는 가정하에 계산된 복리 결과입니다.
+                    """)
 
             
 def render_roadmap_page(df):
@@ -1063,14 +1083,27 @@ def render_roadmap_page(df):
         st.warning("⚠️ **'💰 배당금 계산기'** 메뉴에서 종목을 먼저 선택해 주세요!")
         st.stop()
     
-    # [수정] Bottom-up 호환 로직 (키값 amt_i 확인)
+    # [수정] Bottom-up 호환 로직
     weights = {}
     temp_total = 0
     amounts = {}
     
-    # 1. 입력된 금액 수집
+    # [핵심 추가] 데이터 증발 방지 (포트폴리오 백업 불러오기)
+    portfolio_cache = st.session_state.get('portfolio_map', {})
+
+    # 1. 입력된 금액 수집 (안전장치 적용)
     for i, stock in enumerate(selected):
-        val = st.session_state.get(f"amt_{i}", 0)
+        # 1순위: Calculator 페이지에서 넘어온 백업 데이터 사용
+        if stock in portfolio_cache:
+            val = portfolio_cache[stock]
+        # 2순위: 혹시라도 위젯 데이터가 살아있으면 사용
+        else:
+            val = st.session_state.get(f"amt_{i}", 0)
+        
+        # 3순위: 데이터가 0이고 총 자산은 설정되어 있다면? (초기화 방지용 N빵)
+        if val == 0 and st.session_state.total_invest > 0:
+             val = int(st.session_state.total_invest / 10000 / len(selected))
+
         temp_total += val
         amounts[stock] = val
         
