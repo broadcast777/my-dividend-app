@@ -1,7 +1,7 @@
 """
 프로젝트: 배당 팽이 (Dividend Top) v2.9
 파일명: recommendation.py
-설명: AI 로보어드바이저 엔진 (쿼터제 + 황금비율 + 셔플 + 안정형 리스크 필터링 강화)
+설명: AI 로보어드바이저 엔진 (최종 완성: 쿼터제 + 황금비율 + 셔플 + 데이터 무결성 + 심플 결과창)
 업데이트: 2026.01.20
 """
 
@@ -139,8 +139,6 @@ def get_smart_recommendation(df, user_choices):
         pool.loc[pool['cluster'] == 'reit', 'score'] += 20
         
         # 🚨 [안정형 특화 필터링] 
-        # 하이일드/정크본드는 '채권'이어도 감점(-100) -> 추천 제외
-        # 국채/단기채는 가산점(+30) -> 무조건 추천
         for idx, row in pool.iterrows():
             if row['cluster'] == 'bond':
                 name_upper = (str(row.get('pure_name', '')) + " " + str(row.get('종목명', ''))).upper()
@@ -246,7 +244,6 @@ def get_smart_recommendation(df, user_choices):
         for p in final_picks:
             cluster = selected_pool[selected_pool['pure_name']==p]['cluster'].iloc[0]
             priority = 0
-            # 스타일별 대장주 우선순위
             if style == 'safe' and cluster == 'bond': priority = 3
             elif style == 'flow' and cluster == 'cov': priority = 3
             elif style == 'growth' and cluster == 'growth': priority = 3
@@ -336,10 +333,10 @@ def show_wizard():
         st.subheader("Q1. 어떤 투자를 원하세요?")
         
         st.button("📈 성장 추구 (주가 상승 + 배당)", use_container_width=True, on_click=go_next_step, args=(2, 'style', 'growth'))
-       
+        st.write("") 
         
         st.button("💰 현금 흐름 (월 배당금 극대화)", use_container_width=True, on_click=go_next_step, args=(2, 'style', 'flow'))
-        
+        st.write("") 
         
         st.button("🛡️ 안정성 (원금 방어 최우선)", use_container_width=True, on_click=go_next_step, args=(2, 'style', 'safe'))
 
@@ -402,7 +399,7 @@ def show_wizard():
         if c1.button("⬅️ 이전으로", use_container_width=True): st.session_state.wiz_step = 3; st.rerun()
         if c2.button("🚀 결과 보기", type="primary", use_container_width=True): st.session_state.wiz_step = 5; st.rerun()
 
-    # [Step 5] 최종 결과 출력 (닫기 버튼 삭제됨)
+    # [Step 5] 최종 결과 출력 (심플 UI)
     elif step == 5:
         if "ai_result_cache" not in st.session_state or st.session_state.ai_result_cache is None:
             with st.spinner("🎲 최적 조합 찾는 중..."):
@@ -449,15 +446,9 @@ def show_wizard():
             st.info("💡 우측 상단 복사 아이콘을 눌러 카톡에 붙여넣으세요!")
 
         st.write("")
-        st.warning("""⚠️ **투자 유의사항 (필독)**
-
-1. 본 결과는 매수/매도 추천이 아니며, 과거 데이터를 기반으로 한 단순 시뮬레이션입니다.
-
-2. 배당률 및 지급일정은 시장 상황과 운용사 정책에 따라 언제든 변동될 수 있습니다.
-
-3. 과거의 수익이 미래의 수익을 보장하지 않으므로, 모든 투자의 책임은 본인에게 있습니다.""")
         
-        st.info("💡 **팁:** AI 제안 결과는 단순 참고용입니다. [가져오기]를 누르신 후, 아래 [💰 배당금 계산기]에서 종목이나 비중을 자유롭게 수정하실 수 있습니다.")
+        # 💡 [핵심] 면책 조항 삭제 후 심플한 팁만 남김
+        st.info("💡 **팁:** AI 제안 결과는 시뮬레이션용 단순 참고 자료입니다. [가져오기] 후 자유롭게 수정하여 최종 결정하세요.")
 
         st.divider()
         c1, c2 = st.columns(2)
