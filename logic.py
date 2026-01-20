@@ -1,8 +1,7 @@
 """
-프로젝트: 배당 팽이 (Dividend Top) v3.3 (API Endpoint Fix)
+프로젝트: 배당 팽이 (Dividend Top) v3.5 (The Final Hybrid)
 파일명: logic.py
-설명: 네이버 모바일 API 주소 수정 (analysis -> basic)
-업데이트: 2026.01.20
+설명: v1.5의 정확한 ETF 주소 + v3.4의 차단 방지/속도 조절 기능 통합
 """
 
 import streamlit as st
@@ -10,6 +9,7 @@ import pandas as pd
 import yfinance as yf
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
+import random 
 import mojito 
 import datetime 
 import calendar 
@@ -22,8 +22,10 @@ from github import Github
 from logger import logger
 import sqlite3 
 
-# ... [SECTION 1: 날짜 및 스케줄링 헬퍼는 기존과 동일하므로 생략 가능하지만, 전체 복붙을 위해 포함합니다] ...
-# (기존 코드 유지)
+# -----------------------------------------------------------
+# [SECTION 1] 날짜 및 스케줄링 헬퍼 (v1.5 로직 유지 + 안전성 강화)
+# -----------------------------------------------------------
+
 def standardize_date_format(date_str):
     s = str(date_str).strip()
     if re.match(r'^\d{4}-\d{2}-\d{2}$', s): return s
@@ -126,30 +128,38 @@ def get_google_cal_url(stock_name, date_str):
         logger.error(f"Calendar URL Error: {e}")
         return None
 
-# ... [SECTION 2: 시세 조회 함수도 기존과 동일] ...
+# -----------------------------------------------------------
+# [SECTION 2] 시세 및 데이터 조회 (Yahoo 차단 방어 적용)
+# -----------------------------------------------------------
+
 def _fetch_price_raw(broker, code, category):
-    try:
-        code_str = str(code).strip()
-        if category == '국내':
-            try:
-                resp = broker.fetch_price(code_str)
-                if resp and isinstance(resp, dict) and 'output' in resp:
-                    if resp['output'] and resp['output'].get('stck_prpr'):
-                        return int(resp['output']['stck_prpr'])
-            except: pass
-        ticker_code = f"{code_str}.KS" if category == '국내' else code_str
-        for attempt in range(3): 
-            try:
-                ticker = yf.Ticker(ticker_code)
-                price = ticker.fast_info.get('last_price')
-                if not price:
-                    hist = ticker.history(period="1d")
-                    if not hist.empty: price = hist['Close'].iloc[-1]
-                if price: return float(price)
-            except sqlite3.OperationalError: time.sleep(0.5)
-            except Exception: break
-        return None
-    except Exception: return None
+    code_str = str(code).strip()
+    if category == '국내':
+        try:
+            resp = broker.fetch_price(code_str)
+            if resp and isinstance(resp, dict) and 'output' in resp:
+                if resp['output'] and resp['output'].get('stck_prpr'):
+                    return int(resp['output']['stck_prpr'])
+        except: pass
+    
+    ticker_code = f"{code_str}.KS" if category == '국내' else code_str
+    
+    # [v3.4 차단 방지 적용] 3회 재시도 + 랜덤 대기
+    for attempt in range(3): 
+        try:
+            ticker = yf.Ticker(ticker_code)
+            price = ticker.fast_info.get('last_price')
+            if not price:
+                hist = ticker.history(period="1d")
+                if not hist.empty: price = hist['Close'].iloc[-1]
+            if price: return float(price)
+        except Exception as e: 
+            # "Too Many Requests" 발생 시 2~4초 대기
+            if "Too Many" in str(e) or "Rate limit" in str(e):
+                time.sleep(random.uniform(2.0, 4.0)) 
+            else:
+                time.sleep(0.5)
+    return None
 
 def get_safe_price(broker, code, category):
     for _ in range(2):
@@ -160,8 +170,8 @@ def get_safe_price(broker, code, category):
 
 def classify_asset(row):
     name, symbol = str(row.get('종목명', '')).upper(), str(row.get('종목코드', '')).upper()
-    if any(k in name or k in symbol for k in ['커버드콜', 'COVERED', 'QYLD', 'JEPI']): return '🛡️ 커버드콜'
-    if any(k in name or k in symbol for k in ['채권', '국채', 'BOND', 'TLT']): return '🏦 채권형'
+    if any(k in name or k in symbol for k in ['커버드콜', 'COVERED', 'QYLD', 'JEPI', 'GPIQ', 'JEPQ']): return '🛡️ 커버드콜'
+    if any(k in name or k in symbol for k in ['채권', '국채', 'BOND', 'TLT', 'SHV', 'BIL', 'SGOV']): return '🏦 채권형'
     if '리츠' in name or 'REITS' in name: return '🏢 리츠형'
     return '📈 주식형'
 
@@ -172,7 +182,10 @@ def get_hedge_status(name, category):
     if any(x in name_str for x in ["(H)", "헤지"]): return "🛡️환헤지(H)"
     return "⚡환노출" if any(x in name_str for x in ['미국', 'GLOBAL']) else "-"
 
-# ... [SECTION 3: 데이터 처리 및 저장 함수] ...
+# -----------------------------------------------------------
+# [SECTION 3] 데이터 처리 및 파일 관리 (병렬 처리 인원 감축)
+# -----------------------------------------------------------
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def load_and_process_data(df_raw, is_admin=False):
     if df_raw.empty: return pd.DataFrame()
@@ -204,18 +217,25 @@ def load_and_process_data(df_raw, is_admin=False):
             code = str(row.get('종목코드', '')).strip()
             name = str(row.get('종목명', '')).strip()
             category = str(row.get('분류', '국내')).strip()
+            
+            # [시세 조회] - 야후 차단 방지 로직 포함
             price = get_safe_price(broker, code, category) or 0
+            
             crawled_div = float(row.get('연배당금_크롤링', 0))
             manual_div = float(row.get('연배당금', 0))        
             months = int(row.get('신규상장개월수', 0))
+
             target_div = (manual_div / months * 12) if (0 < months < 12 and manual_div > 0) else (crawled_div if crawled_div > 0 else manual_div)
             display_name = f"{name} ⭐" if (0 < months < 12) else name
+            
             yield_val = (target_div / price * 100) if price > 0 else 0
             if is_admin and (yield_val < 2.0 or yield_val > 25.0): display_name = f"🚫 {display_name}"
+            
             price_fmt = f"{int(price):,}원" if category == '국내' else f"${price:.2f}"
             auto_asset_type = classify_asset(row) 
             final_type = str(row.get('유형', '-'))
             if any(k in auto_asset_type for k in ['채권', '커버드콜', '리츠']): final_type = auto_asset_type.replace('🛡️ ', '').replace('🏦 ', '').replace('🏢 ', '')
+
             return idx, {
                 '코드': code, '종목명': display_name,
                 '블로그링크': str(row.get('블로그링크', '#')),
@@ -230,11 +250,13 @@ def load_and_process_data(df_raw, is_admin=False):
             }
         except Exception: return idx, None
 
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    # [중요] 작업자 수를 2명으로 줄여서 야후/네이버 차단 방지
+    with ThreadPoolExecutor(max_workers=2) as executor:
         futures = {executor.submit(process_row, idx, row): idx for idx, row in df_raw.iterrows()}
         for future in as_completed(futures):
             idx, result = future.result()
             results[idx] = result
+
     final_data = [r for r in results if r is not None]
     return pd.DataFrame(final_data).sort_values('연배당률', ascending=False) if final_data else pd.DataFrame()
 
@@ -268,19 +290,17 @@ def save_to_github(df):
         return False, f"❌ 저장 실패: {str(e)}"
 
 # -----------------------------------------------------------
-# [SECTION 4] 실시간 배당 정보 크롤링 (핵심 수정 완료)
+# [SECTION 4] 실시간 배당 정보 크롤링 (v1.5 API 주소 부활 + v3.4 안전장치)
 # -----------------------------------------------------------
 
 def fetch_dividend_yield_hybrid(code, category):
     code = str(code).strip()
     
-    # -----------------------------------------------------------
-    # [1] 국내 주식/ETF: 공식 API 및 글로벌 라이브러리 우선 사용
-    # -----------------------------------------------------------
+    # [1] 국내 주식/ETF
     if category == '국내':
+        current_price = 0
         
-        # [Step 1] KIS (한국투자증권) 공식 API (가장 안전 & 정확)
-        # 사장님이 발급받으신 키를 사용하는 정당한 접근입니다.
+        # [Step 1] 현재가 확보 (KIS 우선 -> 네이버 백업 -> 야후 최후)
         try:
             broker = mojito.KoreaInvestment(
                 api_key=st.secrets["kis"]["app_key"],
@@ -290,76 +310,89 @@ def fetch_dividend_yield_hybrid(code, category):
             )
             resp = broker.fetch_price(code)
             if resp and 'output' in resp:
-                # hts_dvsd_rate: 배당수익률
-                yield_str = resp['output'].get('hts_dvsd_rate', '0.0')
-                if float(yield_str) > 0: 
-                    return float(yield_str), "✅ 한투 API(공식)"
+                current_price = int(resp['output'].get('stck_prpr', 0))
         except: pass
+        
+        if current_price == 0:
+             # 네이버 모바일 API로 가격 조회 (User-Agent 필수)
+             try:
+                p_url = f"https://api.stock.naver.com/stock/{code}/basic"
+                headers = {'User-Agent': 'Mozilla/5.0 (Linux; Android 10; Mobile)'}
+                res = requests.get(p_url, headers=headers, timeout=3)
+                if res.status_code == 200:
+                    data = res.json()
+                    if 'closePrice' in data: 
+                        current_price = float(data['closePrice'].replace(',', ''))
+             except: pass
 
-        # [Step 2] Yahoo Finance (글로벌 표준)
-        # yfinance 라이브러리는 내부적으로 차단 방지 로직이 있어 안전합니다.
-        try:
-            ticker_code = f"{code}.KS" # 한국 종목 코드
-            stock = yf.Ticker(ticker_code)
+        if current_price == 0:
+            return 0.0, "⚠️ 현재가 조회 실패"
+
+        # [Step 2] 배당금/분배금 조회 (v1.5 방식의 API 주소 사용!)
+        last_amount = 0
+        source_type = ""
+        
+        # v1.5에 있던 'Referer' 헤더 추가 (차단 방지)
+        headers_mobile = {
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1',
+            'Referer': f'https://m.stock.naver.com/'
+        }
+
+        # (A) ETF 분배금 (v1.5에 있던 주소!)
+        if last_amount == 0:
+            try:
+                url_etf = f"https://api.stock.naver.com/etf/{code}/distribution/list?page=1&pageSize=1"
+                res = requests.get(url_etf, headers=headers_mobile, timeout=3)
+                if res.status_code == 200:
+                    data = res.json()
+                    # content 또는 result 필드 확인
+                    content = data.get('content') or data.get('result', {}).get('distributionInfoList')
+                    if content and len(content) > 0:
+                        # amountPerShare 또는 amount 사용
+                        item = content[0]
+                        last_amount = float(item.get('amountPerShare', item.get('amount', 0)))
+                        if last_amount > 0: source_type = "ETF분배"
+            except: pass
+
+        # (B) 일반 주식 배당금 (v1.5에 있던 주소!)
+        if last_amount == 0:
+            try:
+                url_stock = f"https://api.stock.naver.com/stock/{code}/dividend/list?page=1&pageSize=1"
+                res = requests.get(url_stock, headers=headers_mobile, timeout=3)
+                if res.status_code == 200:
+                    data = res.json()
+                    content = data.get('content')
+                    if content and len(content) > 0:
+                        last_amount = float(content[0].get('dividendPerShare', 0))
+                        if last_amount > 0: source_type = "주식배당"
+            except: pass
             
-            # 배당률 정보 조회
-            dy = stock.info.get('dividendYield', 0)
-            if dy and dy > 0:
-                return round(dy * 100, 2), "✅ 야후(안전)"
-                
-            # (옵션) 배당 내역으로 역산
-            divs = stock.dividends
-            if not divs.empty:
-                recent_total = divs.iloc[-12:].sum() if len(divs) > 12 else divs.sum()
-                # 현재가 조회 (야후)
-                price = stock.fast_info.get('last_price')
-                if not price:
-                    hist = stock.history(period="1d")
-                    if not hist.empty: price = hist['Close'].iloc[-1]
-                
-                if price and price > 0:
-                    val = (recent_total / price) * 100
-                    if 0 < val < 50: return round(val, 2), "✅ 야후(계산)"
-        except: pass
+        if last_amount > 0:
+            calc_yield = (last_amount * 12 / current_price) * 100
+            return round(calc_yield, 2), f"✅ {source_type}({int(last_amount)}원x12)"
 
-        # [Step 3] 네이버 PC 페이지 단순 조회 (최후의 수단)
-        # API를 해킹하는 게 아니라, 공개된 웹페이지를 '읽기'만 합니다. (법적 리스크 낮음)
+        # [Step 3] 최후의 보루 (PC 페이지)
         try:
             url = f"https://finance.naver.com/item/main.naver?code={code}"
-            # 일반적인 브라우저 헤더 하나만 사용 (위조 아님)
-            headers = {'User-Agent': 'Mozilla/5.0'} 
+            headers = {'User-Agent': 'Mozilla/5.0'}
             response = requests.get(url, headers=headers, timeout=5)
             response.encoding = 'euc-kr' 
-            
-            # 3-A. 일반 주식 (_dvr 태그)
             dvr_match = re.search(r'<em id="_dvr">\s*([\d\.]+)\s*</em>', response.text)
             if dvr_match:
                 val = float(dvr_match.group(1))
                 if val > 0: return val, "✅ 네이버(PC)"
-                
-            # 3-B. ETF (테이블 스캔) - TIGER 배당다우존스 같은 것
-            # HTML 텍스트 안에서 "분배수익률"이라는 글자 뒤에 나오는 숫자를 찾습니다.
-            if "분배수익률" in response.text:
-                # 예: <th>분배수익률</th><td><em class="up">2.47</em>%</td> 패턴 찾기
-                # 복잡한 파싱 대신 정규식으로 숫자만 안전하게 추출
-                etf_matches = re.findall(r'분배수익률.*?<em.*?>(.*?)</em>', response.text, re.DOTALL)
-                if etf_matches:
-                    val = float(etf_matches[0])
-                    if val > 0: return val, "✅ 네이버(PC-ETF)"
-                    
         except: pass
 
-        return 0.0, "⚠️ 데이터 없음 (국내)"
+        return 0.0, "⚠️ 배당 내역 없음"
 
-    # -----------------------------------------------------------
-    # [2] 해외 주식 (기존 유지 - 야후가 가장 안전)
-    # -----------------------------------------------------------
+    # [2] 해외 주식 (v3.4 차단 방지 적용)
     else:
         try:
             stock = yf.Ticker(code)
             dy = stock.info.get('dividendYield')
             if dy and dy > 0: return round(dy * 100, 2), "✅ 야후(Info)"
             
+            # 너무 자주 요청하면 막히므로 에러 처리 강화
             divs = stock.dividends
             if not divs.empty:
                 recent_total = divs.iloc[-12:].sum() if len(divs) > 12 else divs.sum()
@@ -370,7 +403,7 @@ def fetch_dividend_yield_hybrid(code, category):
             return 0.0, "⚠️ 데이터 없음"
         except Exception as e:
             return 0.0, f"❌ 해외 에러: {str(e)}"
-            
+
 def update_dividend_rolling(current_history_str, new_dividend_amount):
     """배당금 기록 갱신"""
     if pd.isna(current_history_str) or str(current_history_str).strip() == "":
@@ -378,6 +411,7 @@ def update_dividend_rolling(current_history_str, new_dividend_amount):
     else:
         try: history = [int(float(x)) for x in str(current_history_str).split('|') if x.strip()]
         except: history = []
+
     if len(history) >= 12: history.pop(0)
     history.append(int(new_dividend_amount))
     return sum(history), "|".join(map(str, history))
