@@ -1,7 +1,7 @@
 """
 프로젝트: 배당 팽이 (Dividend Top) v2.9
 파일명: recommendation.py
-설명: AI 로보어드바이저 엔진 (안정형 리스크 필터링 + 투자 유의사항 + 좀비 팝업 방지 안전 종료 추가)
+설명: AI 로보어드바이저 엔진 (안정형 리스크 필터링 + 투자 유의사항 + 심플 UI 버전)
 업데이트: 2026.01.20
 """
 
@@ -246,12 +246,6 @@ def show_wizard():
             if st.button("🇰🇷 국내 종목만", use_container_width=True): go_next_step(1, 'include_foreign', False); st.rerun()
         with col_all:
             if st.button("🌎 해외 포함", use_container_width=True): go_next_step(1, 'include_foreign', True); st.rerun()
-        
-        # 🚨 [안전 장치] 시작 화면에서 나가기 버튼 (좀비 팝업 방지)
-        st.write("")
-        if st.button("닫기", use_container_width=True):
-            st.session_state.ai_modal_open = False
-            st.rerun()
 
     # [Step 1] 투자 스타일 결정
     elif step == 1:
@@ -388,11 +382,4 @@ def show_wizard():
             if "ai_result_cache" in st.session_state: del st.session_state.ai_result_cache
             st.toast("장바구니에 담았습니다! 🛒", icon="✅")
             time.sleep(0.5)
-            st.rerun()
-            
-        # 🚨 [안전 장치] 결과 화면에서 그냥 닫고 싶을 때 (좀비 팝업 방지)
-        st.write("")
-        if st.button("닫기 (저장 안 함)", use_container_width=True):
-            st.session_state.ai_modal_open = False
-            if "ai_result_cache" in st.session_state: del st.session_state.ai_result_cache
             st.rerun()
