@@ -1,7 +1,7 @@
 """
-프로젝트: 배당 팽이 (Dividend Top) v2.8
+프로젝트: 배당 팽이 (Dividend Top) v2.9
 파일명: logic.py
-설명: 금융 API 연동, 데이터 크롤링, 캘린더 파일 생성 (구글 캘린더 링크 버그 수정 완료)
+설명: 금융 API 연동, 데이터 크롤링, 캘린더 파일 생성 (월말/월초 로직 + 올해 한정 생성 + 면책조항 강화)
 """
 
 import streamlit as st
@@ -26,7 +26,7 @@ from logger import logger
 
 def parse_dividend_date(date_str):
     """
-    다양한 형태의 날짜 문자열을 datetime.date 객체로 변환합니다.
+    다양한 형태의 날짜 문자열(월초, 월말, 특정일)을 datetime.date 객체로 변환합니다.
     """
     s = str(date_str).strip()
     today = datetime.date.today()
@@ -37,23 +37,44 @@ def parse_dividend_date(date_str):
     except ValueError:
         pass
     
-    # 2. '매월 XX일' 형식
+    # 2. 키워드 분석 (월말/월초 우선 체크)
+    is_end_of_month = any(k in s for k in ['말일', '월말', '마지막', '하순'])
+    is_start_of_month = any(k in s for k in ['매월 초', '월초', '1~3일'])
+    
     day_match = re.search(r'(\d+)', s)
-    if day_match and ('매월' in s or '일' in s):
+    
+    if is_end_of_month or is_start_of_month or (day_match and ('매월' in s or '일' in s)):
         try:
-            day = int(day_match.group(1))
+            if is_end_of_month:
+                day = calendar.monthrange(today.year, today.month)[1] # 이번달 말일
+            elif is_start_of_month:
+                day = 1 # [수정] 월초는 1일로 설정
+            else:
+                day = int(day_match.group(1))
+            
             # 이번 달 배당락일 추정
-            target_date = datetime.date(today.year, today.month, day)
+            try:
+                target_date = datetime.date(today.year, today.month, day)
+            except ValueError: # 2월 30일 같은 날짜 오류 시 말일로 보정
+                last_day = calendar.monthrange(today.year, today.month)[1]
+                target_date = datetime.date(today.year, today.month, last_day)
             
             # 이미 지났으면 다음 달로
             if target_date < today:
                 next_month = today.month + 1 if today.month < 12 else 1
                 year = today.year if today.month < 12 else today.year + 1
-                try:
-                    return datetime.date(year, next_month, day)
-                except ValueError: # 2월 30일 같은 경우 말일로 처리
-                    last_day = calendar.monthrange(year, next_month)[1]
-                    return datetime.date(year, next_month, last_day)
+                
+                last_day_next = calendar.monthrange(year, next_month)[1]
+                
+                if is_end_of_month:
+                    real_day = last_day_next
+                elif is_start_of_month:
+                    real_day = 1
+                else:
+                    real_day = min(day, last_day_next) # 31일이 없는 달 방어
+                    
+                return datetime.date(year, next_month, real_day)
+            
             return target_date
         except ValueError:
             pass
@@ -63,6 +84,7 @@ def parse_dividend_date(date_str):
 def generate_portfolio_ics(portfolio_data):
     """
     [일괄 등록용] 포트폴리오 전체 일정을 .ics 파일 포맷으로 생성
+    (조건: 과거 일정 스킵 + 오늘부터 '올해 12월 31일'까지만 생성)
     """
     ics_content = [
         "BEGIN:VCALENDAR",
@@ -79,44 +101,74 @@ def generate_portfolio_ics(portfolio_data):
         name = item.get('종목', '배당주')
         date_info = str(item.get('배당락일', '-'))
         
+        # 1. 키워드 파싱
+        is_end_of_month = any(k in date_info for k in ['말일', '월말', '마지막', '30일', '31일', '하순'])
+        is_start_of_month = any(k in date_info for k in ['매월 초', '월초', '1~3일'])
         day_match = re.search(r'(\d+)', date_info)
         
-        if day_match and ('매월' in date_info or '일' in date_info):
-            day = int(day_match.group(1))
-            for i in range(12):
-                month = today.month + i
-                year = current_year + (month - 1) // 12
-                month = (month - 1) % 12 + 1
+        target_day = None
+        if is_end_of_month: target_day = 'END'
+        elif is_start_of_month: target_day = 1
+        elif day_match and ('매월' in date_info or '일' in date_info):
+            target_day = int(day_match.group(1))
+        
+        # 2. 스마트 날짜 계산 (올해 연말까지만!)
+        if target_day is not None:
+            check_idx = 0
+            
+            # 최대 12개월을 탐색하되, 해가 바뀌면 중단
+            while check_idx < 12:
+                month_calc = today.month + check_idx
+                year = current_year + (month_calc - 1) // 12
+                month = (month_calc - 1) % 12 + 1
+                
+                check_idx += 1 
+                
+                # 🚨 [핵심] 해가 바뀌면(내년이 되면) 더 이상 생성하지 않고 종료
+                if year > current_year:
+                    break
                 
                 try:
-                    last_day = calendar.monthrange(year, month)[1]
-                    safe_day = min(day, last_day)
+                    last_day_of_month = calendar.monthrange(year, month)[1]
+                    
+                    if target_day == 'END':
+                        safe_day = last_day_of_month
+                    else:
+                        safe_day = min(target_day, last_day_of_month)
+                    
                     event_date = datetime.date(year, month, safe_day)
                     
+                    # D-3 계산 (주말이면 금요일로 당김)
                     buy_date = event_date - datetime.timedelta(days=3)
-                    while buy_date.weekday() >= 5:
+                    while buy_date.weekday() >= 5: 
                         buy_date -= datetime.timedelta(days=1)
+                    
+                    # 🚨 [핵심] 이미 지난 과거 알림은 건너뜀
+                    if buy_date < today:
+                        continue
                         
                     dt_start = buy_date.strftime("%Y%m%d")
                     dt_end = (buy_date + datetime.timedelta(days=1)).strftime("%Y%m%d")
                     
-                    # [수정] 알림 메시지 및 면책 문구 적용
+                    # [수정] 면책 조항 강화 (토스 스타일)
                     description = (
                         f"예상 배당락일: {event_date}\\n\\n"
-                        f"배당 수령을 위해 일정을 체크할 시기입니다.\\n\\n"
-                        f"⚠️ 유의사항:\\n"
-                        f"1. 실제 배당락일은 운용사 사정에 따라 변동될 수 있습니다.\\n"
-                        f"2. 정확한 정보는 반드시 운용사 홈페이지나 공시를 재확인해주세요."
+                        f"💰 [{name}] 배당 수령을 위해 계좌를 확인하세요.\\n\\n"
+                        f"🛑 [필독] 투자 유의사항\\n"
+                        f"이 알림은 과거 데이터를 기반으로 생성된 '예상 일정'입니다.\\n"
+                        f"운용사 정책 변경으로 실제 배당일이 바뀔 수 있습니다.\\n"
+                        f"안전한 투자를 위해, 매수 전 반드시 '운용사 공식 홈페이지' 공시를 확인해주세요."
                     )
                     
                     ics_content.extend([
                         "BEGIN:VEVENT",
                         f"DTSTART;VALUE=DATE:{dt_start}",
                         f"DTEND;VALUE=DATE:{dt_end}",
-                        f"SUMMARY:🔔 [{name}] 배당락 D-3 체크",
+                        f"SUMMARY:🔔 [{name}] 배당락 D-3 (변동 주의)",
                         f"DESCRIPTION:{description}",
                         "END:VEVENT"
                     ])
+                    
                 except ValueError:
                     continue
 
@@ -128,7 +180,7 @@ def get_google_cal_url(stock_name, date_str):
     [단일 등록용] 구글 캘린더 일정 등록 URL 생성 (D-3일 기준)
     """
     try:
-        # 1. 날짜 파싱
+        # 1. 날짜 파싱 (parse_dividend_date가 업데이트되었으므로 월말/월초 로직 자동 적용됨)
         target_date = parse_dividend_date(date_str)
         if not target_date: return None
         
@@ -148,14 +200,15 @@ def get_google_cal_url(stock_name, date_str):
         
         base_url = "https://www.google.com/calendar/render?action=TEMPLATE"
         
-        # [수정] 알림 메시지 및 면책 문구 적용
-        title_text = f"🔔 [{stock_name}] 배당락 D-3 체크"
+        # [수정] 제목 및 면책 조항 동기화
+        title_text = f"🔔 [{stock_name}] 배당락 D-3 (변동 주의)"
         details_text = (
             f"예상 배당락일: {date_str}\n\n"
-            f"안전한 배당 수령을 위해 일정을 확인하세요.\n\n"
-            f"[⚠️ 유의사항]\n"
-            f"실제 일정은 운용사 사정에 따라 변동될 수 있으므로, "
-            f"정확한 정보는 반드시 운용사 홈페이지/공시를 재확인해주세요."
+            f"💰 배당 수령을 위해 계좌를 확인하세요.\n\n"
+            f"🛑 [필독] 투자 유의사항\n"
+            f"이 알림은 과거 데이터를 기반으로 생성된 '예상 일정'입니다.\n"
+            f"운용사 정책 변경(예: 15일→월말)으로 실제 배당일이 바뀔 수 있습니다.\n"
+            f"안전한 투자를 위해, 매수 전 반드시 '운용사 공식 홈페이지' 공시를 확인해주세요."
         )
 
         title = quote(title_text)
