@@ -334,7 +334,7 @@ def fetch_dividend_yield_hybrid(code, category):
         # HTML을 긁는 게 아니라, 모바일 앱이 쓰는 진짜 데이터(JSON)를 가져옵니다.
         try:
             # 네이버 모바일 증권에서 사용하는 공식 API 주소입니다.
-            url = f"https://api.stock.naver.com/stock/{code}/basic"
+            url = f"https://api.stock.naver.com/stock/{code}/analysis"
             headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36'}
             
             res = requests.get(url, headers=headers, timeout=5)
