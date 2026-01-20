@@ -1,7 +1,7 @@
 """
-프로젝트: 배당 팽이 (Dividend Top) v2.9 (Emergency UI Fix)
+프로젝트: 배당 팽이 (Dividend Top) v3.1 (Final Rescue)
 파일명: app.py
-설명: UI 레이아웃 긴급 복구 + 링크 버튼화 + 모바일 가독성 최적화
+설명: KeyError(코드명 불일치) 해결 + 블로그 링크 연동 UI 복구 + 모바일 최적화
 """
 
 import streamlit as st
@@ -385,7 +385,8 @@ def render_calculator_page(df):
     with st.expander("🧮 나만의 배당 포트폴리오 시뮬레이션", expanded=True):
         col_total, col_select = st.columns([1, 2])
 
-        code_col_name = next((c for c in df.columns if '코드' in c), '종목코드')
+        # 유연한 컬럼명 찾기
+        code_col_name = next((c for c in df.columns if '코드' in c), '코드')
         name_col_name = next((c for c in df.columns if 'pure' in c or '명' in c), '종목명')
 
         def clean_label(row):
@@ -999,11 +1000,16 @@ def render_stocklist_page(df):
             if unique_types: type_opts = unique_types
         type_filter = st.multiselect("자산 유형", options=type_opts, default=[])
 
-    # 2. 필터링 로직
+    # 2. 필터링 로직 (KeyError 방지 - 안전한 컬럼명 사용)
     filtered_df = df.copy()
+    
+    # '코드' 또는 '종목코드' 중 존재하는 컬럼 사용
+    code_col = '코드' if '코드' in filtered_df.columns else '종목코드'
+    
     if search_query:
+        # 안전한 문자열 검색 (NaN 처리 포함)
         mask = filtered_df['종목명'].astype(str).str.contains(search_query, case=False) | \
-               filtered_df['종목코드'].astype(str).str.contains(search_query)
+               filtered_df[code_col].astype(str).str.contains(search_query)
         if '검색라벨' in filtered_df.columns:
             mask |= filtered_df['검색라벨'].astype(str).str.contains(search_query, case=False)
         filtered_df = filtered_df[mask]
@@ -1017,6 +1023,7 @@ def render_stocklist_page(df):
     
     # 3. 데이터 가공 (링크 텍스트 개선)
     if '금융링크' in filtered_df.columns:
+        # 금융링크가 있으면 그걸 쓰고, 없으면 블로그 링크를 쓴다 (우선순위 조정 가능)
         filtered_df['상세정보'] = filtered_df['금융링크']
     else:
         filtered_df['상세정보'] = '#'
@@ -1024,6 +1031,8 @@ def render_stocklist_page(df):
     # 4. 컬럼 정의 및 테이블 출력
     # 모바일에서 너무 많은 컬럼은 독이므로 핵심만 추립니다.
     cols_to_show = ["종목명", "현재가", "연배당률", "배당락일", "자산유형", "상세정보"]
+    
+    # 실제 데이터에 있는 컬럼만 필터링
     final_cols = [c for c in cols_to_show if c in filtered_df.columns]
 
     st.dataframe(
@@ -1033,7 +1042,7 @@ def render_stocklist_page(df):
             "현재가": st.column_config.TextColumn("현재가"),
             "연배당률": st.column_config.NumberColumn("연배당률", format="%.2f%%"),
             "배당락일": st.column_config.TextColumn("배당 기준일"),
-            "상세정보": st.column_config.LinkColumn("상세정보", display_text="🔗 바로가기")
+            "상세정보": st.column_config.LinkColumn("분석/상세", display_text="🔍 분석글 보기")
         },
         column_order=final_cols,
         hide_index=True,
