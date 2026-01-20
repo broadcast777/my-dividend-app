@@ -1,7 +1,7 @@
 """
-프로젝트: 배당 팽이 (Dividend Top) v2.8
+프로젝트: 배당 팽이 (Dividend Top) v3.0 (Final Release Candidate)
 파일명: app.py
-설명: 모바일 UX 최적화 (Bottom-up 입력 + 단일/일괄 캘린더 등록 완벽 구현)
+설명: 모바일 최적화 + 탭 기능 안정화 + 역산기 단순화(Simpler Goal Tab)
 """
 
 import streamlit as st
@@ -67,28 +67,6 @@ def init_session_state():
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
-
-# ---------------------------------------------------------
-# [추가 과제] 4과제: COPPA 나이 확인
-# ---------------------------------------------------------
-def check_coppa_compliance():
-    """만 13세 이상 이용 확인"""
-    if (st.session_state.get("age_verified") or 
-        st.query_params.get("age_verified") == "1" or 
-        st.session_state.get("is_logged_in")):
-        st.session_state.age_verified = True
-        return
-
-    with st.expander("📋 서비스 이용 안내 (필수)", expanded=True):
-        st.warning("본 서비스는 만 13세 이상 사용자만 이용 가능합니다.")
-        if st.checkbox("나는 만 13세 이상이며, 이용 약관 및 개인정보 처리방침에 동의합니다."):
-            st.session_state.age_verified = True
-            st.components.v1.html("<script>localStorage.setItem('age_verified','1');</script>", height=0)
-            st.query_params["age_verified"] = "1"
-            time.sleep(0.5)
-            st.rerun()
-        else:
-            st.stop()
 
 # 외부 데이터베이스(Supabase) 연결 초기화
 supabase = db.init_supabase()
@@ -195,7 +173,6 @@ def render_login_buttons(key_suffix="default"):
     except: current_session_id = "unknown"
     redirect_url = f"https://dividend-pange.streamlit.app?old_id={current_session_id}"
 
-    # 상단 헤더용일 때는 문구 생략하고 버튼만 심플하게
     if key_suffix != "top_header":
         st.caption("🔒 기능을 사용하려면 로그인이 필요합니다.")
         
@@ -766,7 +743,7 @@ def render_calculator_page(df):
     df_ana = pd.DataFrame(all_data)
     if not df_ana.empty:
         st.write("")
-        # [핵심 변경] st.tabs -> st.segmented_control 복구 (UI 및 상태 유지)
+        # [핵심 변경] st.tabs -> st.segmented_control (UI 및 상태 유지)
         tab_options = ["💎 자산 구성 분석", "💰 10년 뒤 자산 미리보기", "🎯 목표 배당 달성"]
         selected_tab = st.segmented_control(
             "main_tab_nav",
@@ -777,8 +754,7 @@ def render_calculator_page(df):
         )
         if not selected_tab: selected_tab = tab_options[0]
 
-        # [키 포인트] 변수 Hoisting (UnboundLocalError 해결 - 탭 내부 변수를 밖으로 꺼냄)
-        # 세션에 저장된 값이 있으면 불러오고, 없으면 150(150만원)을 기본값으로 사용
+        # [키 포인트] 변수 Hoisting (UnboundLocalError 해결)
         saved_monthly = st.session_state.get("shared_monthly_input", 150)
         
         st.write("")
@@ -994,24 +970,21 @@ def render_calculator_page(df):
             st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**\n1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 단순 결과입니다.
                     2. 재투자가 매월 이루어진다는 가정하에 계산된 복리 결과입니다.""")
 
-        # 3. 목표 배당 달성
+        # 3. 목표 배당 달성 (역산기) - 심플 버전
         elif selected_tab == "🎯 목표 배당 달성":
             st.subheader("🎯 목표 배당금 역산기 (은퇴 시뮬레이터)")
-            st.caption("내가 원하는 월급을 받기 위해 얼마를 더 모아야 할지 정밀하게 계산합니다.")
+            st.caption("내가 원하는 월급을 받기 위해 총 얼마가 필요한지 계산합니다.")
 
-            # [정보 요약 박스] - 유지
+            # [수정] 2열 레이아웃으로 변경 (추가납입 삭제)
             with st.container(border=True):
-                col_info1, col_info2, col_info3 = st.columns(3)
+                col_info1, col_info2 = st.columns(2)
                 col_info1.metric("📊 평균 연배당률", f"{avg_y:.2f}%")
-                # [수정] 위에서 호이스팅한 monthly_input 변수 사용 (UnboundLocalError 해결)
-                monthly_input_view = st.session_state.get("shared_monthly_input", 150)
-                col_info2.metric("💰 매월 추가적립", f"{monthly_input_view:,.0f}만원")
-                col_info3.metric("📦 선택 종목 수", f"{len(selected)}개")
+                col_info2.metric("📦 선택 종목 수", f"{len(selected)}개")
                 st.caption(f"🔎 **적용 종목:** {', '.join(selected)}")
 
             st.write("")
 
-            # [입력창] - 물가상승 제거 및 간소화
+            # [입력창] - 추가납입 제거, 목표금액과 보유자산 포함 여부만 유지
             col_g1, col_g2 = st.columns(2)
             with col_g1:
                 target_monthly_goal = st.number_input(
@@ -1027,17 +1000,17 @@ def render_calculator_page(df):
                 use_start_money = st.checkbox(
                     "현재 설정된 초기 자산을 포함하여 계산", 
                     value=True, 
-                    help="체크 해제 시 '0원'에서 시작하는 제로베이스 시뮬레이션이 진행됩니다.",
+                    help="체크 해제 시 0원에서 시작한다고 가정합니다.",
                     key="use_start_money_chk"
                 )
                 st.caption(f"보유: {total_invest/10000:,.0f}만원")
 
-            # [계산 로직]
+            # [계산 로직] - 추가 납입(calc_monthly_input)을 0으로 고정
             current_bal_goal = total_invest if use_start_money else 0
             actual_start_bal = current_bal_goal 
             
-            # 여기서도 공유된 적립금 값을 실시간으로 다시 읽음
-            calc_monthly_input = st.session_state.get("shared_monthly_input", 150) * 10000
+            # 여기서 0으로 고정하여 탭 간 간섭 제거
+            calc_monthly_input = 0
             
             tax_factor = 0.846
             monthly_yld = avg_y / 100 / 12  
@@ -1050,7 +1023,7 @@ def render_calculator_page(df):
             else:
                 required_asset_at_time = 0
             
-            # 시뮬레이션 루프
+            # 시뮬레이션 루프 (단순 복리 계산용)
             while months_passed < max_months:
                 if current_bal_goal >= required_asset_at_time:
                     break
@@ -1061,7 +1034,7 @@ def render_calculator_page(df):
 
             st.markdown("---")
 
-            # [결과 표시] - 진행률 및 초록색 차감 표시
+            # [결과 표시]
             gap_money = max(0, required_asset_at_time - actual_start_bal)
             progress_rate = (actual_start_bal / required_asset_at_time) * 100 if required_asset_at_time > 0 else 0
 
@@ -1069,35 +1042,29 @@ def render_calculator_page(df):
             st.write(f"📊 **목표 달성 진행률: {min(progress_rate, 100):.1f}%**")
             st.progress(min(progress_rate / 100, 1.0))
 
-            # 2. 3단 결과
+            # 2. 결과 카드
             if months_passed >= max_months:
-                st.error("⚠️ 현재 적립액으로는 60년 내 달성이 어렵습니다. 적립금을 높여주세요.")
+                st.warning("⚠️ 현재 조건(추가 납입 없음)으로는 목표 달성에 60년 이상 걸립니다. 초기 자산을 늘리거나 목표를 조정해 보세요.")
             else:
-                c_res1, c_res2, c_res3 = st.columns(3)
+                c_res1, c_res2 = st.columns(2)
                 with c_res1:
                     st.metric("최종 필요 자산", f"{required_asset_at_time/100000000:,.2f} 억원")
-                    st.caption("목표 배당을 위한 몸집")
+                    st.caption(f"월 {target_monthly_goal/10000:,.0f}만원을 받기 위해 필요한 돈")
                 
                 with c_res2:
                     if gap_money > 0:
                         st.metric(
-                            "앞으로 모을 금액", 
+                            "앞으로 더 모아야 할 금액", 
                             f"{gap_money/100000000:,.2f} 억원", 
                             delta=f"✅ {actual_start_bal/10000:,.0f}만원 보유 중", 
                             delta_color="normal"
                         )
                     else:
-                        st.success("🎉 이미 목표 달성!")
+                        st.success("🎉 이미 목표 달성! 은퇴하셔도 됩니다.")
                 
-                with c_res3:
-                    st.metric("목표 달성까지 소요 기간", f"{months_passed // 12}년 {months_passed % 12}개월")
-                    st.caption("월 복리 재투자 기준")
-
             # [하단 문구 정리]
             st.write("") 
-            final_annual_income = target_monthly_goal * 12
-            if (final_annual_income / tax_factor) > 20000000:
-                st.warning(f"🚨 **현실적 조언:** 목표 달성 시 연간 배당소득(세전)이 2,000만원을 초과하여 **금융소득종합과세** 대상이 될 수 있습니다.")
+            st.info("💡 이 계산은 **추가 납입 없이**, 배당금 재투자만으로 목표에 도달하는 기준입니다.")
                 
             st.error("""
                     **⚠️ 시뮬레이션 활용 시 유의사항**
