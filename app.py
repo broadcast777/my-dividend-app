@@ -1,7 +1,7 @@
 """
 프로젝트: 배당 팽이 (Dividend Top) v2.9
 파일명: app.py
-설명: 모바일 UX 최적화 + 팝업(Dialog) 기능 복구 + UnboundLocalError 해결
+설명: 모바일 UX 최적화 + 팝업(Dialog) 기능 복구 + UnboundLocalError 해결 + 자기유지 회로 적용
 """
 
 import streamlit as st
@@ -53,7 +53,7 @@ def init_session_state():
         "is_logged_in": False,
         "user_info": None,
         "code_processed": False,
-        "ai_modal_open": False,
+        "ai_modal_open": False,  # 💡 [핵심] 팝업 유지 스위치
         "age_verified": False,
         "total_invest": 30000000, 
         "selected_stocks": [],
@@ -64,27 +64,6 @@ def init_session_state():
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
-
-# ---------------------------------------------------------
-# [추가 과제] 4과제: COPPA 나이 확인
-# ---------------------------------------------------------
-def check_coppa_compliance():
-    if (st.session_state.get("age_verified") or 
-        st.query_params.get("age_verified") == "1" or 
-        st.session_state.get("is_logged_in")):
-        st.session_state.age_verified = True
-        return
-
-    with st.expander("📋 서비스 이용 안내 (필수)", expanded=True):
-        st.warning("본 서비스는 만 13세 이상 사용자만 이용 가능합니다.")
-        if st.checkbox("나는 만 13세 이상이며, 이용 약관 및 개인정보 처리방침에 동의합니다."):
-            st.session_state.age_verified = True
-            st.components.v1.html("<script>localStorage.setItem('age_verified','1');</script>", height=0)
-            st.query_params["age_verified"] = "1"
-            time.sleep(0.5)
-            st.rerun()
-        else:
-            st.stop()
 
 supabase = db.init_supabase()
 
@@ -393,8 +372,8 @@ def confirm_overwrite_dialog(final_name, user_id, user_email, save_data, existin
     if col_ov2.button("아니요, 취소", use_container_width=True):
         st.rerun()
 
-# [3] AI 로보어드바이저 팝업 (🚨 중요: @st.dialog 여기 있어야 함!)
-@st.dialog("🕵️ AI 로보어드바이저", width="large")
+# [3] AI 로보어드바이저 팝업 호출 함수
+# 💡 [중요] 여기서 @st.dialog 데코레이터를 제거했습니다. (중첩 에러 해결)
 def open_ai_wizard_dialog():
     recommendation.show_wizard()
 
@@ -998,15 +977,21 @@ def main():
                 st.success(f"👋 **{nickname}**님, 환영합니다!")
 
         with col_ai:
-            # 🚨 [여기서 팝업 함수를 호출합니다]
+            # 💡 [수정] 버튼 클릭 시 팝업을 바로 띄우지 않고 '스위치'만 켭니다.
             if st.button("🕵️ AI 로보어드바이저", use_container_width=True, type="primary"):
                 if st.session_state.get("is_logged_in"):
                     st.session_state.wiz_step = 0 
                     st.session_state.wiz_data = {}
                     if "ai_result_cache" in st.session_state: del st.session_state.ai_result_cache
-                    open_ai_wizard_dialog() # 팝업 열기
+                    st.session_state.ai_modal_open = True # 스위치 ON
+                    st.rerun()
                 else:
                     st.toast("🔒 로그인을 먼저 해주세요!", icon="👆")
+
+    # 📡 [핵심] 자기유지 회로 작동부
+    # 앱이 새로고침되더라도 스위치가 켜져 있으면 팝업을 계속 호출합니다.
+    if st.session_state.get("ai_modal_open", False):
+        open_ai_wizard_dialog()
 
     df_raw = logic.load_stock_data_from_csv()
     if df_raw.empty: 
