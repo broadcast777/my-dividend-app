@@ -273,6 +273,8 @@ def save_to_github(df):
 
 # logic.py 내부 함수 교체
 
+# logic.py의 fetch_dividend_yield_hybrid 함수를 이걸로 통째로 교체하세요!
+
 def fetch_dividend_yield_hybrid(code, category):
     code = str(code).strip()
     
@@ -282,58 +284,71 @@ def fetch_dividend_yield_hybrid(code, category):
     if category == '국내':
         current_price = 0
         
-        # 1. 현재가 먼저 확보 (분모)
-        # KIS API로 시도
+        # [Step 1] 현재가 확보 (3중 안전장치)
+        
+        # 1-1. 네이버 모바일 API (가장 빠름)
         try:
-            broker = mojito.KoreaInvestment(
-                api_key=st.secrets["kis"]["app_key"],
-                api_secret=st.secrets["kis"]["app_secret"],
-                acc_no=st.secrets["kis"]["acc_no"],
-                mock=True 
-            )
-            resp = broker.fetch_price(code)
-            if resp and 'output' in resp:
-                current_price = int(resp['output'].get('stck_prpr', 0))
+            p_url = f"https://api.stock.naver.com/stock/{code}/basic"
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36'}
+            p_res = requests.get(p_url, headers=headers, timeout=2)
+            if p_res.status_code == 200:
+                data = p_res.json()
+                # 'closePrice'가 보통 현재가입니다.
+                if 'closePrice' in data and data['closePrice']:
+                    current_price = float(data['closePrice'].replace(',', ''))
         except: pass
 
-        # KIS 실패 시 네이버 크롤링으로 가격 확보
+        # 1-2. 야후 파이낸스 (네이버 실패 시)
         if current_price == 0:
             try:
-                p_url = f"https://api.stock.naver.com/stock/{code}/basic"
-                headers = {'User-Agent': 'Mozilla/5.0'}
-                p_res = requests.get(p_url, headers=headers, timeout=3)
-                if p_res.status_code == 200:
-                    current_price = int(p_res.json().get('closePrice', 0.0))
+                ticker = yf.Ticker(f"{code}.KS")
+                price = ticker.fast_info.get('last_price')
+                if price: current_price = price
             except: pass
 
-        # 가격을 못 구했으면 계산 불가 -> 종료
+        # 1-3. KIS API (최후의 수단, 키가 있을 때만)
+        if current_price == 0:
+            try:
+                broker = mojito.KoreaInvestment(
+                    api_key=st.secrets["kis"]["app_key"],
+                    api_secret=st.secrets["kis"]["app_secret"],
+                    acc_no=st.secrets["kis"]["acc_no"],
+                    mock=True 
+                )
+                resp = broker.fetch_price(code)
+                if resp and 'output' in resp:
+                    current_price = float(resp['output'].get('stck_prpr', 0))
+            except: pass
+
+        # --- 가격 확보 실패 시 종료 ---
         if current_price == 0:
             return 0.0, "⚠️ 현재가 조회 실패"
 
-        # 2. [핵심] 최근 배당금 내역 조회 (네이버 모바일 API)
-        # 사장님이 말씀하신 '리스트 맨 위' 데이터를 가져옵니다.
+
+        # [Step 2] 최근 배당금 내역 조회 (네이버 모바일 리스트 API)
+        # 사장님이 보셨던 그 '리스트 맨 위' 데이터를 가져옵니다.
         try:
             # page=1, pageSize=1로 설정하여 '가장 최근 1개'만 가져옵니다.
             div_url = f"https://api.stock.naver.com/stock/{code}/dividend/list?page=1&pageSize=1"
-            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36'}
+            headers = {'User-Agent': 'Mozilla/5.0'}
             
             res = requests.get(div_url, headers=headers, timeout=5)
             if res.status_code == 200:
                 data = res.json()
                 # 리스트 안에 데이터가 있는지 확인
                 if 'content' in data and len(data['content']) > 0:
-                    # 가장 최근 배당금 추출 (예: 51원)
+                    # 가장 최근 배당금 추출 (dividendPerShare: 주당배당금)
                     last_div = float(data['content'][0].get('dividendPerShare', 0))
                     
                     if last_div > 0:
                         # 3. [사장님 공식] (최근 배당금 * 12) / 현재가 * 100
                         calc_yield = (last_div * 12 / current_price) * 100
-                        return round(calc_yield, 2), f"✅ 직접계산({int(last_div)}원x12)"
+                        return round(calc_yield, 2), f"✅ 직접계산({int(last_div)}원)"
                         
         except Exception as e:
             pass # 실패 시 아래 PC 크롤링 백업으로 이동
 
-        # 3. (백업) PC 버전 크롤링
+        # [Step 3] (백업) PC 버전 크롤링
         try:
             url = f"https://finance.naver.com/item/main.naver?code={code}"
             headers = {'User-Agent': 'Mozilla/5.0'}
@@ -361,9 +376,6 @@ def fetch_dividend_yield_hybrid(code, category):
             # 2순위: 내역으로 역산
             divs = stock.dividends
             if not divs.empty:
-                # 최근 1년치 합계 사용 (미국은 분기 배당이 많으므로 단순 *12 위험)
-                # 하지만 월배당 ETF라면 최근 것 * 12가 맞을 수도 있음. 
-                # 안전하게 최근 12개월 합으로 갑니다.
                 recent_total = divs.iloc[-12:].sum() if len(divs) > 12 else divs.sum()
                 price = stock.fast_info.get('last_price')
                 if price and price > 0:
