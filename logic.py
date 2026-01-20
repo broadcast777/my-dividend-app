@@ -1,7 +1,7 @@
 """
-프로젝트: 배당 팽이 (Dividend Top) v3.0
+프로젝트: 배당 팽이 (Dividend Top) v3.1
 파일명: logic.py
-설명: 금융 API 연동 (네이버 모바일 '배당 내역' 직접 집계 방식 적용 - 국내 데이터 해결)
+설명: 데이터 크롤링 엔진 (해외 배당률 단위 보정 + 국내 현재가 조회 네이버 백업 추가)
 """
 
 import streamlit as st
@@ -114,16 +114,46 @@ def get_google_cal_url(stock_name, date_str):
 # [SECTION 2] 시세 조회 및 유틸리티
 # -----------------------------------------------------------
 
+def _fetch_naver_price(code):
+    """[NEW] 네이버 모바일 API로 현재가 조회 (한투 실패 시 백업용)"""
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://m.stock.naver.com/"
+        }
+        # ETF 시도
+        url = f"https://api.stock.naver.com/etf/{code}/basic"
+        res = requests.get(url, headers=headers, timeout=2)
+        if res.status_code == 200:
+            data = res.json()
+            if 'closePrice' in data: return int(data['closePrice'])
+            
+        # 주식 시도
+        url = f"https://api.stock.naver.com/stock/{code}/basic"
+        res = requests.get(url, headers=headers, timeout=2)
+        if res.status_code == 200:
+            data = res.json()
+            if 'closePrice' in data: return int(data['closePrice'])
+    except:
+        pass
+    return 0
+
 def _fetch_price_raw(broker, code, category):
     try:
         code_str = str(code).strip()
+        
+        # 1. 국내: 한투 API -> 실패 시 네이버 API
         if category == '국내':
             try:
                 resp = broker.fetch_price(code_str)
                 if resp and isinstance(resp, dict) and 'output' in resp:
                     if resp['output'].get('stck_prpr'): return int(resp['output']['stck_prpr'])
             except: pass
+            
+            # [백업] 네이버에서 가격 가져오기
+            return _fetch_naver_price(code_str)
         
+        # 2. 해외: Yfinance
         ticker_code = f"{code_str}.KS" if category == '국내' else code_str
         max_retries = 3
         for attempt in range(max_retries):
@@ -143,7 +173,7 @@ def _fetch_price_raw(broker, code, category):
 def get_safe_price(broker, code, category):
     for _ in range(2):
         price = _fetch_price_raw(broker, code, category)
-        if price is not None: return price
+        if price and price > 0: return price
         time.sleep(0.3)
     return None
 
@@ -199,7 +229,6 @@ def load_and_process_data(df_raw, is_admin=False):
             price = get_safe_price(broker, code, category)
             if not price: price = 0 
 
-            # 크롤링된 데이터 vs 수기 데이터
             crawled_div = float(row.get('연배당금_크롤링', 0))
             manual_div = float(row.get('연배당금', 0))        
             months = int(row.get('신규상장개월수', 0))
@@ -284,26 +313,24 @@ def save_to_github(df):
 
 
 # -----------------------------------------------------------
-# [SECTION 6] 실시간 배당 정보 크롤링 (Hybrid - 사장님 제공 로직 이식)
+# [SECTION 6] 실시간 배당 정보 크롤링 (Hybrid)
 # -----------------------------------------------------------
 
 def fetch_dividend_yield_hybrid(code, category):
     """
-    [NEW] 사장님 제공 로직 이식: 네이버 모바일 '배당 내역(History)' API 직접 집계
-    -> 최근 12개월(또는 전체 페이지) 내역을 모두 합산하여 정확한 연배당금을 구하고, 
-       현재가로 나누어 배당률을 역산합니다.
+    네이버 모바일 '배당 내역(History)' API 직접 집계 + 야후 보정 적용
     """
     code = str(code).strip()
     
-    # 1. [국내 주식] 네이버 모바일 API (History 집계 방식) - 강력함!
+    # 1. [국내 주식] 네이버 모바일 API
     if category == '국내':
         HEADERS_MOBILE = {
-            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1",
+            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)",
             "Accept": "application/json, text/plain, */*",
             "Referer": "https://m.stock.naver.com/"
         }
         
-        # 1-1. 한투 API로 현재가 먼저 확보 (필수)
+        # 1-1. 현재가 확보 (한투 -> 네이버 백업)
         current_price = 0
         try:
             broker = mojito.KoreaInvestment(
@@ -317,106 +344,57 @@ def fetch_dividend_yield_hybrid(code, category):
                 current_price = int(resp['output'].get('stck_prpr', 0))
         except: pass
         
+        if current_price == 0:
+            current_price = _fetch_naver_price(code)
+        
         if current_price == 0: return 0.0, "⚠️ 현재가 조회 실패"
 
-        # 1-2. 배당 내역 API 호출 (ETF 우선 -> 일반 Stock 순서)
-        urls = [
-            f"https://m.stock.naver.com/api/etf/{code}/dividend/history",
-            f"https://m.stock.naver.com/api/stock/{code}/dividend/history"
-        ]
-        
+        # 1-2. 배당 내역 집계
+        urls = [f"https://m.stock.naver.com/api/etf/{code}/dividend/history", f"https://m.stock.naver.com/api/stock/{code}/dividend/history"]
         total_dividend = 0
         found_source = ""
         
         for url in urls:
             try:
-                # 1페이지, 50개면 웬만한 월배당 1년치는 다 들어옴
-                params = {"page": 1, "pageSize": 50} 
-                res = requests.get(url, params=params, headers=HEADERS_MOBILE, timeout=5)
-                
+                res = requests.get(url, params={"page": 1, "pageSize": 50}, headers=HEADERS_MOBILE, timeout=5)
                 if res.status_code == 200:
                     data = res.json()
-                    # JSON 파싱 (사장님 코드 로직 반영)
                     items = []
-                    if 'result' in data and isinstance(data['result'], dict) and 'items' in data['result']:
-                        items = data['result']['items']
-                    elif 'result' in data and isinstance(data['result'], list):
-                        items = data['result']
-                    elif 'items' in data:
-                        items = data['items']
+                    if 'result' in data and 'items' in data['result']: items = data['result']['items']
+                    elif 'items' in data: items = data['items']
                         
                     if items:
-                        # 합계 계산
-                        temp_total = 0
-                        today = datetime.date.today()
-                        one_year_ago = today - datetime.timedelta(days=365)
-                        
-                        count = 0
-                        for it in items:
-                            # 날짜 필터링 (최근 1년치만 합산해야 정확한 연배당률이 됨)
-                            # 날짜 키: usually 'date' or 'localDate'
-                            # 여기서는 복잡하니 일단 상위 12개(월배당 기준 1년)만 끊거나, 
-                            # 사장님 코드는 다 더했는데, 정확도를 위해 '최근 1년' 데이터만 더하는 로직을 추가합니다.
-                            
-                            # 금액 추출
-                            val = None
-                            for k in ['dividend', 'dividendAmount', 'amount']:
-                                if k in it and it[k]:
-                                    val = it[k]
-                                    break
-                            
-                            if val:
-                                try:
-                                    v = int(float(str(val).replace(',', '')))
-                                    temp_total += v
-                                    count += 1
-                                except: continue
-                                
-                        # 12개월치 데이터가 확보되면 그게 연배당금
-                        # 너무 옛날꺼까지 다 더하면 안되므로, API가 보통 최신순 정렬임을 감안하여
-                        # 최대 12개(월배당) 혹은 4개(분기배당) 끊어야 하지만,
-                        # 사장님 코드대로 '가져온 거 다 더하기'로 하되, 1년치(12회) 까지만 제한을 두겠습니다.
-                        
-                        # (수정) items는 최신순 정렬이므로, 앞에서부터 12개까지만 합산하는 것이 안전합니다.
-                        # 만약 분기배당이면 4개, 연배당이면 1개겠지만, 월배당 타겟이므로 Max 12개로 제한.
-                        
-                        real_total = 0
-                        limit = 12 
-                        collected = 0
-                        
+                        real_total = 0; limit = 12; collected = 0
                         for it in items:
                             val = None
                             for k in ['dividend', 'dividendAmount', 'amount']:
-                                if k in it and it[k]:
-                                    val = it[k]
-                                    break
+                                if k in it and it[k]: val = it[k]; break
                             if val:
                                 try:
                                     real_total += int(float(str(val).replace(',', '')))
                                     collected += 1
                                 except: pass
                             if collected >= limit: break
-                        
                         if real_total > 0:
-                            total_dividend = real_total
-                            found_source = "✅ 네이버(History집계)"
-                            break # 성공했으니 루프 종료
-            except:
-                pass
+                            total_dividend = real_total; found_source = "✅ 네이버(History)"; break
+            except: pass
         
-        # 1-3. 수익률 계산 및 반환
         if total_dividend > 0:
             yield_val = (total_dividend / current_price) * 100
             return round(yield_val, 2), found_source
             
         return 0.0, "⚠️ 데이터 없음 (국내)"
 
-    # [해외 주식 조회 로직] (기존 유지)
+    # 2. [해외 주식] 야후 파이낸스 (보정 로직 추가)
     else:
         try:
             stock = yf.Ticker(code)
             dy = stock.info.get('dividendYield')
-            if dy and dy > 0: return round(dy * 100, 2), "✅ 야후(Info)"
+            if dy and dy > 0: 
+                # 🚨 [보정] 50% 이상이면 100으로 나눔 (738% -> 7.38%)
+                calc_val = dy * 100
+                if calc_val > 50: calc_val = dy
+                return round(calc_val, 2), "✅ 야후(Info)"
             return 0.0, "⚠️ 데이터 없음"
         except:
             return 0.0, "❌ 해외 에러"
