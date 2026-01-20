@@ -1,7 +1,7 @@
 """
-프로젝트: 배당 팽이 (Dividend Top) v3.5 (The Final Hybrid)
+프로젝트: 배당 팽이 (Dividend Top) v3.6 (The Real Final)
 파일명: logic.py
-설명: v1.5의 정확한 ETF 주소 + v3.4의 차단 방지/속도 조절 기능 통합
+설명: v1.5의 ETF 로직 복원 + v3.4의 안전장치 통합
 """
 
 import streamlit as st
@@ -23,7 +23,7 @@ from logger import logger
 import sqlite3 
 
 # -----------------------------------------------------------
-# [SECTION 1] 날짜 및 스케줄링 헬퍼 (v1.5 로직 유지 + 안전성 강화)
+# [SECTION 1] 날짜 및 스케줄링 헬퍼
 # -----------------------------------------------------------
 
 def standardize_date_format(date_str):
@@ -129,7 +129,7 @@ def get_google_cal_url(stock_name, date_str):
         return None
 
 # -----------------------------------------------------------
-# [SECTION 2] 시세 및 데이터 조회 (Yahoo 차단 방어 적용)
+# [SECTION 2] 시세 및 데이터 조회
 # -----------------------------------------------------------
 
 def _fetch_price_raw(broker, code, category):
