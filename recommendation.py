@@ -1,7 +1,7 @@
 """
 프로젝트: 배당 팽이 (Dividend Top) v2.9
 파일명: recommendation.py
-설명: AI 로보어드바이저 엔진 (최종 완성: 쿼터제 + 황금비율 + 셔플 + 데이터 무결성 + 심플 결과창)
+설명: AI 로보어드바이저 엔진 (최종 완성: 쿼터제 + 황금비율 + 셔플 + 데이터 무결성 + 심플 결과창 + 안정형 리스크 방어)
 업데이트: 2026.01.20
 """
 
@@ -91,7 +91,7 @@ def get_smart_recommendation(df, user_choices):
             if not match.empty: focus_real_names.append(match.iloc[0]['pure_name'])
 
     # 2. 유니버스 필터링 (데이터 무결성 강화)
-    # [필수 개선] 숫자가 아닌 데이터 에러 방지
+    # [필수 개선] 숫자가 아닌 데이터(문자, NaN)가 섞여있으면 에러가 나므로 강제 변환 및 제거
     df['연배당률'] = pd.to_numeric(df['연배당률'], errors='coerce')
     pool = df.dropna(subset=['연배당률']) # NaN 데이터 삭제
     
@@ -131,6 +131,10 @@ def get_smart_recommendation(df, user_choices):
     quotas = []
     
     if style == 'safe':
+        # 🚨 [연금 모드 자동 적용] 
+        # 안정형을 선택한 경우, 연배당률 12%를 초과하는 초고위험 종목은 후보에서 아예 제외합니다.
+        pool = pool[pool['연배당률'] <= 12.0]
+
         # 안정형: 채권 필수 + 리츠(물가방어) 필수
         quotas = ['bond', 'reit'] 
         
@@ -150,7 +154,7 @@ def get_smart_recommendation(df, user_choices):
                 # 안전 채권 우대 (국채, Treasury, 단기, SGOV, T-Bill)
                 if any(k in name_upper for k in ['국채', 'TREASURY', 'SGOV', '단기', 'BILL', '초단기']):
                     pool.at[idx, 'score'] += 30
-
+        
     elif style == 'growth':
         # 성장형: 배당성장 필수 + 리츠/고배당 중 하나
         quotas = ['growth', 'income'] 
@@ -244,6 +248,7 @@ def get_smart_recommendation(df, user_choices):
         for p in final_picks:
             cluster = selected_pool[selected_pool['pure_name']==p]['cluster'].iloc[0]
             priority = 0
+            # 스타일별 대장주 우선순위
             if style == 'safe' and cluster == 'bond': priority = 3
             elif style == 'flow' and cluster == 'cov': priority = 3
             elif style == 'growth' and cluster == 'growth': priority = 3
@@ -318,7 +323,7 @@ def show_wizard():
     # [Step 0] 도입부 (닫기 버튼 삭제됨)
     if step == 0:
         st.subheader("나만의 배당 조합, 막막하신가요?")
-        st.write("투자 성향과 목표에 맞춰 최적의 포트폴리오를 제시해 드립니다. ✨")
+        st.write("투자 성향과 목표에 맞춰 배당팽이가 최적의 포트폴리오를 설계해 드립니다. ✨")
         st.caption("AI 알고리즘이 30여 개의 종목을 실시간으로 분석합니다.")
         st.markdown("---")
         st.write("🌍 **어떤 종목을 포함할까요?**")
@@ -333,9 +338,11 @@ def show_wizard():
         st.subheader("Q1. 어떤 투자를 원하세요?")
         
         st.button("📈 성장 추구 (주가 상승 + 배당)", use_container_width=True, on_click=go_next_step, args=(2, 'style', 'growth'))
-    
+        st.write("") 
+        
         st.button("💰 현금 흐름 (월 배당금 극대화)", use_container_width=True, on_click=go_next_step, args=(2, 'style', 'flow'))
-               
+        st.write("") 
+        
         st.button("🛡️ 안정성 (원금 방어 최우선)", use_container_width=True, on_click=go_next_step, args=(2, 'style', 'safe'))
 
     # [Step 2] 배당 주기 결정
