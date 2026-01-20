@@ -1,7 +1,7 @@
 """
-프로젝트: 배당 팽이 (Dividend Top) v2.9
+프로젝트: 배당 팽이 (Dividend Top) v2.9 (Emergency UI Fix)
 파일명: app.py
-설명: 모바일 UX 최적화 + 팝업(Dialog) 기능 복구 + UnboundLocalError 해결 + 자기유지 회로 + 캘린더 UX 최종 완성
+설명: UI 레이아웃 긴급 복구 + 링크 버튼화 + 모바일 가독성 최적화
 """
 
 import streamlit as st
@@ -964,7 +964,7 @@ def render_calculator_page(df):
             st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**\n1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 단순 결과입니다.\n2. 재투자가 매월 이루어진다는 가정하에 계산된 복리 결과입니다.""")
 
 # ==========================================
-# [SECTION 4.5] 누락된 페이지 렌더링 함수 (복원)
+# [SECTION 4.5] 누락된 페이지 렌더링 함수 (복원 및 UI 개선)
 # ==========================================
 
 def render_roadmap_page(df):
@@ -985,21 +985,21 @@ def render_roadmap_page(df):
         st.write(f"현재 선택된 종목: {', '.join(st.session_state.selected_stocks)}")
 
 def render_stocklist_page(df):
-    """📃 전체 종목 리스트 페이지"""
+    """📃 전체 종목 리스트 페이지 (UI Clean Fix)"""
     st.header("📃 전체 배당주 리스트")
     
-    with st.expander("🔍 검색 및 필터 옵션", expanded=True):
-        col1, col2 = st.columns([2, 1])
-        with col1:
-            search_query = st.text_input("종목명 또는 코드 검색", placeholder="예: SCHD, 336570")
-        with col2:
-            type_opts = ["주식형", "채권형", "리츠형", "커버드콜"]
-            if '자산유형' in df.columns:
-                unique_types = df['자산유형'].unique().tolist()
-                if unique_types: type_opts = unique_types
-            type_filter = st.multiselect("자산 유형", options=type_opts, default=[])
+    # 1. 검색 및 필터 (Expander 제거로 접근성 향상)
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        search_query = st.text_input("🔍 종목 검색", placeholder="종목명 또는 코드 (예: SCHD, 336570)")
+    with col2:
+        type_opts = ["주식형", "채권형", "리츠형", "커버드콜"]
+        if '자산유형' in df.columns:
+            unique_types = df['자산유형'].unique().tolist()
+            if unique_types: type_opts = unique_types
+        type_filter = st.multiselect("자산 유형", options=type_opts, default=[])
 
-    # 필터링 로직
+    # 2. 필터링 로직
     filtered_df = df.copy()
     if search_query:
         mask = filtered_df['종목명'].astype(str).str.contains(search_query, case=False) | \
@@ -1015,8 +1015,15 @@ def render_stocklist_page(df):
 
     st.markdown(f"**총 {len(filtered_df)}개 종목**")
     
-    # 테이블 출력
-    cols_to_show = ["종목코드", "종목명", "현재가", "연배당률", "배당락일", "자산유형", "금융링크"]
+    # 3. 데이터 가공 (링크 텍스트 개선)
+    if '금융링크' in filtered_df.columns:
+        filtered_df['상세정보'] = filtered_df['금융링크']
+    else:
+        filtered_df['상세정보'] = '#'
+
+    # 4. 컬럼 정의 및 테이블 출력
+    # 모바일에서 너무 많은 컬럼은 독이므로 핵심만 추립니다.
+    cols_to_show = ["종목명", "현재가", "연배당률", "배당락일", "자산유형", "상세정보"]
     final_cols = [c for c in cols_to_show if c in filtered_df.columns]
 
     st.dataframe(
@@ -1026,7 +1033,7 @@ def render_stocklist_page(df):
             "현재가": st.column_config.TextColumn("현재가"),
             "연배당률": st.column_config.NumberColumn("연배당률", format="%.2f%%"),
             "배당락일": st.column_config.TextColumn("배당 기준일"),
-            "금융링크": st.column_config.LinkColumn("상세 정보")
+            "상세정보": st.column_config.LinkColumn("상세정보", display_text="🔗 바로가기")
         },
         column_order=final_cols,
         hide_index=True,
