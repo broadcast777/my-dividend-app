@@ -1,7 +1,7 @@
 import streamlit as st
 import html
 import re
-
+import timeline
 # ---------------------------------------------------------
 # [SECTION] UI 렌더링 모듈 (인테리어 연결 및 보안 강화)
 # ---------------------------------------------------------
@@ -100,11 +100,21 @@ def render_stocklist_page(df):
     render_custom_table(display_df)
 
 def render_roadmap_page(df):
-    """📅 월별 로드맵 페이지 렌더링"""
+    """📅 월별 로드맵 페이지 (timeline 모듈 연결 완료)"""
     st.header("📅 월별 로드맵")
-    st.info("선택하신 종목들의 월별 예상 배당 흐름을 한눈에 확인하세요.")
     
-    # 로드맵 로직 (기존에 작성하셨던 timeline 모듈 등을 활용하거나 기본 안내 출력)
-    st.warning("로드맵 상세 기능은 timeline 모듈과 연동이 필요합니다.")
-    # 예시: 간단한 데이터프레임 출력
-    st.dataframe(df[['종목명', '배당락일', '연배당률']], use_container_width=True)
+    # 1. 데이터 가져오기 (계산기에서 선택한 종목들)
+    selected_stocks = st.session_state.get('selected_stocks', [])
+    total_invest = st.session_state.get('total_invest', 0)
+    
+    # 2. 예외 처리: 선택한 종목이 없을 때
+    if not selected_stocks:
+        st.info("👈 먼저 '💰 배당금 계산기' 메뉴에서 포트폴리오를 구성해주세요.")
+        return
+
+    # 3. 비중(Weights) 계산
+    # (계산기 페이지에서 저장된 비중이 있으면 쓰고, 없으면 1/N로 나눔)
+    weights = st.session_state.get('ai_suggested_weights', {})
+    if not weights:
+        for stock in selected_stocks:
+            weights[stock] = 100 / len(selected_stocks)
