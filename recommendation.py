@@ -318,7 +318,7 @@ def show_wizard():
     # [Step 0] 도입부 (닫기 버튼 삭제됨)
     if step == 0:
         st.subheader("나만의 배당 조합, 막막하신가요?")
-        st.write("투자 성향과 목표에 맞춰 배당팽이가 최적의 포트폴리오를 설계해 드립니다. ✨")
+        st.write("투자 성향과 목표에 맞춰 최적의 포트폴리오를 제시해 드립니다. ✨")
         st.caption("AI 알고리즘이 30여 개의 종목을 실시간으로 분석합니다.")
         st.markdown("---")
         st.write("🌍 **어떤 종목을 포함할까요?**")
@@ -333,11 +333,9 @@ def show_wizard():
         st.subheader("Q1. 어떤 투자를 원하세요?")
         
         st.button("📈 성장 추구 (주가 상승 + 배당)", use_container_width=True, on_click=go_next_step, args=(2, 'style', 'growth'))
-        st.write("") 
-        
+    
         st.button("💰 현금 흐름 (월 배당금 극대화)", use_container_width=True, on_click=go_next_step, args=(2, 'style', 'flow'))
-        st.write("") 
-        
+               
         st.button("🛡️ 안정성 (원금 방어 최우선)", use_container_width=True, on_click=go_next_step, args=(2, 'style', 'safe'))
 
     # [Step 2] 배당 주기 결정
