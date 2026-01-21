@@ -337,57 +337,6 @@ def get_safe_price(broker, code, category):
         if price is not None: return price
         time.sleep(0.3)
     return None
-# [INSERT] 이 함수를 get_safe_price 함수와 classify_asset 함수 사이에 넣으세요.
-
-# ================= [여기서부터 복사] =================
-
-def fetch_latest_dividend_amount(code):
-    """
-    [NEW] 배당금 2중 방어 로직 (History -> TTM)
-    1순위: 최근 배당금(51원) x 12 (최신 트렌드)
-    2순위: TTM(345원) (지난 1년간 지급 총액)
-    결과: '연간 배당금 총액'을 반환
-    """
-    headers = {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)", 
-        "Referer": f"https://m.stock.naver.com/domestic/stock/{code}/analysis"
-    }
-    
-    # [1단계] History API (최신 1회분 x 12)
-    try:
-        url_hist = f"https://m.stock.naver.com/api/etf/{code}/dividend/history?page=1&pageSize=20"
-        res = requests.get(url_hist, headers=headers, timeout=3)
-        if res.status_code == 200:
-            data = res.json()
-            items = []
-            if isinstance(data, list): items = data
-            elif isinstance(data, dict):
-                items = data.get('result', {}).get('items') or data.get('items') or []
-            
-            if items:
-                first = items[0]
-                for k in ["dividend", "dividendAmount", "amount"]:
-                    if k in first and first[k]:
-                        one_time = float(str(first[k]).replace(',', ''))
-                        return one_time * 12 # 연환산 반환
-    except: pass
-
-    # [2단계] TTM API (1년치 합계)
-    try:
-        url_ttm = f"https://m.stock.naver.com/api/stock/{code}/etfAnalysis"
-        res = requests.get(url_ttm, headers=headers, timeout=3)
-        if res.status_code == 200:
-            data = res.json()
-            div_data = data.get("dividend", {}) or data.get("result", {}).get("dividend", {})
-            ttm_amt = div_data.get("dividendPerShareTtm")
-            if ttm_amt:
-                return float(str(ttm_amt).replace(',', '')) # TTM 그대로 반환
-    except: pass
-
-    return None
-
-# ================= [여기까지 복사] =================
-
 
 def classify_asset(row):
     """종목명과 코드를 분석하여 자산의 유형을 정밀 분류합니다."""
@@ -417,34 +366,20 @@ def load_and_process_data(df_raw, is_admin=False):
 
     # 1. 데이터 전처리 (결측치 방어)
     try:
-        num_cols = ['연배당금', '연배당률', '현재가', '신규상장개월수', '연배당금_크롤링', '연배당금_크롤링_auto', '연배당률_크롤링']
-
+        num_cols = ['연배당금', '연배당률', '현재가', '신규상장개월수', '연배당금_크롤링']
         for col in num_cols:
             if col in df_raw.columns:
                 # 문자가 섞여있을 경우 강제 변환 후 NaN은 0으로
                 df_raw[col] = pd.to_numeric(df_raw[col], errors='coerce').fillna(0)
 
-        #
-        # [수정된 코드] 종목코드 클리닝 로직 (분류에 따라 다르게 적용)
         if '종목코드' in df_raw.columns:
-            def clean_ticker_smart(row):
-                # 1. 값 가져오기
-                raw_code = str(row.get('종목코드', '')).split('.')[0].strip()
-                category = str(row.get('분류', '국내')).strip()  # 분류 컬럼이 없으면 '국내'로 가정
-
-                # 2. [해외]일 때만 앞의 0 강제 제거 (예: 00JEPI -> JEPI)
-                if category == '해외':
-                    return raw_code.lstrip('0').upper()
-
-                # 3. [국내]일 때 숫자면 6자리 채우기 (예: 5930 -> 005930)
-                if raw_code.isdigit():
-                    return raw_code.zfill(6)
-
-                return raw_code.upper()
-
-            # axis=1을 써서 행 단위로 처리 (분류 컬럼을 참조하기 위함)
-            df_raw['종목코드'] = df_raw.apply(clean_ticker_smart, axis=1)
+            def clean_ticker(x):
+                s = str(x).split('.')[0].strip()
+                if s.isdigit(): return s.zfill(6) 
+                return s.upper() 
             
+            df_raw['종목코드'] = df_raw['종목코드'].apply(clean_ticker)
+
         if '배당락일' in df_raw.columns:
             df_raw['배당락일'] = df_raw['배당락일'].astype(str).replace(['nan', 'None', 'nan '], '-')
 
@@ -467,93 +402,56 @@ def load_and_process_data(df_raw, is_admin=False):
     results = [None] * len(df_raw)
     
     # 3. 병렬 처리 작업자
-    # ================= [기존 process_row 지우고 이걸로 교체] =================
-    
-    # 3. 병렬 처리 작업자 (수동 우선 > 자동 차선 > 캐시 최후)
     def process_row(idx, row):
         try:
             code = str(row.get('종목코드', '')).strip()
             name = str(row.get('종목명', '')).strip()
             category = str(row.get('분류', '국내')).strip()
             
-            # 1) 가격 조회
+            # 가격 조회 (Safe Logic 적용)
             price = get_safe_price(broker, code, category)
-            if not price: price = 0
+            if not price: price = 0 
 
-            # 2) 데이터 준비
-            manual_div = float(row.get('연배당금', 0))        # 사장님 입력값 (1순위)
-            saved_auto = float(row.get('연배당금_크롤링_auto', 0)) # 캐시값 (3순위)
+            crawled_div = float(row.get('연배당금_크롤링', 0))
+            manual_div = float(row.get('연배당금', 0))        
             months = int(row.get('신규상장개월수', 0))
-            
-            auto_annual_div = None
 
-            # [핵심] 수동 입력이 '없을 때만(0)' 크롤링 수행 (자원 절약 + 왜곡 방지)
-            if category == '국내' and manual_div == 0:
-                # 실시간 크롤링 (History -> TTM)
-                auto_annual_div = fetch_latest_dividend_amount(code)
-                
-                if auto_annual_div:
-                    # 성공: CSV 저장용 데이터 갱신
-                    row['연배당금_크롤링_auto'] = auto_annual_div
-                    if price > 0:
-                        row['연배당률_크롤링'] = round((auto_annual_div / price) * 100, 2)
-                elif saved_auto > 0:
-                    # 실패: 기존 캐시 데이터 사용 (방어막)
-                    auto_annual_div = saved_auto
-
-            # 3) 최종 배당금 결정 (수동 > 자동 > 과거)
-            if manual_div > 0:
-                # [1순위] 사장님 수동 입력값 (폭탄 배당주 방어용)
-                if 0 < months < 12:
-                    target_div = (manual_div / months * 12) # 신규는 월할
-                    display_name = f"{name} ⭐"
-                else:
-                    target_div = manual_div
-                    display_name = name
-            
-            elif auto_annual_div and auto_annual_div > 0:
-                # [2순위] 자동 크롤링 (수동 값이 0일 때만 적용됨)
-                target_div = auto_annual_div
-                display_name = f"{name} ⭐" if 0 < months < 12 else name
-                
+            # 신규 상장 종목 연환산
+            if 0 < months < 12:
+                target_div = (manual_div / months * 12) if manual_div > 0 else crawled_div
+                display_name = f"{name} ⭐"
             else:
-                # [3순위] 다 없으면 옛날 크롤링 값이라도 사용
-                orig_crawled = float(row.get('연배당금_크롤링', 0) or 0)
-                target_div = orig_crawled
+                target_div = crawled_div if crawled_div > 0 else manual_div
                 display_name = name
 
-            # 4) 연배당률 계산
             yield_val = (target_div / price * 100) if price > 0 else 0
 
-            if is_admin and (yield_val < 2.0 or yield_val > 25.0):
-                display_name = f"🚫 {display_name}"
+            if is_admin and (yield_val < 2.0 or yield_val > 25.0): display_name = f"🚫 {display_name}"
 
             price_fmt = f"{int(price):,}원" if category == '국내' else f"${price:.2f}"
             
-            # 자산 분류
             csv_type = str(row.get('유형', '-'))
             auto_asset_type = classify_asset(row) 
+            
             final_type = csv_type
             if '채권' in auto_asset_type: final_type = '채권'
             elif '커버드콜' in auto_asset_type: final_type = '커버드콜'
             elif '리츠' in auto_asset_type: final_type = '리츠'
 
             return idx, {
-                '코드': code,
+                '코드': code, 
                 '종목명': display_name,
                 '블로그링크': str(row.get('블로그링크', '#')),
                 '금융링크': f"https://finance.naver.com/item/main.naver?code={code}" if category == '국내' else f"https://finance.yahoo.com/quote/{code}",
-                '현재가': price_fmt,
+                '현재가': price_fmt, 
                 '연배당률': yield_val,
-                '연배당금_크롤링_auto': row.get('연배당금_크롤링_auto', 0),
-                '연배당률_크롤링': row.get('연배당률_크롤링', None),
                 '환구분': get_hedge_status(name, category),
-                '배당락일': str(row.get('배당락일', '-')),
+                '배당락일': str(row.get('배당락일', '-')), 
                 '분류': category,
-                '유형': final_type,
+                '유형': final_type, 
                 '자산유형': auto_asset_type,
-                '캘린더링크': None,
-                'pure_name': name.replace("🚫 ", "").replace(" (필터대상)", ""),
+                '캘린더링크': None, 
+                'pure_name': name.replace("🚫 ", "").replace(" (필터대상)", ""), 
                 '신규상장개월수': months,
                 '배당기록': str(row.get('배당기록', '')),
                 '검색라벨': str(row.get('검색라벨', f"[{code}] {display_name}"))
@@ -561,8 +459,6 @@ def load_and_process_data(df_raw, is_admin=False):
         except Exception as e:
             logger.error(f"Row Processing Error ({idx}): {e}")
             return idx, None
-
-    # ================= [여기까지 교체 완료] =================
 
     # 스레드 풀 실행 (yfinance 충돌 완화를 위해 워커 수 조절 가능)
     with ThreadPoolExecutor(max_workers=10) as executor:
@@ -593,16 +489,6 @@ def load_stock_data_from_csv():
             df = pd.read_csv(file_path, dtype={'종목코드': str})
             df.columns = df.columns.str.strip()
             if '연배당금_크롤링' not in df.columns: df['연배당금_크롤링'] = 0.0
-
-            # <<< 여기에 새 컬럼 기본값 채우기 시작 >>>
-            if '연배당금_크롤링_auto' not in df.columns:
-                df['연배당금_크롤링_auto'] = 0.0
-            if '연배당률_크롤링' not in df.columns:
-                df['연배당률_크롤링'] = 0.0
-            # <<< 여기에 새 컬럼 기본값 채우기 끝 >>>
-
-   
-    
             return df
         except Exception:
             time.sleep(0.5) # 잠겨있으면 0.5초 대기
@@ -715,54 +601,18 @@ def fetch_dividend_yield_hybrid(code, category):
         # (E) 최종 실패
         return 0.0, "⚠️ 조회 실패"
 
-        else:
-            # 해외: 야후 파이낸스 (개선된 로직: info 실패 시 직접 계산)
-            try:
-                stock = yf.Ticker(code)
-                
-                # [시도 1] 간편 정보(info)에서 가져오기
-                dy = stock.info.get('dividendYield')
-                if dy is None:
-                    dy = stock.info.get('trailingAnnualDividendYield')
-    
-                # [시도 2] info가 비어있으면 직접 계산 (최근 1년 배당금 합계 / 현재가)
-                if dy is None:
-                    # 1. 현재가 확보
-                    price = stock.fast_info.get('last_price')
-                    if not price:
-                        hist = stock.history(period="1d")
-                        if not hist.empty:
-                            price = hist['Close'].iloc[-1]
-                    
-                    # 2. 배당금 내역 확보 (최근 1년)
-                    if price and price > 0:
-                        divs = stock.dividends
-                        if not divs.empty:
-                            # 날짜 타임존 제거 (비교를 위해)
-                            divs.index = divs.index.tz_localize(None)
-                            
-                            today = datetime.datetime.now()
-                            one_year_ago = today - datetime.timedelta(days=365)
-                            
-                            # 1년치 합계
-                            recent_divs = divs[divs.index >= one_year_ago]
-                            annual_div = recent_divs.sum()
-                            
-                            if annual_div > 0:
-                                dy = annual_div / price
-    
-                # [결과 처리]
-                if dy:
-                    calc_val = dy * 100
-                    # 가끔 야후가 0.05가 아니라 5.0으로 주는 경우 방어
-                    if calc_val > 200: calc_val = dy 
-                    return round(calc_val, 2), "✅ 야후(성공)"
-                
-                return 0.0, "⚠️ 데이터 없음"
-    
-            except Exception as e:
-                # logger.error(f"Overseas Error ({code}): {e}") # 로그가 너무 많으면 주석 처리
-                return 0.0, "❌ 해외 에러"
+    else:
+        # 해외: 기존 야후 파이낸스 로직 유지
+        try:
+            stock = yf.Ticker(code)
+            dy = stock.info.get('dividendYield')
+            if dy:
+                calc_val = dy * 100
+                if calc_val > 50: calc_val = dy
+                return round(calc_val, 2), "✅ 야후(Info)"
+            return 0.0, "⚠️ 데이터 없음"
+        except Exception:
+            return 0.0, "❌ 해외 에러"
 
 
 def update_dividend_rolling(current_history_str, new_dividend_amount):
