@@ -1284,10 +1284,38 @@ def main():
 
     if is_admin:
         render_admin_tools(df_raw)
-
+    # ================= [여기서부터 교체 시작] =================
+    
+    # 3. 로직 수행 및 데이터 동기화 (핵심 수정 파트)
     with st.spinner('⚙️ 배당 데이터베이스 엔진 가동 중...'):
-        df = logic.load_and_process_data(df_raw, is_admin=is_admin)
-        st.session_state['shared_df'] = df
+        # (1) 로직 실행 (크롤링 수행)
+        df_calculated = logic.load_and_process_data(df_raw, is_admin=is_admin)
+        st.session_state['shared_df'] = df_calculated  # 계산된 데이터 공유
+        
+        # (2) [NEW] 크롤링된 Auto 데이터를 저장용 변수(df_dirty)에 강제 주입
+        #     -> 이렇게 해야 '저장' 버튼 누를 때 0원이 아닌 51원이 저장됨!
+        if not df_calculated.empty and 'df_dirty' in st.session_state:
+            try:
+                # 종목코드를 기준으로 매핑 (순서 섞임 방지)
+                auto_map = df_calculated.set_index('종목코드')['연배당금_크롤링_auto'].to_dict()
+                
+                # 저장용 데이터(df_dirty)에 값 채워 넣기
+                # "코드가 같으면 auto_map 값을 넣고, 없으면 원래 값 유지"
+                st.session_state.df_dirty['연배당금_크롤링_auto'] = (
+                    st.session_state.df_dirty['종목코드']
+                    .map(auto_map)
+                    .fillna(st.session_state.df_dirty['연배당금_크롤링_auto'])
+                )
+                
+                # (선택) 디버깅용: 성공 로그
+                # print("✅ Auto 데이터 동기화 완료!")
+            except Exception as e:
+                logger.error(f"⚠️ 데이터 동기화 중 오류: {e}")
+
+        # (3) 화면 표시용 변수는 계산된 결과물(df_calculated) 사용
+        df = df_calculated
+
+    # ================= [여기까지 교체 완료] =================
 
     with st.sidebar:
         if not st.session_state.is_logged_in: st.markdown("---")
