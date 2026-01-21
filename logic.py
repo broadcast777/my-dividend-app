@@ -518,64 +518,102 @@ def save_to_github(df):
 
 def fetch_dividend_yield_hybrid(code, category):
     """
-    국내: Playwright 최신배당금 캡처 -> x12 / 한투 실시간 주가 계산
-    해외: 야후 파이낸스 연배당률 유지
+    국내: requests로 최신배당금 캡처 -> x12 / 한투 실시간 주가 계산
+    해외: 기존 야후 로직 유지
+    변경 요지: Playwright 대신 requests로 dividend/history 직접 호출하여 안정성 확보
     """
     code = str(code).strip()
     
     if category == '국내':
         # (A) 한투 API로 '실시간 주가' 확보
         current_price = 0
+        resp = None
         try:
-            broker = mojito.KoreaInvestment(api_key=st.secrets["kis"]["app_key"], api_secret=st.secrets["kis"]["app_secret"], acc_no=st.secrets["kis"]["acc_no"], mock=True)
+            broker = mojito.KoreaInvestment(
+                api_key=st.secrets["kis"]["app_key"],
+                api_secret=st.secrets["kis"]["app_secret"],
+                acc_no=st.secrets["kis"]["acc_no"],
+                mock=True
+            )
             resp = broker.fetch_price(code)
             if resp and 'output' in resp:
-                current_price = float(resp['output'].get('stck_prpr', 0))
-        except: pass
+                current_price = float(resp['output'].get('stck_prpr', 0) or 0)
+        except Exception:
+            current_price = 0
         
-        if current_price == 0: current_price = _fetch_naver_price(code) # 백업 시도
+        if current_price == 0:
+            try:
+                current_price = _fetch_naver_price(code) or 0
+            except:
+                current_price = 0
         
-        # (B) Playwright로 네이버 API 가로채기 (최신 배당금 1건)
+        # (B) requests로 네이버 API 직접 호출 (Playwright 제거)
         latest_div = 0
         try:
-            with sync_playwright() as p:
-                browser = p.chromium.launch(headless=True)
-                page = browser.new_page()
-                api_url = f"https://m.stock.naver.com/api/etf/{code}/dividend/history"
-                page.goto(f"https://m.stock.naver.com/etf/{code}/dividend", wait_until="networkidle")
-                content = page.evaluate(f"fetch('{api_url}').then(res => res.json())")
-                
-                if content and 'result' in content and 'items' in content['result']:
-                    items = content['result']['items']
-                    if items: latest_div = float(str(items[0].get('dividend', 0)).replace(',', ''))
-                browser.close()
+            headers = {"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)", "Referer": f"https://m.stock.naver.com/domestic/stock/{code}/analysis"}
+            hist_url = f"https://m.stock.naver.com/api/etf/{code}/dividend/history?page=1&pageSize=200&firstPageSize=200"
+            r = requests.get(hist_url, headers=headers, timeout=6)
+            if r.status_code == 200:
+                j = r.json()
+                # 응답 구조: dict with 'result' -> list OR direct list
+                items = []
+                if isinstance(j, dict):
+                    items = j.get("result") or j.get("items") or j.get("data") or []
+                    # result가 dict 안에 items로 들어있는 경우 보정
+                    if isinstance(items, dict):
+                        items = items.get("items") or []
+                elif isinstance(j, list):
+                    items = j
+                # items가 리스트이면 첫 항목에서 금액 추출
+                if isinstance(items, list) and items:
+                    first = items[0]
+                    # 여러 후보 키에 대응
+                    amt = None
+                    for k in ("dividendAmount","dividend","distribution","amount","value","payAmount"):
+                        if isinstance(first, dict) and k in first and first[k] is not None:
+                            amt = first[k]; break
+                    if isinstance(amt, str):
+                        try: amt = float(amt.replace(',','').strip())
+                        except: amt = None
+                    if amt:
+                        latest_div = float(amt)
         except Exception as e:
-            logger.error(f"❌ Playwright 실패: {e}")
+            logger.warning(f"Dividend history request failed ({code}): {e}")
+            latest_div = 0
 
         # (C) 최종 실시간 배당률 계산
         if current_price > 0 and latest_div > 0:
-            yield_val = (latest_div * 12) / current_price * 100
-            return round(yield_val, 2), f"✅ 실시간({int(latest_div)}원)"
+            try:
+                yield_val = (latest_div * 12) / current_price * 100
+                return round(yield_val, 2), f"✅ 실시간({int(latest_div)}원)"
+            except Exception:
+                pass
         
-        # [백업] 실패 시 한투 전산 배당률이라도 반환
+        # (D) 백업: 한투 전산 배당률 반환 시도
         try:
             if resp and 'output' in resp:
                 backup = resp['output'].get('hts_dvsd_rate')
-                if backup and backup != '-': return float(backup), "✅ 한투API(백업)"
-        except: pass
+                if backup and backup != '-':
+                    return float(backup), "✅ 한투API(백업)"
+        except Exception:
+            pass
+
+        # (E) 최종 실패
         return 0.0, "⚠️ 조회 실패"
 
     else:
-        # [해외] 야후 파이낸스 로직 (기존 유지)
+        # 해외: 기존 야후 파이낸스 로직 유지
         try:
             stock = yf.Ticker(code)
             dy = stock.info.get('dividendYield')
             if dy:
                 calc_val = dy * 100
-                if calc_val > 50: calc_val = dy # 뻥튀기 보정
+                if calc_val > 50: calc_val = dy
                 return round(calc_val, 2), "✅ 야후(Info)"
             return 0.0, "⚠️ 데이터 없음"
-        except: return 0.0, "❌ 해외 에러"
+        except Exception:
+            return 0.0, "❌ 해외 에러"
+
 
 def update_dividend_rolling(current_history_str, new_dividend_amount):
     """배당금 기록 갱신"""
