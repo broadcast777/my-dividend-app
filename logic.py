@@ -716,16 +716,52 @@ def fetch_dividend_yield_hybrid(code, category):
         return 0.0, "⚠️ 조회 실패"
 
     else:
-        # 해외: 기존 야후 파이낸스 로직 유지
+        # 해외: 야후 파이낸스 (개선된 로직: info 실패 시 직접 계산)
         try:
             stock = yf.Ticker(code)
+            
+            # [시도 1] 간편 정보(info)에서 가져오기
             dy = stock.info.get('dividendYield')
+            if dy is None:
+                dy = stock.info.get('trailingAnnualDividendYield')
+
+            # [시도 2] info가 비어있으면 직접 계산 (최근 1년 배당금 합계 / 현재가)
+            if dy is None:
+                # 1. 현재가 확보
+                price = stock.fast_info.get('last_price')
+                if not price:
+                    hist = stock.history(period="1d")
+                    if not hist.empty:
+                        price = hist['Close'].iloc[-1]
+                
+                # 2. 배당금 내역 확보 (최근 1년)
+                if price and price > 0:
+                    divs = stock.dividends
+                    if not divs.empty:
+                        # 날짜 타임존 제거 (비교를 위해)
+                        divs.index = divs.index.tz_localize(None)
+                        
+                        today = datetime.datetime.now()
+                        one_year_ago = today - datetime.timedelta(days=365)
+                        
+                        # 1년치 합계
+                        recent_divs = divs[divs.index >= one_year_ago]
+                        annual_div = recent_divs.sum()
+                        
+                        if annual_div > 0:
+                            dy = annual_div / price
+
+            # [결과 처리]
             if dy:
                 calc_val = dy * 100
-                if calc_val > 50: calc_val = dy
-                return round(calc_val, 2), "✅ 야후(Info)"
+                # 가끔 야후가 0.05가 아니라 5.0으로 주는 경우 방어
+                if calc_val > 200: calc_val = dy 
+                return round(calc_val, 2), "✅ 야후(성공)"
+            
             return 0.0, "⚠️ 데이터 없음"
-        except Exception:
+
+        except Exception as e:
+            # logger.error(f"Overseas Error ({code}): {e}") # 로그가 너무 많으면 주석 처리
             return 0.0, "❌ 해외 에러"
 
 
