@@ -366,7 +366,8 @@ def load_and_process_data(df_raw, is_admin=False):
 
     # 1. 데이터 전처리 (결측치 방어)
     try:
-        num_cols = ['연배당금', '연배당률', '현재가', '신규상장개월수', '연배당금_크롤링']
+        num_cols = ['연배당금', '연배당률', '현재가', '신규상장개월수', '연배당금_크롤링', '연배당금_크롤링_auto', '연배당률_크롤링']
+
         for col in num_cols:
             if col in df_raw.columns:
                 # 문자가 섞여있을 경우 강제 변환 후 NaN은 0으로
@@ -513,6 +514,16 @@ def load_stock_data_from_csv():
             df = pd.read_csv(file_path, dtype={'종목코드': str})
             df.columns = df.columns.str.strip()
             if '연배당금_크롤링' not in df.columns: df['연배당금_크롤링'] = 0.0
+
+            # <<< 여기에 새 컬럼 기본값 채우기 시작 >>>
+            if '연배당금_크롤링_auto' not in df.columns:
+                df['연배당금_크롤링_auto'] = 0.0
+            if '연배당률_크롤링' not in df.columns:
+                df['연배당률_크롤링'] = 0.0
+            # <<< 여기에 새 컬럼 기본값 채우기 끝 >>>
+
+            return df
+    
             return df
         except Exception:
             time.sleep(0.5) # 잠겨있으면 0.5초 대기
