@@ -476,17 +476,33 @@ def load_and_process_data(df_raw, is_admin=False):
                 logger.warning(f"Auto dividend fetch failed for {code}: {e}")
     
             # 기존 값
+            # ------------------------------------------------------------------
+            # [수정] 아래 로직으로 교체하세요 (자동 데이터 1순위 적용)
+            # ------------------------------------------------------------------
+            
+            # 1. 사용할 변수들 정리
             manual_div = float(row.get('연배당금', 0))
             orig_crawled = float(row.get('연배당금_크롤링', 0) or 0)
             months = int(row.get('신규상장개월수', 0))
-    
-            # target_div 결정
-            if 0 < months < 12:
-                target_div = (manual_div / months * 12) if manual_div > 0 else (orig_crawled or auto_div_amt or 0)
-                display_name = f"{name} ⭐"
+
+            # 2. target_div 결정 (핵심: 자동 데이터가 있으면 무조건 1순위!)
+            if auto_div_amt and auto_div_amt > 0:
+                # 깡패 모드: 방금 낚아온 싱싱한 자동 데이터가 있으면 무조건 씀
+                target_div = auto_div_amt
+                # 이름에 별표 붙일지 말지만 결정
+                display_name = f"{name} ⭐" if 0 < months < 12 else name
+                
             else:
-                target_div = orig_crawled if orig_crawled > 0 else (auto_div_amt or manual_div)
-                display_name = name
+                # 쭈구리 모드: 자동 데이터 실패 시 기존 방식(수동/과거값) 사용
+                if 0 < months < 12:
+                    # 신규 상장: 수동 입력 우선
+                    target_div = (manual_div / months * 12) if manual_div > 0 else (orig_crawled or 0)
+                    display_name = f"{name} ⭐"
+                else:
+                    # 일반 종목: 과거 크롤링 값 우선
+                    target_div = orig_crawled if orig_crawled > 0 else manual_div
+                    display_name = name
+            # ------------------------------------------------------------------
     
             # 연배당률 계산
             yield_val = (target_div / price * 100) if price > 0 else 0
