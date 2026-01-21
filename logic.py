@@ -1,8 +1,8 @@
 """
-프로젝트: 배당 팽이 (Dividend Top) v3.0 (Updated)
+프로젝트: 배당 팽이 (Dividend Top) v2.9
 파일명: logic.py
-설명: 금융 API 연동, 데이터 크롤링, 캘린더 파일 생성 (데이터 무결성 강화 + 충돌 방지 패치 적용 + 자동 크롤링 방어 로직)
-업데이트: 2026.01.21
+설명: 금융 API 연동, 데이터 크롤링, 캘린더 파일 생성 (데이터 무결성 강화 + 충돌 방지 패치 적용)
+업데이트: 2026.01.20
 """
 
 import streamlit as st
@@ -21,11 +21,6 @@ import json
 from github import Github
 from logger import logger
 import sqlite3  # DB 에러 처리를 위해 추가
-
-
-# [코랩 검증] 데이터 추출용 키 후보
-DATE_KEYS = ["exDividendAt","localDate","exDate","date","dateTime","payDate","recordDate"]
-AMT_KEYS = ["dividendAmount","dividend","distribution","amount","value","payAmount","pay_amount"]
 
 
 # -----------------------------------------------------------
@@ -342,61 +337,42 @@ def get_safe_price(broker, code, category):
         if price is not None: return price
         time.sleep(0.3)
     return None
+# [INSERT] 이 함수를 get_safe_price 함수와 classify_asset 함수 사이에 넣으세요.
 
 def fetch_latest_dividend_amount(code):
     """
-    [2중 방어] 
-    1순위: 최근 배당금(51원) x 12 (가장 최신 트렌드 반영)
-    2순위: TTM(345원) (지난 1년간 실제 지급 총액, 안전빵)
-    결과: '연간 배당금 총액'을 반환함
+    [NEW] CSV 자동 갱신용: 최신 배당금 1회분만 쏙 뽑아오는 함수 (Requests 방식)
     """
-    headers = {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)", 
-        "Referer": f"https://m.stock.naver.com/domestic/stock/{code}/analysis"
-    }
-    
-    # ---------------------------------------------------------
-    # [1단계] History API 찌르기 (최신 배당금 x 12)
-    # ---------------------------------------------------------
     try:
-        url_hist = f"https://m.stock.naver.com/api/etf/{code}/dividend/history?page=1&pageSize=20"
-        res = requests.get(url_hist, headers=headers, timeout=3)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)", 
+            "Referer": f"https://m.stock.naver.com/domestic/stock/{code}/analysis"
+        }
+        # 배당 히스토리 API 호출
+        url = f"https://m.stock.naver.com/api/etf/{code}/dividend/history?page=1&pageSize=20"
+        res = requests.get(url, headers=headers, timeout=3)
+        
         if res.status_code == 200:
             data = res.json()
             items = []
-            if isinstance(data, list): items = data
+            
+            # 리스트인지 딕셔너리인지 확인해서 아이템 추출
+            if isinstance(data, list):
+                items = data
             elif isinstance(data, dict):
                 items = data.get('result', {}).get('items') or data.get('items') or []
             
+            # 최신 배당금 찾기
             if items:
-                first = items[0]
-                for k in ["dividend", "dividendAmount", "amount"]:
-                    if k in first and first[k]:
-                        one_time = float(str(first[k]).replace(',', ''))
-                        # 1회분을 연배당으로 환산해서 반환
-                        return one_time * 12 
-    except:
-        pass # 1단계 실패 시 조용히 2단계로 이동
-
-    # ---------------------------------------------------------
-    # [2단계] TTM API 찌르기 (1년치 합계) - 여기가 후속 로직!
-    # ---------------------------------------------------------
-    try:
-        url_ttm = f"https://m.stock.naver.com/api/stock/{code}/etfAnalysis"
-        res = requests.get(url_ttm, headers=headers, timeout=3)
-        if res.status_code == 200:
-            data = res.json()
-            # TTM 데이터 파싱
-            div_data = data.get("dividend", {}) or data.get("result", {}).get("dividend", {})
-            ttm_amt = div_data.get("dividendPerShareTtm")
-            
-            if ttm_amt:
-                # TTM은 이미 연간 합계이므로 그대로 반환
-                return float(str(ttm_amt).replace(',', ''))
-    except:
-        pass # 2단계도 실패하면 None 반환
-
+                first_item = items[0]
+                # 가능한 키 값들을 모두 검사 (dividend, dividendAmount 등)
+                for key in ["dividend", "dividendAmount", "amount", "payAmount"]:
+                    if key in first_item and first_item[key]:
+                        return float(str(first_item[key]).replace(',', ''))
+    except Exception as e:
+        pass # 실패하면 조용히 넘어감
     return None
+
 
 def classify_asset(row):
     """종목명과 코드를 분석하여 자산의 유형을 정밀 분류합니다."""
@@ -474,54 +450,74 @@ def load_and_process_data(df_raw, is_admin=False):
             if not price: price = 0
 
             # ==========================================================
-            # [수정] 3중 철벽 방어 로직 (Live -> Cache -> Manual)
+            # [INSERT HERE] 여기부터 아래 내용을 복사해서 붙여넣으세요!
             # ==========================================================
             
-            # 0. 변수 초기화
-            auto_annual_div = None  # 이번에 가져올 실시간 값
-            saved_auto_div = float(row.get('연배당금_크롤링_auto', 0)) # CSV에 저장된 지난번 값
-            
-            # 1. [1차/2차 방어] 실시간 크롤링 시도 (History -> TTM)
+            # 1. 최신 배당금 자동 크롤링 (국내 종목만)
             if category == '국내':
-                auto_annual_div = fetch_latest_dividend_amount(code)
-                
-                if auto_annual_div:
-                    # 성공! -> CSV 업데이트 준비
-                    row['연배당금_크롤링_auto'] = auto_annual_div
+                auto_amt = fetch_latest_dividend_amount(code)
+                if auto_amt:
+                    # 1회분 * 12 = 연배당금 계산
+                    row['연배당금_크롤링_auto'] = auto_amt * 12
+                    
+                    # 실시간 배당률 계산 (현재가가 있을 때만)
                     if price > 0:
-                        row['연배당률_크롤링'] = round((auto_annual_div / price) * 100, 2)
-                else:
-                    # 실패! -> [3차 방어] CSV에 있던 지난번 값 재사용 (캐시)
-                    if saved_auto_div > 0:
-                        auto_annual_div = saved_auto_div
-                        # (선택) 로그에 남기기: print(f"{code} API 실패, 캐시 데이터 사용")
-
-            # 2. 최종 배당금 결정 (우선순위: 실시간/캐시 > 과거크롤링 > 수동)
+                        auto_yield = (auto_amt * 12 / price) * 100
+                        row['연배당률_크롤링'] = round(auto_yield, 2)
+    
+            # 자동 크롤링 시도
+            auto_div_amt = None
+            try:
+                latest_one = fetch_latest_dividend_amount(code)  # 1회 지급 금액
+                if latest_one:
+                    auto_div_amt = float(latest_one) * 12  # 연환산
+                    row['연배당금_크롤링_auto'] = auto_div_amt
+            except Exception as e:
+                logger.warning(f"Auto dividend fetch failed for {code}: {e}")
+    
+            # 기존 값
+            # ------------------------------------------------------------------
+            # [수정] 아래 로직으로 교체하세요 (자동 데이터 1순위 적용)
+            # ------------------------------------------------------------------
+            
+            # 1. 사용할 변수들 정리
             manual_div = float(row.get('연배당금', 0))
             orig_crawled = float(row.get('연배당금_크롤링', 0) or 0)
             months = int(row.get('신규상장개월수', 0))
 
-            if auto_annual_div and auto_annual_div > 0:
-                # 깡패 모드: (방금 가져왔든, 저장된 거든) 자동 데이터가 있으면 씀
-                target_div = auto_annual_div
+            # 2. target_div 결정 (핵심: 자동 데이터가 있으면 무조건 1순위!)
+            if auto_div_amt and auto_div_amt > 0:
+                # 깡패 모드: 방금 낚아온 싱싱한 자동 데이터가 있으면 무조건 씀
+                target_div = auto_div_amt
+                # 이름에 별표 붙일지 말지만 결정
                 display_name = f"{name} ⭐" if 0 < months < 12 else name
                 
             else:
-                # 쭈구리 모드: 3차 방어까지 다 뚫림 -> 기존 수동/구버전 데이터 사용
+                # 쭈구리 모드: 자동 데이터 실패 시 기존 방식(수동/과거값) 사용
                 if 0 < months < 12:
+                    # 신규 상장: 수동 입력 우선
                     target_div = (manual_div / months * 12) if manual_div > 0 else (orig_crawled or 0)
                     display_name = f"{name} ⭐"
                 else:
+                    # 일반 종목: 과거 크롤링 값 우선
                     target_div = orig_crawled if orig_crawled > 0 else manual_div
                     display_name = name
-            # ==========================================================
-            
+            # ------------------------------------------------------------------
+    
             # 연배당률 계산
             yield_val = (target_div / price * 100) if price > 0 else 0
-
+    
+            # 자동 연배당률 기록
+            if auto_div_amt and price > 0:
+                try:
+                    auto_yield = (auto_div_amt / price) * 100
+                    row['연배당률_크롤링'] = round(auto_yield, 4)
+                except:
+                    row['연배당률_크롤링'] = None
+    
             if is_admin and (yield_val < 2.0 or yield_val > 25.0):
                 display_name = f"🚫 {display_name}"
-
+    
             price_fmt = f"{int(price):,}원" if category == '국내' else f"${price:.2f}"
             
             csv_type = str(row.get('유형', '-'))
@@ -531,7 +527,7 @@ def load_and_process_data(df_raw, is_admin=False):
             if '채권' in auto_asset_type: final_type = '채권'
             elif '커버드콜' in auto_asset_type: final_type = '커버드콜'
             elif '리츠' in auto_asset_type: final_type = '리츠'
-
+    
             return idx, {
                 '코드': code,
                 '종목명': display_name,
@@ -594,6 +590,8 @@ def load_stock_data_from_csv():
                 df['연배당률_크롤링'] = 0.0
             # <<< 여기에 새 컬럼 기본값 채우기 끝 >>>
 
+   
+    
             return df
         except Exception:
             time.sleep(0.5) # 잠겨있으면 0.5초 대기
@@ -623,64 +621,102 @@ def save_to_github(df):
 
 def fetch_dividend_yield_hybrid(code, category):
     """
-    국내: Playwright 최신배당금 캡처 -> x12 / 한투 실시간 주가 계산
-    해외: 야후 파이낸스 연배당률 유지
+    국내: requests로 최신배당금 캡처 -> x12 / 한투 실시간 주가 계산
+    해외: 기존 야후 로직 유지
+    변경 요지: Playwright 대신 requests로 dividend/history 직접 호출하여 안정성 확보
     """
     code = str(code).strip()
     
     if category == '국내':
         # (A) 한투 API로 '실시간 주가' 확보
         current_price = 0
+        resp = None
         try:
-            broker = mojito.KoreaInvestment(api_key=st.secrets["kis"]["app_key"], api_secret=st.secrets["kis"]["app_secret"], acc_no=st.secrets["kis"]["acc_no"], mock=True)
+            broker = mojito.KoreaInvestment(
+                api_key=st.secrets["kis"]["app_key"],
+                api_secret=st.secrets["kis"]["app_secret"],
+                acc_no=st.secrets["kis"]["acc_no"],
+                mock=True
+            )
             resp = broker.fetch_price(code)
             if resp and 'output' in resp:
-                current_price = float(resp['output'].get('stck_prpr', 0))
-        except: pass
+                current_price = float(resp['output'].get('stck_prpr', 0) or 0)
+        except Exception:
+            current_price = 0
         
-        if current_price == 0: current_price = _fetch_naver_price(code) # 백업 시도
+        if current_price == 0:
+            try:
+                current_price = _fetch_naver_price(code) or 0
+            except:
+                current_price = 0
         
-        # (B) Playwright로 네이버 API 가로채기 (최신 배당금 1건)
+        # (B) requests로 네이버 API 직접 호출 (Playwright 제거)
         latest_div = 0
         try:
-            with sync_playwright() as p:
-                browser = p.chromium.launch(headless=True)
-                page = browser.new_page()
-                api_url = f"https://m.stock.naver.com/api/etf/{code}/dividend/history"
-                page.goto(f"https://m.stock.naver.com/etf/{code}/dividend", wait_until="networkidle")
-                content = page.evaluate(f"fetch('{api_url}').then(res => res.json())")
-                
-                if content and 'result' in content and 'items' in content['result']:
-                    items = content['result']['items']
-                    if items: latest_div = float(str(items[0].get('dividend', 0)).replace(',', ''))
-                browser.close()
+            headers = {"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)", "Referer": f"https://m.stock.naver.com/domestic/stock/{code}/analysis"}
+            hist_url = f"https://m.stock.naver.com/api/etf/{code}/dividend/history?page=1&pageSize=200&firstPageSize=200"
+            r = requests.get(hist_url, headers=headers, timeout=6)
+            if r.status_code == 200:
+                j = r.json()
+                # 응답 구조: dict with 'result' -> list OR direct list
+                items = []
+                if isinstance(j, dict):
+                    items = j.get("result") or j.get("items") or j.get("data") or []
+                    # result가 dict 안에 items로 들어있는 경우 보정
+                    if isinstance(items, dict):
+                        items = items.get("items") or []
+                elif isinstance(j, list):
+                    items = j
+                # items가 리스트이면 첫 항목에서 금액 추출
+                if isinstance(items, list) and items:
+                    first = items[0]
+                    # 여러 후보 키에 대응
+                    amt = None
+                    for k in ("dividendAmount","dividend","distribution","amount","value","payAmount"):
+                        if isinstance(first, dict) and k in first and first[k] is not None:
+                            amt = first[k]; break
+                    if isinstance(amt, str):
+                        try: amt = float(amt.replace(',','').strip())
+                        except: amt = None
+                    if amt:
+                        latest_div = float(amt)
         except Exception as e:
-            logger.error(f"❌ Playwright 실패: {e}")
+            logger.warning(f"Dividend history request failed ({code}): {e}")
+            latest_div = 0
 
         # (C) 최종 실시간 배당률 계산
         if current_price > 0 and latest_div > 0:
-            yield_val = (latest_div * 12) / current_price * 100
-            return round(yield_val, 2), f"✅ 실시간({int(latest_div)}원)"
+            try:
+                yield_val = (latest_div * 12) / current_price * 100
+                return round(yield_val, 2), f"✅ 실시간({int(latest_div)}원)"
+            except Exception:
+                pass
         
-        # [백업] 실패 시 한투 전산 배당률이라도 반환
+        # (D) 백업: 한투 전산 배당률 반환 시도
         try:
             if resp and 'output' in resp:
                 backup = resp['output'].get('hts_dvsd_rate')
-                if backup and backup != '-': return float(backup), "✅ 한투API(백업)"
-        except: pass
+                if backup and backup != '-':
+                    return float(backup), "✅ 한투API(백업)"
+        except Exception:
+            pass
+
+        # (E) 최종 실패
         return 0.0, "⚠️ 조회 실패"
 
     else:
-        # [해외] 야후 파이낸스 로직 (기존 유지)
+        # 해외: 기존 야후 파이낸스 로직 유지
         try:
             stock = yf.Ticker(code)
             dy = stock.info.get('dividendYield')
             if dy:
                 calc_val = dy * 100
-                if calc_val > 50: calc_val = dy # 뻥튀기 보정
+                if calc_val > 50: calc_val = dy
                 return round(calc_val, 2), "✅ 야후(Info)"
             return 0.0, "⚠️ 데이터 없음"
-        except: return 0.0, "❌ 해외 에러"
+        except Exception:
+            return 0.0, "❌ 해외 에러"
+
 
 def update_dividend_rolling(current_history_str, new_dividend_amount):
     """배당금 기록 갱신"""
