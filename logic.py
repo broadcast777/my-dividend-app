@@ -424,14 +424,27 @@ def load_and_process_data(df_raw, is_admin=False):
                 # 문자가 섞여있을 경우 강제 변환 후 NaN은 0으로
                 df_raw[col] = pd.to_numeric(df_raw[col], errors='coerce').fillna(0)
 
+        #
+        # [수정된 코드] 종목코드 클리닝 로직 (분류에 따라 다르게 적용)
         if '종목코드' in df_raw.columns:
-            def clean_ticker(x):
-                s = str(x).split('.')[0].strip()
-                if s.isdigit(): return s.zfill(6) 
-                return s.upper() 
-            
-            df_raw['종목코드'] = df_raw['종목코드'].apply(clean_ticker)
+            def clean_ticker_smart(row):
+                # 1. 값 가져오기
+                raw_code = str(row.get('종목코드', '')).split('.')[0].strip()
+                category = str(row.get('분류', '국내')).strip()  # 분류 컬럼이 없으면 '국내'로 가정
 
+                # 2. [해외]일 때만 앞의 0 강제 제거 (예: 00JEPI -> JEPI)
+                if category == '해외':
+                    return raw_code.lstrip('0').upper()
+
+                # 3. [국내]일 때 숫자면 6자리 채우기 (예: 5930 -> 005930)
+                if raw_code.isdigit():
+                    return raw_code.zfill(6)
+
+                return raw_code.upper()
+
+            # axis=1을 써서 행 단위로 처리 (분류 컬럼을 참조하기 위함)
+            df_raw['종목코드'] = df_raw.apply(clean_ticker_smart, axis=1)
+            
         if '배당락일' in df_raw.columns:
             df_raw['배당락일'] = df_raw['배당락일'].astype(str).replace(['nan', 'None', 'nan '], '-')
 
