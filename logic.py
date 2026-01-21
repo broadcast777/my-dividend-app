@@ -337,6 +337,42 @@ def get_safe_price(broker, code, category):
         if price is not None: return price
         time.sleep(0.3)
     return None
+# [INSERT] 이 함수를 get_safe_price 함수와 classify_asset 함수 사이에 넣으세요.
+
+def fetch_latest_dividend_amount(code):
+    """
+    [NEW] CSV 자동 갱신용: 최신 배당금 1회분만 쏙 뽑아오는 함수 (Requests 방식)
+    """
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)", 
+            "Referer": f"https://m.stock.naver.com/domestic/stock/{code}/analysis"
+        }
+        # 배당 히스토리 API 호출
+        url = f"https://m.stock.naver.com/api/etf/{code}/dividend/history?page=1&pageSize=20"
+        res = requests.get(url, headers=headers, timeout=3)
+        
+        if res.status_code == 200:
+            data = res.json()
+            items = []
+            
+            # 리스트인지 딕셔너리인지 확인해서 아이템 추출
+            if isinstance(data, list):
+                items = data
+            elif isinstance(data, dict):
+                items = data.get('result', {}).get('items') or data.get('items') or []
+            
+            # 최신 배당금 찾기
+            if items:
+                first_item = items[0]
+                # 가능한 키 값들을 모두 검사 (dividend, dividendAmount 등)
+                for key in ["dividend", "dividendAmount", "amount", "payAmount"]:
+                    if key in first_item and first_item[key]:
+                        return float(str(first_item[key]).replace(',', ''))
+    except Exception as e:
+        pass # 실패하면 조용히 넘어감
+    return None
+
 
 def classify_asset(row):
     """종목명과 코드를 분석하여 자산의 유형을 정밀 분류합니다."""
@@ -412,6 +448,22 @@ def load_and_process_data(df_raw, is_admin=False):
             # 가격 조회
             price = get_safe_price(broker, code, category)
             if not price: price = 0
+
+            # ==========================================================
+            # [INSERT HERE] 여기부터 아래 내용을 복사해서 붙여넣으세요!
+            # ==========================================================
+            
+            # 1. 최신 배당금 자동 크롤링 (국내 종목만)
+            if category == '국내':
+                auto_amt = fetch_latest_dividend_amount(code)
+                if auto_amt:
+                    # 1회분 * 12 = 연배당금 계산
+                    row['연배당금_크롤링_auto'] = auto_amt * 12
+                    
+                    # 실시간 배당률 계산 (현재가가 있을 때만)
+                    if price > 0:
+                        auto_yield = (auto_amt * 12 / price) * 100
+                        row['연배당률_크롤링'] = round(auto_yield, 2)
     
             # 자동 크롤링 시도
             auto_div_amt = None
