@@ -403,62 +403,86 @@ def load_and_process_data(df_raw, is_admin=False):
     
     # 3. 병렬 처리 작업자
     def process_row(idx, row):
+    try:
+        code = str(row.get('종목코드', '')).strip()
+        name = str(row.get('종목명', '')).strip()
+        category = str(row.get('분류', '국내')).strip()
+        
+        # 가격 조회
+        price = get_safe_price(broker, code, category)
+        if not price: price = 0
+
+        # 자동 크롤링 시도
+        auto_div_amt = None
         try:
-            code = str(row.get('종목코드', '')).strip()
-            name = str(row.get('종목명', '')).strip()
-            category = str(row.get('분류', '국내')).strip()
-            
-            # 가격 조회 (Safe Logic 적용)
-            price = get_safe_price(broker, code, category)
-            if not price: price = 0 
-
-            crawled_div = float(row.get('연배당금_크롤링', 0))
-            manual_div = float(row.get('연배당금', 0))        
-            months = int(row.get('신규상장개월수', 0))
-
-            # 신규 상장 종목 연환산
-            if 0 < months < 12:
-                target_div = (manual_div / months * 12) if manual_div > 0 else crawled_div
-                display_name = f"{name} ⭐"
-            else:
-                target_div = crawled_div if crawled_div > 0 else manual_div
-                display_name = name
-
-            yield_val = (target_div / price * 100) if price > 0 else 0
-
-            if is_admin and (yield_val < 2.0 or yield_val > 25.0): display_name = f"🚫 {display_name}"
-
-            price_fmt = f"{int(price):,}원" if category == '국내' else f"${price:.2f}"
-            
-            csv_type = str(row.get('유형', '-'))
-            auto_asset_type = classify_asset(row) 
-            
-            final_type = csv_type
-            if '채권' in auto_asset_type: final_type = '채권'
-            elif '커버드콜' in auto_asset_type: final_type = '커버드콜'
-            elif '리츠' in auto_asset_type: final_type = '리츠'
-
-            return idx, {
-                '코드': code, 
-                '종목명': display_name,
-                '블로그링크': str(row.get('블로그링크', '#')),
-                '금융링크': f"https://finance.naver.com/item/main.naver?code={code}" if category == '국내' else f"https://finance.yahoo.com/quote/{code}",
-                '현재가': price_fmt, 
-                '연배당률': yield_val,
-                '환구분': get_hedge_status(name, category),
-                '배당락일': str(row.get('배당락일', '-')), 
-                '분류': category,
-                '유형': final_type, 
-                '자산유형': auto_asset_type,
-                '캘린더링크': None, 
-                'pure_name': name.replace("🚫 ", "").replace(" (필터대상)", ""), 
-                '신규상장개월수': months,
-                '배당기록': str(row.get('배당기록', '')),
-                '검색라벨': str(row.get('검색라벨', f"[{code}] {display_name}"))
-            }
+            latest_one = fetch_latest_dividend_amount(code)  # 1회 지급 금액
+            if latest_one:
+                auto_div_amt = float(latest_one) * 12  # 연환산
+                row['연배당금_크롤링_auto'] = auto_div_amt
         except Exception as e:
-            logger.error(f"Row Processing Error ({idx}): {e}")
-            return idx, None
+            logger.warning(f"Auto dividend fetch failed for {code}: {e}")
+
+        # 기존 값
+        manual_div = float(row.get('연배당금', 0))
+        orig_crawled = float(row.get('연배당금_크롤링', 0) or 0)
+        months = int(row.get('신규상장개월수', 0))
+
+        # target_div 결정
+        if 0 < months < 12:
+            target_div = (manual_div / months * 12) if manual_div > 0 else (orig_crawled or auto_div_amt or 0)
+            display_name = f"{name} ⭐"
+        else:
+            target_div = orig_crawled if orig_crawled > 0 else (auto_div_amt or manual_div)
+            display_name = name
+
+        # 연배당률 계산
+        yield_val = (target_div / price * 100) if price > 0 else 0
+
+        # 자동 연배당률 기록
+        if auto_div_amt and price > 0:
+            try:
+                auto_yield = (auto_div_amt / price) * 100
+                row['연배당률_크롤링'] = round(auto_yield, 4)
+            except:
+                row['연배당률_크롤링'] = None
+
+        if is_admin and (yield_val < 2.0 or yield_val > 25.0):
+            display_name = f"🚫 {display_name}"
+
+        price_fmt = f"{int(price):,}원" if category == '국내' else f"${price:.2f}"
+        
+        csv_type = str(row.get('유형', '-'))
+        auto_asset_type = classify_asset(row) 
+        
+        final_type = csv_type
+        if '채권' in auto_asset_type: final_type = '채권'
+        elif '커버드콜' in auto_asset_type: final_type = '커버드콜'
+        elif '리츠' in auto_asset_type: final_type = '리츠'
+
+        return idx, {
+            '코드': code,
+            '종목명': display_name,
+            '블로그링크': str(row.get('블로그링크', '#')),
+            '금융링크': f"https://finance.naver.com/item/main.naver?code={code}" if category == '국내' else f"https://finance.yahoo.com/quote/{code}",
+            '현재가': price_fmt,
+            '연배당률': yield_val,
+            '연배당금_크롤링_auto': row.get('연배당금_크롤링_auto', 0),
+            '연배당률_크롤링': row.get('연배당률_크롤링', None),
+            '환구분': get_hedge_status(name, category),
+            '배당락일': str(row.get('배당락일', '-')),
+            '분류': category,
+            '유형': final_type,
+            '자산유형': auto_asset_type,
+            '캘린더링크': None,
+            'pure_name': name.replace("🚫 ", "").replace(" (필터대상)", ""),
+            '신규상장개월수': months,
+            '배당기록': str(row.get('배당기록', '')),
+            '검색라벨': str(row.get('검색라벨', f"[{code}] {display_name}"))
+        }
+    except Exception as e:
+        logger.error(f"Row Processing Error ({idx}): {e}")
+        return idx, None
+
 
     # 스레드 풀 실행 (yfinance 충돌 완화를 위해 워커 수 조절 가능)
     with ThreadPoolExecutor(max_workers=10) as executor:
