@@ -522,7 +522,7 @@ def load_stock_data_from_csv():
                 df['연배당률_크롤링'] = 0.0
             # <<< 여기에 새 컬럼 기본값 채우기 끝 >>>
 
-            return df
+   
     
             return df
         except Exception:
