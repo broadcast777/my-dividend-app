@@ -21,7 +21,7 @@ import json
 from github import Github
 from logger import logger
 import sqlite3  # DB 에러 처리를 위해 추가
-from playwright.sync_api import sync_playwright
+
 
 # [코랩 검증] 데이터 추출용 키 후보
 DATE_KEYS = ["exDividendAt","localDate","exDate","date","dateTime","payDate","recordDate"]
