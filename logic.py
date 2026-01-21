@@ -21,6 +21,7 @@ import json
 from github import Github
 from logger import logger
 import sqlite3  # DB 에러 처리를 위해 추가
+from playwright.sync_api import sync_playwright
 
 # -----------------------------------------------------------
 # [SECTION 1] 날짜 및 스케줄링 헬퍼 (공통 도구)
@@ -263,6 +264,19 @@ def get_google_cal_url(stock_name, date_str):
 # [SECTION 2] 시세 조회 및 유틸리티 함수
 # -----------------------------------------------------------
 
+def _fetch_naver_price(code):
+    """네이버 모바일 API로 현재가 조회 (한투 실패 시 백업용)"""
+    try:
+        headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://m.stock.naver.com/"}
+        url = f"https://api.stock.naver.com/etf/{code}/basic"
+        res = requests.get(url, headers=headers, timeout=2)
+        if res.status_code == 200:
+            data = res.json()
+            if 'result' in data and 'closePrice' in data['result']:
+                return int(data['result']['closePrice'])
+    except: pass
+    return 0
+    
 def _fetch_price_raw(broker, code, category):
     """
     [핵심 수정] DB Locked 에러 방지를 위한 안전 조회 로직
@@ -503,98 +517,65 @@ def save_to_github(df):
 # -----------------------------------------------------------
 
 def fetch_dividend_yield_hybrid(code, category):
+    """
+    국내: Playwright 최신배당금 캡처 -> x12 / 한투 실시간 주가 계산
+    해외: 야후 파이낸스 연배당률 유지
+    """
     code = str(code).strip()
     
-    # [국내 주식 조회 로직]
     if category == '국내':
+        # (A) 한투 API로 '실시간 주가' 확보
+        current_price = 0
         try:
-            broker = mojito.KoreaInvestment(
-                api_key=st.secrets["kis"]["app_key"],
-                api_secret=st.secrets["kis"]["app_secret"],
-                acc_no=st.secrets["kis"]["acc_no"],
-                mock=True 
-            )
+            broker = mojito.KoreaInvestment(api_key=st.secrets["kis"]["app_key"], api_secret=st.secrets["kis"]["app_secret"], acc_no=st.secrets["kis"]["acc_no"], mock=True)
             resp = broker.fetch_price(code)
             if resp and 'output' in resp:
-                yield_str = resp['output'].get('hts_dvsd_rate', '0.0')
-                if yield_str and yield_str != '-' and float(yield_str) > 0:
-                    return float(yield_str), "✅ 한투 API"
+                current_price = float(resp['output'].get('stck_prpr', 0))
         except: pass
-
+        
+        if current_price == 0: current_price = _fetch_naver_price(code) # 백업 시도
+        
+        # (B) Playwright로 네이버 API 가로채기 (최신 배당금 1건)
+        latest_div = 0
         try:
-            ticker_code = f"{code}.KS"
-            # yfinance 호출 시에도 sqlite 에러 방지
-            try:
-                stock = yf.Ticker(ticker_code)
-                dy = stock.info.get('dividendYield')
-                if dy and dy > 0: return round(dy * 100, 2), "✅ 야후(Info)"
-            except sqlite3.OperationalError:
-                pass # DB 잠금 시 스킵
-
-            # 네이버 크롤링
-            url = f"https://finance.naver.com/item/main.naver?code={code}"
-            headers = {'User-Agent': 'Mozilla/5.0'}
-            response = requests.get(url, headers=headers)
-            response.encoding = 'euc-kr' 
-            
-            # 테이블 파싱 시도
-            try:
-                dfs = pd.read_html(response.text)
-                for df in dfs:
-                    table_str = df.to_string()
-                    if "배당수익률" in table_str or "분배금수익률" in table_str:
-                        for col in df.columns:
-                            col_list = df[col].astype(str).tolist()
-                            for val in col_list:
-                                if "%" in val:
-                                    try:
-                                        num = float(val.replace("%", "").strip())
-                                        if 0 < num < 30: return num, "✅ 네이버(Table)"
-                                    except: pass
-            except: pass
-
-            if '_dvr' in response.text:
-                part = response.text.split('<em id="_dvr">')[1]
-                val = part.split('</em>')[0]
-                return float(val), "✅ 네이버(ID)"
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True)
+                page = browser.new_page()
+                api_url = f"https://m.stock.naver.com/api/etf/{code}/dividend/history"
+                page.goto(f"https://m.stock.naver.com/etf/{code}/dividend", wait_until="networkidle")
+                content = page.evaluate(f"fetch('{api_url}').then(res => res.json())")
+                
+                if content and 'result' in content and 'items' in content['result']:
+                    items = content['result']['items']
+                    if items: latest_div = float(str(items[0].get('dividend', 0)).replace(',', ''))
+                browser.close()
         except Exception as e:
-            return 0.0, f"❌ 네이버 에러: {str(e)}"
+            logger.error(f"❌ Playwright 실패: {e}")
 
-        return 0.0, "⚠️ 데이터 없음 (국내)"
+        # (C) 최종 실시간 배당률 계산
+        if current_price > 0 and latest_div > 0:
+            yield_val = (latest_div * 12) / current_price * 100
+            return round(yield_val, 2), f"✅ 실시간({int(latest_div)}원)"
+        
+        # [백업] 실패 시 한투 전산 배당률이라도 반환
+        try:
+            if resp and 'output' in resp:
+                backup = resp['output'].get('hts_dvsd_rate')
+                if backup and backup != '-': return float(backup), "✅ 한투API(백업)"
+        except: pass
+        return 0.0, "⚠️ 조회 실패"
 
-    # [해외 주식 조회 로직]
     else:
+        # [해외] 야후 파이낸스 로직 (기존 유지)
         try:
             stock = yf.Ticker(code)
-            try:
-                divs = stock.dividends
-                if not divs.empty:
-                    if divs.index.tz is not None:
-                        divs.index = divs.index.tz_localize(None)
-                    one_year_ago = pd.Timestamp.now() - pd.Timedelta(days=365)
-                    recent_divs = divs[divs.index >= one_year_ago]
-                    recent_total = recent_divs.sum()
-                    
-                    price = stock.fast_info.get('last_price')
-                    if not price or price <= 0:
-                        hist = stock.history(period="1d")
-                        if not hist.empty: price = hist['Close'].iloc[-1]
-                    
-                    if price and price > 0 and recent_total > 0:
-                        yield_cal = (recent_total / price) * 100
-                        if yield_cal > 50: yield_cal = yield_cal / 100
-                        if 0 < yield_cal < 50:
-                            return round(yield_cal, 2), f"✅ 야후(계산:${recent_total:.2f})"
-            except: pass 
-
             dy = stock.info.get('dividendYield')
-            if dy and dy > 0: 
-                calc_dy = dy * 100
-                if calc_dy > 50: calc_dy = dy 
-                return round(calc_dy, 2), "✅ 야후(Info)"
+            if dy:
+                calc_val = dy * 100
+                if calc_val > 50: calc_val = dy # 뻥튀기 보정
+                return round(calc_val, 2), "✅ 야후(Info)"
             return 0.0, "⚠️ 데이터 없음"
-        except Exception as e:
-            return 0.0, f"❌ 해외 에러: {str(e)}"
+        except: return 0.0, "❌ 해외 에러"
 
 def update_dividend_rolling(current_history_str, new_dividend_amount):
     """배당금 기록 갱신"""
