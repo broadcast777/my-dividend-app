@@ -224,12 +224,45 @@ def render_admin_tools(df_raw):
                 if st.button("🔍 배당률 조회", key="btn_auto_check", use_container_width=True):
                     with st.spinner("탐색 중..."):
                         y_val, src = logic.fetch_dividend_yield_hybrid(code, category)
-                        if y_val > 0:
+                
+                        # 화면 출력 (기존 동작 유지)
+                        if y_val and y_val > 0:
                             st.success(f"📈 {y_val}%")
                             st.caption(f"출처: {src}")
                         else:
                             st.error("실패")
                             st.caption(f"원인: {src}")
+                
+                        # --- 추가: 조회값을 df_raw에 저장 ---
+                        try:
+                            df_raw.loc[df_raw['종목코드'] == code, '연배당률_크롤링'] = float(y_val) if y_val else 0.0
+                        except Exception:
+                            df_raw.loc[df_raw['종목코드'] == code, '연배당률_크롤링'] = 0.0
+                
+                        # 국내면 src에서 단발 배당금(원) 파싱하여 연환산 저장
+                        if category == '국내':
+                            latest_div = None
+                            try:
+                                m = re.search(r'\(([\d,\.]+)원\)', str(src))
+                                if m:
+                                    latest_div = int(m.group(1).replace(',', '').split('.')[0])
+                            except Exception:
+                                latest_div = None
+                
+                            if latest_div:
+                                try:
+                                    df_raw.loc[df_raw['종목코드'] == code, '연배당금_크롤링_auto'] = float(latest_div) * 12
+                                    # 필요하면 참고용으로 연배당금_크롤링도 업데이트
+                                    # df_raw.loc[df_raw['종목코드'] == code, '연배당금_크롤링'] = float(latest_div) * 12
+                                except Exception:
+                                    logger.warning(f"돋보기 저장 실패: {code} / {latest_div}")
+                
+                        # 변경사항 세션 반영
+                        st.session_state.df_dirty = df_raw
+                        st.success("조회값을 저장했습니다. 깃허브에 덮어쓰기 전에 확인하세요.")
+
+
+            
             
             st.divider()
             st.caption("👇 배당금 업데이트 모드 선택")
@@ -312,27 +345,41 @@ def render_admin_tools(df_raw):
                 total_stocks = len(df_raw)
                 df_temp = df_raw.copy()
                 
-                for i, row in df_temp.iterrows():
-                    progress_bar.progress((i + 1) / total_stocks)
-                    status_text.text(f"검사 중: {row['종목명']}...")
-                    try: months = int(row.get('신규상장개월수', 0))
-                    except: months = 0
-                    if 0 < months < 12:
-                        skipped_count += 1
-                        continue
-                    
-                    code = str(row['종목코드']).strip()
-                    cat = str(row.get('분류', '국내')).strip()
-                    y_val, src = logic.fetch_dividend_yield_hybrid(code, cat) 
-                    
-                    if y_val > 0:
-                        df_temp.at[i, '연배당률_크롤링'] = y_val
-                        updated_count += 1
-                    else:
-                        fail_msg = f"{row['종목명']}({code}) - {src}"
-                        fail_list.append(fail_msg)
-                        logger.error(f"업데이트 실패: {fail_msg}")
-                    time.sleep(0.1)
+               
+                # 변경: 국내/해외 분기 처리 및 국내 단발금 파싱 후 연환산 저장
+                y_val, src = logic.fetch_dividend_yield_hybrid(code, cat)
+                
+                # 공통: 연배당률 저장 (해외/국내 공통)
+                if y_val and y_val > 0:
+                    df_temp.at[i, '연배당률_크롤링'] = float(y_val)
+                    updated_count += 1
+                else:
+                    fail_msg = f"{row['종목명']}({code}) - {src}"
+                    fail_list.append(fail_msg)
+                    logger.error(f"업데이트 실패: {fail_msg}")
+                
+                # 국내 전용: src에서 단발 배당금(원) 파싱 -> 연환산 저장
+                if cat == '국내':
+                    latest_div = None
+                    try:
+                        # src 예시: "✅ 실시간(94원)" 같은 형식에서 괄호 안 숫자 추출
+                        m = re.search(r'\(([\d,\.]+)원\)', str(src))
+                        if m:
+                            latest_div = int(m.group(1).replace(',', '').split('.')[0])
+                    except Exception:
+                        latest_div = None
+                
+                    if latest_div:
+                        try:
+                            df_temp.at[i, '연배당금_크롤링_auto'] = float(latest_div) * 12
+                            # 참고용으로 기존 연배당금_크롤링도 업데이트하려면 아래 주석 해제
+                            # df_temp.at[i, '연배당금_크롤링'] = float(latest_div) * 12
+                        except Exception:
+                            logger.warning(f"연환산 저장 실패: {code} / {latest_div}")
+                
+                # 해외는 연환산 금액을 계산/저장하지 않음 (간단/안전 옵션)
+                time.sleep(0.1)
+
                         
                 progress_bar.empty()
                 status_text.text("완료!")
