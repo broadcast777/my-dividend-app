@@ -478,8 +478,7 @@ def load_and_process_data(df_raw, is_admin=False):
 def load_stock_data_from_csv():
     import os
     file_path = "stocks.csv"
-    
-    # 🚨 [패치] 파일 접근 충돌 방지 (Retry Logic)
+
     for _ in range(3):
         try:
             if not os.path.exists(file_path):
@@ -489,9 +488,18 @@ def load_stock_data_from_csv():
                 for c in required_cols:
                     df_empty[c] = pd.Series(dtype='object' if c in ['종목코드','종목명','배당기록'] else 'float')
                 return df_empty
-            
-            df = pd.read_csv(file_path, dtype={'종목코드': str})
-            df.columns = df.columns.str.strip()
+
+            # encoding='utf-8-sig'로 BOM 제거 시도, 모든 컬럼을 우선 문자열로 읽음
+            df = pd.read_csv(file_path, dtype=str, encoding='utf-8-sig')
+            # 컬럼명 정규화: strip + BOM 제거 + 보이지 않는 문자 제거
+            def _normalize_col(c):
+                if c is None: return ""
+                s = str(c)
+                s = s.replace('\ufeff', '').strip()
+                # 추가로 제어문자 제거
+                s = "".join(ch for ch in s if ord(ch) >= 32)
+                return s
+            df.columns = [_normalize_col(c) for c in df.columns]
 
             # 필수 컬럼 보장: 없으면 기본값으로 생성
             if '연배당금_크롤링' not in df.columns:
@@ -503,29 +511,20 @@ def load_stock_data_from_csv():
             if '배당기록' not in df.columns:
                 df['배당기록'] = ""
             if '종목코드' not in df.columns:
+                # 인덱스를 코드로 사용하거나 빈 문자열로 채움
                 df['종목코드'] = df.index.astype(str).apply(lambda x: x.zfill(6) if x.isdigit() else x)
 
+            # 종목코드 컬럼도 문자열 정규화(공백 제거)
+            df['종목코드'] = df['종목코드'].astype(str).str.strip()
+
             return df
-        except Exception:
-            time.sleep(0.5) # 잠겨있으면 0.5초 대기
-    
+        except Exception as e:
+            logger.warning(f"CSV load attempt failed: {e}")
+            time.sleep(0.5)
+
     logger.error("CSV Load Failed after retries")
     return pd.DataFrame()
 
-def save_to_github(df):
-    try:
-        token = st.secrets["github"]["token"]
-        repo_name = st.secrets["github"]["repo_name"]
-        file_path = st.secrets["github"]["file_path"]
-        g = Github(token)
-        repo = g.get_repo(repo_name)
-        contents = repo.get_contents(file_path)
-        csv_data = df.to_csv(index=False).encode("utf-8")
-        repo.update_file(path=contents.path, message="🤖 데이터 자동 갱신", content=csv_data, sha=contents.sha)
-        return True, "✅ 깃허브 저장 성공!"
-    except Exception as e:
-        logger.error(f"Github Save Error: {e}")
-        return False, f"❌ 저장 실패: {str(e)}"
 
 
 # -----------------------------------------------------------
