@@ -336,59 +336,83 @@ def render_admin_tools(df_raw):
         st.write("") 
         with st.expander("⚡ 전체 종목 자동 업데이트 (신규 제외)"):
             st.caption("신규 상장 종목(⭐)과 배당률 2% 미만은 건너뜁니다.")
-            if st.button("전체 자동 갱신 시작"):
+            if st.button("전체 자동 갱신 시작", key="btn_full_update", use_container_width=True):
                 progress_bar = st.progress(0)
                 status_text = st.empty()
                 updated_count = 0
                 skipped_count = 0
                 fail_list = []
                 total_stocks = len(df_raw)
+                st.info(f"자동 갱신 시작 — 총 종목: {total_stocks}")
                 df_temp = df_raw.copy()
-                
-               
-                # 변경: 국내/해외 분기 처리 및 국내 단발금 파싱 후 연환산 저장
-                y_val, src = logic.fetch_dividend_yield_hybrid(code, cat)
-                
-                # 공통: 연배당률 저장 (해외/국내 공통)
-                if y_val and y_val > 0:
-                    df_temp.at[i, '연배당률_크롤링'] = float(y_val)
-                    updated_count += 1
-                else:
-                    fail_msg = f"{row['종목명']}({code}) - {src}"
-                    fail_list.append(fail_msg)
-                    logger.error(f"업데이트 실패: {fail_msg}")
-                
-                # 국내 전용: src에서 단발 배당금(원) 파싱 -> 연환산 저장
-                if cat == '국내':
-                    latest_div = None
-                    try:
-                        # src 예시: "✅ 실시간(94원)" 같은 형식에서 괄호 안 숫자 추출
-                        m = re.search(r'\(([\d,\.]+)원\)', str(src))
-                        if m:
-                            latest_div = int(m.group(1).replace(',', '').split('.')[0])
-                    except Exception:
-                        latest_div = None
-                
-                    if latest_div:
+            
+                try:
+                    if total_stocks == 0:
+                        st.warning("갱신할 종목이 없습니다. CSV 로드 상태를 확인하세요.")
+                    for i, row in df_temp.iterrows():
+                        progress_bar.progress((i + 1) / max(1, total_stocks))
+                        status_text.text(f"검사 중: {row.get('종목명','(이름없음)')} ({i+1}/{total_stocks})")
+            
                         try:
-                            df_temp.at[i, '연배당금_크롤링_auto'] = float(latest_div) * 12
-                            # 참고용으로 기존 연배당금_크롤링도 업데이트하려면 아래 주석 해제
-                            # df_temp.at[i, '연배당금_크롤링'] = float(latest_div) * 12
-                        except Exception:
-                            logger.warning(f"연환산 저장 실패: {code} / {latest_div}")
-                
-                # 해외는 연환산 금액을 계산/저장하지 않음 (간단/안전 옵션)
-                time.sleep(0.1)
+                            months = int(row.get('신규상장개월수', 0))
+                        except:
+                            months = 0
+                        if 0 < months < 12:
+                            skipped_count += 1
+                            continue
+            
+                        # 반드시 먼저 정의
+                        code = str(row.get('종목코드', '')).strip()
+                        cat = str(row.get('분류', '국내')).strip()
+            
+                        # 안전한 fetch 호출
+                        try:
+                            y_val, src = logic.fetch_dividend_yield_hybrid(code, cat)
+                        except Exception as e_fetch:
+                            logger.exception(f"fetch_dividend_yield_hybrid 호출 중 예외: {code}, {cat}")
+                            fail_list.append(f"{row.get('종목명','?')}({code}) - fetch error: {type(e_fetch).__name__}: {e_fetch}")
+                            continue
+            
+                        # 공통: 연배당률 저장
+                        if y_val and y_val > 0:
+                            try:
+                                df_temp.at[i, '연배당률_크롤링'] = float(y_val)
+                            except Exception:
+                                df_temp.at[i, '연배당률_크롤링'] = y_val
+                            updated_count += 1
+                        else:
+                            fail_msg = f"{row.get('종목명')}({code}) - {src}"
+                            fail_list.append(fail_msg)
+                            logger.error(f"업데이트 실패: {fail_msg}")
+            
+                        # 국내 전용: src에서 단발 배당금(원) 파싱 -> 연환산 저장
+                        if cat == '국내':
+                            try:
+                                m = re.search(r'\(([\d,\,\.]+)원\)', str(src))
+                                if m:
+                                    latest_div = int(m.group(1).replace(',', '').split('.')[0])
+                                    df_temp.at[i, '연배당금_크롤링_auto'] = float(latest_div) * 12
+                            except Exception as e_parse:
+                                logger.warning(f"단발금 파싱 실패 {code}: {e_parse}")
+            
+                        # 해외는 연환산 금액을 계산/저장하지 않음 (간단/안전 옵션)
+                        time.sleep(0.05)
+            
+                except Exception as e:
+                    st.error(f"자동 갱신 중 예외 발생: {type(e).__name__}: {e}")
+                    logger.exception("자동 갱신 루프 전체 예외")
+            
+                finally:
+                    progress_bar.empty()
+                    status_text.text("완료!")
+                    st.success(f"✅ {updated_count}개 갱신 성공 / 🛡️ {skipped_count}개 보호됨")
+                    if fail_list:
+                        st.error(f"🚨 {len(fail_list)}개 업데이트 실패")
+                        with st.expander("🔍 실패 원인 명단 보기"):
+                            for f in fail_list:
+                                st.write(f"- {f}")
+                    st.session_state.df_dirty = df_temp
 
-                        
-                progress_bar.empty()
-                status_text.text("완료!")
-                st.success(f"✅ {updated_count}개 갱신 성공 / 🛡️ {skipped_count}개 보호됨")
-                if fail_list:
-                    st.error(f"🚨 {len(fail_list)}개 업데이트 실패")
-                    with st.expander("🔍 실패 원인 명단 보기"):
-                        for f in fail_list: st.write(f"- {f}")
-                st.session_state.df_dirty = df_temp
 
         st.markdown("---")
         st.info("💡 위에서 내용을 충분히 검토하셨나요?")
