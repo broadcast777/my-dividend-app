@@ -14,6 +14,7 @@ from streamlit.runtime.scriptrunner import get_script_run_ctx
 from logger import logger
 from analytics import inject_ga
 import streamlit.components.v1 as components
+import re
 
 # [필수] 날짜 및 URL 라이브러리
 from datetime import datetime, timedelta
@@ -301,7 +302,7 @@ def render_admin_tools(df_raw):
                 # 1. 만약 "10,000원" 같은 문자열이면 -> 숫자 10000으로 변환
                 if isinstance(current_price, str):
                     try:
-                        import re
+                        
                         # 숫자와 점(.)만 남기고 다 지움
                         clean_str = re.sub(r'[^0-9.]', '', current_price)
                         current_price = float(clean_str) if clean_str else 0
