@@ -223,11 +223,9 @@ def render_admin_tools(df_raw):
             with col_btn:
                 if st.button("🔍 배당률 조회", key="btn_auto_check", use_container_width=True):
                     with st.spinner("탐색 중..."):
-                        # [수정] 3개 값 받기
-                        y_val, amt, src = logic.fetch_dividend_yield_hybrid(code, category)
+                        y_val, src = logic.fetch_dividend_yield_hybrid(code, category)
                         if y_val > 0:
                             st.success(f"📈 {y_val}%")
-                            st.caption(f"💰 연간 {int(amt):,}원")
                             st.caption(f"출처: {src}")
                         else:
                             st.error("실패")
@@ -252,36 +250,49 @@ def render_admin_tools(df_raw):
                     df_raw.loc[df_raw['종목코드'] == code, '연배당률'] = new_yield
                     df_raw.loc[df_raw['종목코드'] == code, '연배당률_크롤링'] = new_yield
                     st.success(f"✅ 1개월 추가 완료 ({new_total}원 / {new_yield}%)")
-                st.session_state.df_dirty = df_raw.copy()
-            
+                st.session_state.df_dirty = df_raw
+            ##
             if col_btn2.button("⚡ 1년치 강제 적용", type="primary", use_container_width=True):
                 new_total = new_div * 12
                 new_hist = "|".join([str(new_div)] * 12)
                 
+                # CSV 데이터 갱신 (수동 입력 최우선)
                 df_raw.loc[df_raw['종목코드'] == code, '배당기록'] = new_hist
                 df_raw.loc[df_raw['종목코드'] == code, '연배당금'] = new_total
                 
+                # -------------------------------------------------------------
+                # [수정] 현재가 숫자 변환 로직 (에러 해결 핵심!)
+                # -------------------------------------------------------------
                 current_price = row.get('현재가', 0)
+                
+                # 1. 만약 "10,000원" 같은 문자열이면 -> 숫자 10000으로 변환
                 if isinstance(current_price, str):
                     try:
                         import re
+                        # 숫자와 점(.)만 남기고 다 지움
                         clean_str = re.sub(r'[^0-9.]', '', current_price)
                         current_price = float(clean_str) if clean_str else 0
-                    except: current_price = 0
+                    except:
+                        current_price = 0
                 
+                # 2. 그래도 없으면(0이면) API로 다시 조회
                 if not current_price or current_price == 0:
                     current_price = logic.get_safe_price(st.session_state.get('broker'), code, category)
                 
+                # 3. 배당률 계산 및 저장
                 if current_price and current_price > 0:
                     new_yield = round((new_total / current_price) * 100, 2)
                     df_raw.loc[df_raw['종목코드'] == code, '연배당률'] = new_yield
+                    # 크롤링 컬럼은 참고용으로 업데이트 (선택 사항)
                     df_raw.loc[df_raw['종목코드'] == code, '연배당금_크롤링'] = new_total 
                     df_raw.loc[df_raw['종목코드'] == code, '연배당률_크롤링'] = new_yield 
+                    
                     st.success(f"⚡ 1년치 강제 적용 완료! (연 {int(new_total):,}원 / {new_yield}%)")
                 else:
                     st.warning("⚠️ 현재가를 가져오지 못해 배당률은 계산되지 않았습니다. (배당금은 저장됨)")
                 
-                st.session_state.df_dirty = df_raw.copy()
+                # 변경사항 즉시 반영 트리거
+                st.session_state.df_dirty = df_raw
 
         st.markdown("---")
         st.subheader("💾 데이터 저장 및 백업")
@@ -312,19 +323,10 @@ def render_admin_tools(df_raw):
                     
                     code = str(row['종목코드']).strip()
                     cat = str(row.get('분류', '국내')).strip()
-                    
-                    # [수정] 3개 값 받기
-                    y_val, amt, src = logic.fetch_dividend_yield_hybrid(code, cat) 
+                    y_val, src = logic.fetch_dividend_yield_hybrid(code, cat) 
                     
                     if y_val > 0:
-                        # 국내/해외 저장 로직 분리
-                        if cat == '해외':
-                            df_temp.at[i, '연배당률_크롤링'] = y_val
-                            if amt > 0: df_temp.at[i, '연배당금_크롤링_auto'] = amt
-                        else:
-                            if amt > 0: df_temp.at[i, '연배당금_크롤링_auto'] = amt
-                            df_temp.at[i, '연배당률_크롤링'] = y_val
-                        
+                        df_temp.at[i, '연배당률_크롤링'] = y_val
                         updated_count += 1
                     else:
                         fail_msg = f"{row['종목명']}({code}) - {src}"
@@ -339,7 +341,7 @@ def render_admin_tools(df_raw):
                     st.error(f"🚨 {len(fail_list)}개 업데이트 실패")
                     with st.expander("🔍 실패 원인 명단 보기"):
                         for f in fail_list: st.write(f"- {f}")
-                st.session_state.df_dirty = df_temp.copy()
+                st.session_state.df_dirty = df_temp
 
         st.markdown("---")
         st.info("💡 위에서 내용을 충분히 검토하셨나요?")
@@ -350,11 +352,6 @@ def render_admin_tools(df_raw):
                 with st.spinner("서버에 업로드 중..."):
                     target_df = st.session_state.get('df_dirty', df_raw)
                     success, msg = logic.save_to_github(target_df)
-                    
-                    # [로컬 저장]
-                    try: target_df.to_csv("stocks.csv", index=False, encoding='utf-8')
-                    except: pass
-
                     if success:
                         st.success(msg)
                         logger.info("💾 관리자가 깃허브 데이터 업데이트 완료")
