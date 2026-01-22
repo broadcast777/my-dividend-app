@@ -422,6 +422,27 @@ def render_admin_tools(df_raw):
         if confirm_save:
             if st.button("🚀 깃허브에 영구 저장 (Commit)", type="primary", use_container_width=True):
                 with st.spinner("서버에 업로드 중..."):
+                    # --- 즉시 확인용 진단 코드 시작 ---
+                import importlib, inspect, sys
+                try:
+                    # 모듈 파일 위치와 함수 존재 여부 출력 (사이드바에 표시)
+                    st.sidebar.write("DEBUG logic module file:", getattr(logic, "__file__", None))
+                    st.sidebar.write("DEBUG has save_to_github:", hasattr(logic, "save_to_github"))
+                    if hasattr(logic, "save_to_github"):
+                        try:
+                            st.sidebar.write("DEBUG save_to_github source:", inspect.getsourcefile(logic.save_to_github))
+                        except Exception as _:
+                            st.sidebar.write("DEBUG save_to_github source: (unavailable)")
+                    st.sidebar.write("DEBUG sys.path head:", sys.path[:5])
+                
+                    # 강제 재로딩 시도(개발용)
+                    importlib.reload(logic)
+                    st.sidebar.write("DEBUG after reload has save_to_github:", hasattr(logic, "save_to_github"))
+                except Exception as e:
+                    logger.exception(f"render_admin_tools debug failed: {e}")
+                    st.sidebar.write("DEBUG: 모듈 진단 중 예외 발생. 로그 확인 필요.")
+                # --- 즉시 확인용 진단 코드 끝 ---
+
                     target_df = st.session_state.get('df_dirty', df_raw)
                     success, msg = logic.save_to_github(target_df)
                     if success:
