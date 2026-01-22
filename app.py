@@ -223,6 +223,7 @@ def render_admin_tools(df_raw):
             with col_btn:
                 if st.button("🔍 배당률 조회", key="btn_auto_check", use_container_width=True):
                     with st.spinner("탐색 중..."):
+                        # [수정] 3개 값 받기
                         y_val, amt, src = logic.fetch_dividend_yield_hybrid(code, category)
                         if y_val > 0:
                             st.success(f"📈 {y_val}%")
@@ -312,11 +313,11 @@ def render_admin_tools(df_raw):
                     code = str(row['종목코드']).strip()
                     cat = str(row.get('분류', '국내')).strip()
                     
-                    # 로직에서 3개 값을 받아옵니다
+                    # [수정] 3개 값 받기
                     y_val, amt, src = logic.fetch_dividend_yield_hybrid(code, cat) 
                     
                     if y_val > 0:
-                        # [핵심] 국내/해외 저장 방식 분리
+                        # 국내/해외 저장 로직 분리
                         if cat == '해외':
                             df_temp.at[i, '연배당률_크롤링'] = y_val
                             if amt > 0: df_temp.at[i, '연배당금_크롤링_auto'] = amt
@@ -350,7 +351,7 @@ def render_admin_tools(df_raw):
                     target_df = st.session_state.get('df_dirty', df_raw)
                     success, msg = logic.save_to_github(target_df)
                     
-                    # [로컬 저장 추가] 내 컴퓨터의 stocks.csv도 강제 업데이트
+                    # [로컬 저장]
                     try: target_df.to_csv("stocks.csv", index=False, encoding='utf-8')
                     except: pass
 
