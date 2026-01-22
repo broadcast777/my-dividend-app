@@ -366,23 +366,23 @@ def load_and_process_data(df_raw, is_admin=False):
 
     # 1. 데이터 전처리 (결측치 방어)
     try:
-        num_cols = ['연배당금', '연배당률', '현재가', '신규상장개월수', '연배당금_크롤링']
+        num_cols = ['연배당금', '연배당률', '현재가', '신규상장개월수', '연배당금_크롤링', '연배당금_크롤링_auto']
         for col in num_cols:
             if col in df_raw.columns:
-                # 문자가 섞여있을 경우 강제 변환 후 NaN은 0으로
                 df_raw[col] = pd.to_numeric(df_raw[col], errors='coerce').fillna(0)
 
         if '종목코드' in df_raw.columns:
-            def clean_ticker(x):
-                s = str(x).split('.')[0].strip()
-                if s.isdigit(): return s.zfill(6) 
-                return s.upper() 
-            
-            df_raw['종목코드'] = df_raw['종목코드'].apply(clean_ticker)
+            def clean_ticker_smart(row):
+                raw_code = str(row.get('종목코드', '')).split('.')[0].strip()
+                category = str(row.get('분류', '국내')).strip()
+                if category == '해외': return raw_code.lstrip('0').upper()
+                if raw_code.isdigit(): return raw_code.zfill(6)
+                return raw_code.upper()
+            df_raw['종목코드'] = df_raw.apply(clean_ticker_smart, axis=1)
 
         if '배당락일' in df_raw.columns:
             df_raw['배당락일'] = df_raw['배당락일'].astype(str).replace(['nan', 'None', 'nan '], '-')
-
+        
         if '자산유형' in df_raw.columns:
             df_raw['자산유형'] = df_raw['자산유형'].fillna('기타')
     except Exception as e:
@@ -408,20 +408,44 @@ def load_and_process_data(df_raw, is_admin=False):
             name = str(row.get('종목명', '')).strip()
             category = str(row.get('분류', '국내')).strip()
             
-            # 가격 조회 (Safe Logic 적용)
+            # 가격 조회
             price = get_safe_price(broker, code, category)
             if not price: price = 0 
 
-            crawled_div = float(row.get('연배당금_크롤링', 0))
             manual_div = float(row.get('연배당금', 0))        
+            saved_auto = float(row.get('연배당금_크롤링_auto', 0))
             months = int(row.get('신규상장개월수', 0))
+            
+            auto_annual_div = None
 
-            # 신규 상장 종목 연환산
-            if 0 < months < 12:
-                target_div = (manual_div / months * 12) if manual_div > 0 else crawled_div
-                display_name = f"{name} ⭐"
+            # [수정된 핵심 로직] 수동 입력이 없을 때만 크롤링 수행
+            if category == '국내' and manual_div == 0:
+                # 함수 이름 수정 및 반환값 3개 중 가운데(금액)만 가져오기
+                _, crawled_amt, _ = fetch_dividend_yield_hybrid(code, category)
+                auto_annual_div = crawled_amt
+                
+                if auto_annual_div > 0:
+                    row['연배당금_크롤링_auto'] = auto_annual_div
+                elif saved_auto > 0:
+                    auto_annual_div = saved_auto # 실패 시 기존값 유지
+
+            # 최종 배당금 결정
+            if manual_div > 0:
+                if 0 < months < 12:
+                    target_div = (manual_div / months * 12)
+                    display_name = f"{name} ⭐"
+                else:
+                    target_div = manual_div
+                    display_name = name
+            
+            elif auto_annual_div and auto_annual_div > 0:
+                target_div = auto_annual_div
+                display_name = f"{name} ⭐" if 0 < months < 12 else name
+                
             else:
-                target_div = crawled_div if crawled_div > 0 else manual_div
+                # 다 없으면 과거 크롤링 값이라도
+                orig_crawled = float(row.get('연배당금_크롤링', 0) or 0)
+                target_div = orig_crawled
                 display_name = name
 
             yield_val = (target_div / price * 100) if price > 0 else 0
@@ -432,7 +456,6 @@ def load_and_process_data(df_raw, is_admin=False):
             
             csv_type = str(row.get('유형', '-'))
             auto_asset_type = classify_asset(row) 
-            
             final_type = csv_type
             if '채권' in auto_asset_type: final_type = '채권'
             elif '커버드콜' in auto_asset_type: final_type = '커버드콜'
@@ -445,6 +468,8 @@ def load_and_process_data(df_raw, is_admin=False):
                 '금융링크': f"https://finance.naver.com/item/main.naver?code={code}" if category == '국내' else f"https://finance.yahoo.com/quote/{code}",
                 '현재가': price_fmt, 
                 '연배당률': yield_val,
+                '연배당금_크롤링_auto': row.get('연배당금_크롤링_auto', 0),
+                '연배당률_크롤링': row.get('연배당률_크롤링', None),
                 '환구분': get_hedge_status(name, category),
                 '배당락일': str(row.get('배당락일', '-')), 
                 '분류': category,
@@ -459,6 +484,15 @@ def load_and_process_data(df_raw, is_admin=False):
         except Exception as e:
             logger.error(f"Row Processing Error ({idx}): {e}")
             return idx, None
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(process_row, idx, row): idx for idx, row in df_raw.iterrows()}
+        for future in as_completed(futures):
+            idx, result = future.result()
+            results[idx] = result
+
+    final_data = [r for r in results if r is not None]
+    return pd.DataFrame(final_data).sort_values('연배당률', ascending=False) if final_data else pd.DataFrame()
 
     # 스레드 풀 실행 (yfinance 충돌 완화를 위해 워커 수 조절 가능)
     with ThreadPoolExecutor(max_workers=10) as executor:
