@@ -474,7 +474,6 @@ def load_and_process_data(df_raw, is_admin=False):
 # -----------------------------------------------------------
 # [SECTION 4] 데이터 파일 관리 (GitHub/CSV)
 # -----------------------------------------------------------
-
 @st.cache_data(ttl=1800)
 def load_stock_data_from_csv():
     import os
@@ -484,11 +483,28 @@ def load_stock_data_from_csv():
     for _ in range(3):
         try:
             if not os.path.exists(file_path):
-                return pd.DataFrame()
+                # 빈 프레임을 반환하되 필수 컬럼을 보장
+                df_empty = pd.DataFrame()
+                required_cols = ['종목코드', '종목명', '연배당금_크롤링_auto', '연배당률_크롤링', '배당기록', '연배당금_크롤링']
+                for c in required_cols:
+                    df_empty[c] = pd.Series(dtype='object' if c in ['종목코드','종목명','배당기록'] else 'float')
+                return df_empty
             
             df = pd.read_csv(file_path, dtype={'종목코드': str})
             df.columns = df.columns.str.strip()
-            if '연배당금_크롤링' not in df.columns: df['연배당금_크롤링'] = 0.0
+
+            # 필수 컬럼 보장: 없으면 기본값으로 생성
+            if '연배당금_크롤링' not in df.columns:
+                df['연배당금_크롤링'] = 0.0
+            if '연배당금_크롤링_auto' not in df.columns:
+                df['연배당금_크롤링_auto'] = 0.0
+            if '연배당률_크롤링' not in df.columns:
+                df['연배당률_크롤링'] = 0.0
+            if '배당기록' not in df.columns:
+                df['배당기록'] = ""
+            if '종목코드' not in df.columns:
+                df['종목코드'] = df.index.astype(str).apply(lambda x: x.zfill(6) if x.isdigit() else x)
+
             return df
         except Exception:
             time.sleep(0.5) # 잠겨있으면 0.5초 대기
@@ -614,13 +630,29 @@ def fetch_dividend_yield_hybrid(code, category):
             except Exception:
                 price = None
 
-            # 2) 배당 기록(최근 1년 합계) 확보
+            # 2) 배당 기록(최근 1년 합계) 확보 (tz-aware 안전 처리)
             annual_div_sum = 0.0
             try:
                 divs = ticker.dividends
                 if divs is not None and len(divs) > 0:
-                    cutoff = pd.Timestamp.now() - pd.Timedelta(days=365)
-                    recent = divs[divs.index >= cutoff]
+                    idx = divs.index
+                    # cutoff를 인덱스 tz에 맞춰 생성
+                    try:
+                        tz = getattr(idx, 'tz', None)
+                        if tz is not None:
+                            cutoff = pd.Timestamp.now(tz=tz) - pd.Timedelta(days=365)
+                        else:
+                            cutoff = pd.Timestamp.now() - pd.Timedelta(days=365)
+                    except Exception:
+                        cutoff = pd.Timestamp.now() - pd.Timedelta(days=365)
+
+                    # 안전 비교
+                    try:
+                        recent = divs[divs.index >= cutoff]
+                    except Exception:
+                        # 비교 실패 시 최근 4개로 대체
+                        recent = divs.tail(4)
+
                     if recent.empty:
                         recent = divs.tail(4)
                     annual_div_sum = float(recent.sum())
@@ -657,6 +689,7 @@ def fetch_dividend_yield_hybrid(code, category):
         except Exception as e:
             logger.exception(f"해외 배당 조회 예외: {code} - {e}")
             return 0.0, "❌ 해외 에러"
+
 
 
 
