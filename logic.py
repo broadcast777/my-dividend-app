@@ -526,6 +526,26 @@ def load_stock_data_from_csv():
     return pd.DataFrame()
 
 
+def save_to_github(df):
+    """
+    깃허브에 CSV로 덮어쓰기(자동 갱신용).
+    st.secrets에 github.token, repo_name, file_path가 설정되어 있어야 합니다.
+    """
+    try:
+        token = st.secrets["github"]["token"]
+        repo_name = st.secrets["github"]["repo_name"]
+        file_path = st.secrets["github"]["file_path"]
+        g = Github(token)
+        repo = g.get_repo(repo_name)
+        contents = repo.get_contents(file_path)
+        csv_data = df.to_csv(index=False).encode("utf-8")
+        repo.update_file(path=contents.path, message="🤖 데이터 자동 갱신", content=csv_data, sha=contents.sha)
+        return True, "✅ 깃허브 저장 성공!"
+    except Exception as e:
+        logger.error(f"Github Save Error: {e}")
+        return False, f"❌ 저장 실패: {str(e)}"
+
+
 
 # -----------------------------------------------------------
 # [SECTION 6] 실시간 배당 정보 크롤링 (Hybrid)
