@@ -445,8 +445,16 @@ def load_and_process_data(df_raw, is_admin=False):
 
             if is_admin and (yield_val < 2.0 or yield_val > 25.0): display_name = f"🚫 {display_name}"
 
-            price_fmt = f"{int(price):,}원" if category == '국내' else f"${price:.2f}"
+            # ... (위쪽 로직은 그대로) ...
             
+            # [수정] 배당금도 포맷팅 (원/달러)
+            if category == '국내':
+                price_fmt = f"{int(price):,}원"
+                div_fmt = f"{int(target_div):,}원" # 348원
+            else:
+                price_fmt = f"${price:.2f}"
+                div_fmt = f"${target_div:.2f}"   # $4.72
+
             csv_type = str(row.get('유형', '-'))
             auto_asset_type = classify_asset(row) 
             
@@ -458,6 +466,7 @@ def load_and_process_data(df_raw, is_admin=False):
             return idx, {
                 '코드': code, 
                 '종목명': display_name,
+                '연배당금': div_fmt,  # 👈 [핵심] 이 줄이 빠져 있었습니다! 이제 348원이 보일 겁니다.
                 '블로그링크': str(row.get('블로그링크', '#')),
                 '금융링크': f"https://finance.naver.com/item/main.naver?code={code}" if category == '국내' else f"https://finance.yahoo.com/quote/{code}",
                 '현재가': price_fmt, 
