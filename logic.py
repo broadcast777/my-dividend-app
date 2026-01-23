@@ -417,16 +417,18 @@ def get_hedge_status(name, category):
 
 # [logic.py -> load_and_process_data 함수 전체 교체]
 
+# [logic.py -> load_and_process_data 함수 전체를 이걸로 덮어쓰세요]
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def load_and_process_data(df_raw, is_admin=False):
     if df_raw.empty: return pd.DataFrame()
 
     # 1. 데이터 전처리 (결측치 방어)
     try:
-        num_cols = ['연배당금', '연배당률', '현재가', '신규상장개월수', '연배당금_크롤링', '연배당금_크롤링_auto']
+        # 'TTM_연배당률(크롤링)' 컬럼 추가
+        num_cols = ['연배당금', '연배당률', '현재가', '신규상장개월수', '연배당금_크롤링', '연배당금_크롤링_auto', 'TTM_연배당률(크롤링)']
         for col in num_cols:
             if col in df_raw.columns:
-                # 문자가 섞여있을 경우 강제 변환 후 NaN은 0으로
                 df_raw[col] = pd.to_numeric(df_raw[col], errors='coerce').fillna(0)
 
         if '종목코드' in df_raw.columns:
@@ -434,7 +436,6 @@ def load_and_process_data(df_raw, is_admin=False):
                 s = str(x).split('.')[0].strip()
                 if s.isdigit(): return s.zfill(6) 
                 return s.upper() 
-            
             df_raw['종목코드'] = df_raw['종목코드'].apply(clean_ticker)
 
         if '배당락일' in df_raw.columns:
@@ -469,67 +470,74 @@ def load_and_process_data(df_raw, is_admin=False):
             price = get_safe_price(broker, code, category)
             if not price: price = 0
 
-            # (B) 데이터 준비
-            # 1순위: Auto (최신 자동 크롤링)
-            auto_div = float(row.get('연배당금_크롤링_auto', 0))
+            # (B) 데이터 준비 (CSV에서 불러오기)
+            auto_div = float(row.get('연배당금_크롤링_auto', 0)) # 1순위
+            manual_div = float(row.get('연배당금', 0))         # 3순위
+            old_div = float(row.get('연배당금_크롤링', 0))     # 4순위
             
-            # 3순위: Manual (수동 입력)
-            manual_div = float(row.get('연배당금', 0))
-            
-            # 4순위: Old (구버전 데이터)
-            old_div = float(row.get('연배당금_크롤링', 0))
+            # [변경] 기존에 저장된 'TTM 수익률(%)' 불러오기
+            saved_ttm_yield = float(row.get('TTM_연배당률(크롤링)', 0))  # 2순위 후보 (기존값)
 
-            # (C) 4단 방어 우선순위 결정 로직
+            # (C) 우선순위 로직
             final_div = 0
             calc_yield = 0
             status_msg = ""
             
-            # 🥇 1순위: Auto
+            # 이번 턴에 새로 구한 TTM 수익률 추적
+            new_ttm_yield = 0 
+            
+            # 🥇 1순위: Auto (최신 자동 크롤링)
             if auto_div > 0:
                 final_div = auto_div
                 calc_yield = (final_div / price * 100) if price > 0 else 0
                 status_msg = "⚡ Auto"
 
             else:
-                # 1순위 실패 -> 🥈 2순위: Playwright (TTM 웹 크롤링)
-                # 속도 저하 방지를 위해 '국내' 종목이면서 Auto가 실패했을 때만 실행
-                ttm_yield = 0
-                pw_msg = ""
+                # 1순위 실패 -> 🥈 2순위: TTM (Playwright 크롤링 OR 저장된 수익률)
                 
+                # 2-1. 실시간 웹 크롤링 시도 (국내 종목)
+                crawled_yield = 0
+                pw_msg = ""
                 if category == '국내':
                     try:
-                        # logic.py 상단에 정의된 함수 호출
-                        ttm_yield, pw_msg = get_ttm_playwright_sync(code)
+                        # logic.py 상단 Playwright 함수 호출
+                        crawled_yield, pw_msg = get_ttm_playwright_sync(code)
                     except NameError:
-                        ttm_yield = 0
-                        pw_msg = ""
+                        crawled_yield = 0
 
-                    if ttm_yield > 0:
-                        calc_yield = ttm_yield
-                        # 수익률로 배당금 역산 (현재가 * 수익률)
-                        final_div = int(price * (ttm_yield / 100)) if price > 0 else 0
-                        status_msg = pw_msg # "✅ 웹크롤링(2.39%)"
+                    if crawled_yield > 0:
+                        # 크롤링 성공! (수익률 % 확보)
+                        calc_yield = crawled_yield
+                        # 수익률로 금액 역산 (현재가 * 수익률%)
+                        final_div = int(price * (crawled_yield / 100)) if price > 0 else 0
+                        status_msg = pw_msg
+                        
+                        # [중요] 새로 구한 수익률 저장 준비
+                        new_ttm_yield = crawled_yield
+                
+                # 2-2. 크롤링 실패했지만, CSV에 '저장된 수익률'이 있다면? (Backup)
+                if calc_yield == 0 and saved_ttm_yield > 0:
+                    calc_yield = saved_ttm_yield
+                    # 저장된 수익률로 금액 역산
+                    final_div = int(price * (saved_ttm_yield / 100)) if price > 0 else 0
+                    status_msg = f"💾 TTM(저장됨: {saved_ttm_yield}%)"
+                    new_ttm_yield = saved_ttm_yield # 값 유지
 
-                # 2순위도 실패했거나 해외 종목인 경우
+                # 3순위/4순위 로직 (변화 없음)
                 if calc_yield == 0:
-                    # 🥉 3순위: Manual
                     if manual_div > 0:
                         final_div = manual_div
                         calc_yield = (final_div / price * 100) if price > 0 else 0
                         status_msg = "🔧 수동"
-                    
-                    # 🛡️ 4순위: Old
                     elif old_div > 0:
                         final_div = old_div
                         calc_yield = (final_div / price * 100) if price > 0 else 0
                         status_msg = "⚠️ Old"
-                    
                     else:
                         status_msg = "❌ N/A"
 
             # (D) 신규 상장 종목 처리
             months = int(row.get('신규상장개월수', 0))
-            # 3순위(수동)를 사용할 때만 월할 계산 적용
             if 0 < months < 12 and "수동" in status_msg:
                 final_div = (manual_div / months * 12)
                 calc_yield = (final_div / price * 100) if price > 0 else 0
@@ -537,9 +545,12 @@ def load_and_process_data(df_raw, is_admin=False):
             else:
                 display_name = name
 
-            # (E) 데이터 포장
+            # (E) 반환 데이터 구성
             price_fmt = f"{int(price):,}원" if category == '국내' else f"${price:.2f}"
             
+            # [최종 결정] CSV에 저장할 TTM 수익률은?
+            final_ttm_save = new_ttm_yield if new_ttm_yield > 0 else saved_ttm_yield
+
             csv_type = str(row.get('유형', '-'))
             auto_asset_type = classify_asset(row)
             final_type = '채권' if '채권' in auto_asset_type else \
@@ -565,11 +576,13 @@ def load_and_process_data(df_raw, is_admin=False):
                 '검색라벨': str(row.get('검색라벨', f"[{code}] {display_name}")),
                 '비고': status_msg,
                 
-                # 데이터 보존 (CSV 저장용)
+                # --- 데이터 보존 구역 ---
                 '연배당금_크롤링_auto': auto_div,
                 '연배당금': manual_div,
                 '연배당금_크롤링': old_div,
-                'TTM_배당금': final_div if "웹크롤링" in status_msg else row.get('TTM_배당금', 0)
+                
+                # [핵심] 요청하신 이름으로 수익률(%) 저장
+                'TTM_연배당률(크롤링)': final_ttm_save 
             }
         except Exception as e:
             logger.error(f"Row Processing Error ({idx}): {e}")
@@ -582,7 +595,7 @@ def load_and_process_data(df_raw, is_admin=False):
             idx, result = future.result()
             results[idx] = result
 
-    # 5. 결과 수집 및 안전한 반환 (AttributeError 방지)
+    # 5. 결과 수집 및 안전한 반환
     final_data = [r for r in results if r is not None]
     
     if final_data:
@@ -591,10 +604,12 @@ def load_and_process_data(df_raw, is_admin=False):
             return result_df.sort_values('연배당률', ascending=False)
         return result_df
     else:
-        return pd.DataFrame() # 빈 프레임 반환
+        return pd.DataFrame()
 # -----------------------------------------------------------
 # [SECTION 4] 데이터 파일 관리 (GitHub/CSV)
 # -----------------------------------------------------------
+# [logic.py -> load_stock_data_from_csv 함수 전체를 이걸로 덮어쓰세요]
+
 @st.cache_data(ttl=1800)
 def load_stock_data_from_csv():
     import os
@@ -605,24 +620,23 @@ def load_stock_data_from_csv():
             if not os.path.exists(file_path):
                 # 빈 프레임을 반환하되 필수 컬럼을 보장
                 df_empty = pd.DataFrame()
-                required_cols = ['종목코드', '종목명', '연배당금_크롤링_auto', '연배당률_크롤링', '배당기록', '연배당금_크롤링']
+                required_cols = ['종목코드', '종목명', '연배당금_크롤링_auto', '연배당률_크롤링', '배당기록', '연배당금_크롤링', 'TTM_연배당률(크롤링)']
                 for c in required_cols:
                     df_empty[c] = pd.Series(dtype='object' if c in ['종목코드','종목명','배당기록'] else 'float')
                 return df_empty
 
-            # encoding='utf-8-sig'로 BOM 제거 시도, 모든 컬럼을 우선 문자열로 읽음
+            # encoding='utf-8-sig'로 BOM 제거 시도
             df = pd.read_csv(file_path, dtype=str, encoding='utf-8-sig')
-            # 컬럼명 정규화: strip + BOM 제거 + 보이지 않는 문자 제거
+            
+            # 컬럼명 정규화
             def _normalize_col(c):
                 if c is None: return ""
-                s = str(c)
-                s = s.replace('\ufeff', '').strip()
-                # 추가로 제어문자 제거
+                s = str(c).replace('\ufeff', '').strip()
                 s = "".join(ch for ch in s if ord(ch) >= 32)
                 return s
             df.columns = [_normalize_col(c) for c in df.columns]
 
-            # 필수 컬럼 보장: 없으면 기본값으로 생성
+            # 필수 컬럼 보장
             if '연배당금_크롤링' not in df.columns:
                 df['연배당금_크롤링'] = 0.0
             if '연배당금_크롤링_auto' not in df.columns:
@@ -631,11 +645,14 @@ def load_stock_data_from_csv():
                 df['연배당률_크롤링'] = 0.0
             if '배당기록' not in df.columns:
                 df['배당기록'] = ""
+            
+            # [추가] TTM 수익률 컬럼 보장
+            if 'TTM_연배당률(크롤링)' not in df.columns:
+                df['TTM_연배당률(크롤링)'] = 0.0
+                
             if '종목코드' not in df.columns:
-                # 인덱스를 코드로 사용하거나 빈 문자열로 채움
                 df['종목코드'] = df.index.astype(str).apply(lambda x: x.zfill(6) if x.isdigit() else x)
 
-            # 종목코드 컬럼도 문자열 정규화(공백 제거)
             df['종목코드'] = df['종목코드'].astype(str).str.strip()
 
             return df
