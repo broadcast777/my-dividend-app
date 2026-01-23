@@ -199,28 +199,7 @@ def render_admin_tools(df_raw):
     with st.sidebar:
         st.markdown("---")
         st.subheader("🛠️ 배당금 갱신 도구")
-        # --- [임시 청소 도구 시작] --------------------------
-    with st.sidebar:
-        if st.button("🧹 CSV 중복 컬럼 청소하기 (1회용)", type="primary"):
-            import pandas as pd
-            try:
-                # 1. 파일 읽기
-                df_clean = pd.read_csv("stocks.csv", encoding='utf-8-sig')
-                
-                # 2. 중복 컬럼 제거 (Pandas 매직)
-                df_clean = df_clean.loc[:, ~df_clean.columns.duplicated()]
-                
-                # 3. 옛날 컬럼 삭제
-                if 'TTM_연배당률크롤링' in df_clean.columns:
-                    df_clean = df_clean.drop(columns=['TTM_연배당률크롤링'])
-                
-                # 4. 저장
-                df_clean.to_csv("stocks.csv", index=False, encoding='utf-8-sig')
-                st.success("청소 완료! 중복 컬럼이 사라졌습니다.")
-                st.rerun() # 화면 새로고침
-            except Exception as e:
-                st.error(f"실패: {e}")
-    # --- [임시 청소 도구 끝] ----------------PY------------
+
         
         # -------------------------------------------------------------
         # 1. 종목 선택 및 기본 정보
