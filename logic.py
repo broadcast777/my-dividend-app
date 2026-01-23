@@ -32,7 +32,8 @@ from playwright.sync_api import sync_playwright
 
 def get_ttm_playwright_sync(code):
     """
-    [2순위 방어] Playwright를 사용하여 네이버 모바일 페이지의 TTM 배당수익률을 직접 크롤링합니다.
+    [최종 검증 완료] Playwright로 화면 전체 텍스트를 스캔하여 배당/분배금 수익률을 찾아냅니다.
+    Colab 테스트를 통과한 강력한 Regex 스캔 방식입니다.
     """
     yield_val = 0.0
     try:
@@ -46,37 +47,36 @@ def get_ttm_playwright_sync(code):
             
             # 페이지 이동
             url = f"https://m.stock.naver.com/item/main.nhn#/stocks/{code}"
-            page.goto(url, timeout=20000) # 타임아웃 20초
+            page.goto(url, timeout=30000)
             
-            # 로딩 대기 (안전하게 2초)
-            page.wait_for_timeout(2000)
+            # 로딩 대기 (데이터가 뜰 때까지 충분히)
+            page.wait_for_timeout(3000)
             
-            # '배당수익률' 텍스트가 있는 dt 태그의 다음 dd 태그 찾기
-            # XPath 사용
-            xpath = "//dt[contains(normalize-space(.),'배당수익률')]/following-sibling::dd[1]"
+            # [핵심] 스크롤을 끝까지 내려서 혹시 숨어있는 데이터 로딩 유도
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            page.wait_for_timeout(1000)
             
-            try:
-                # 요소가 나타날 때까지 최대 3초 대기
-                if page.locator(f"xpath={xpath}").count() > 0:
-                    element = page.locator(f"xpath={xpath}").first
-                    text = element.inner_text().strip()
-                    
-                    # "연 2.39%" -> 2.39 숫자 추출
-                    import re
-                    match = re.search(r"([0-9]+(?:\.[0-9]+)?)", text)
-                    if match:
-                        yield_val = float(match.group(1))
-            except Exception:
-                pass 
-
+            # 1. 화면의 모든 텍스트 가져오기 (태그 무시하고 눈에 보이는 글자 전부)
+            body_text = page.inner_text("body")
+            
+            # 2. 정규표현식으로 '배당수익률' 또는 '분배금수익률' 뒤에 나오는 숫자(%) 찾기
+            # 패턴 설명: (키워드) -> (공백/문자 조금 건너뛰고) -> (숫자.숫자)%
+            import re
+            pattern = re.compile(r'(?:배당수익률|분배금수익률).*?([\d\.]+)\s*%', re.DOTALL)
+            
+            match = pattern.search(body_text)
+            
+            if match:
+                # 찾은 숫자 추출 (예: 12.42)
+                yield_val = float(match.group(1))
+            
             browser.close()
             
             if yield_val > 0:
                 return yield_val, f"✅ 웹크롤링({yield_val}%)"
                 
     except Exception as e:
-        # Playwright 관련 에러는 로그만 남기고 0 반환
-        logger.warning(f"Playwright Fail ({code}): {e}")
+        logger.warning(f"Playwright Scan Fail ({code}): {e}")
         
     return 0.0, ""
 
