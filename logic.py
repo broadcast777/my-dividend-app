@@ -25,31 +25,46 @@ import sqlite3  # DB 에러 처리를 위해 추가
 
 
 
+# [상단 import 뭉치에 추가]
+import subprocess
 
-
-# [여기에 추가하세요]
 def _ensure_browser_installed():
+    """브라우저 미설치 시 자동 설치 (Streamlit Cloud 환경 대비)"""
     try:
         from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
-            try: p.chromium.launch(headless=True)
-            except: subprocess.run(["playwright", "install", "chromium"], check=True)
-    except: pass
+            try:
+                p.chromium.launch(headless=True)
+            except:
+                # 브라우저가 없으면 설치 명령 실행
+                subprocess.run(["playwright", "install", "chromium"], check=True)
+                # 리눅스 의존성 패키지도 필요한 경우 대비 (선택사항)
+                # subprocess.run(["playwright", "install-deps"], check=True)
+    except:
+        pass
 
 def get_ttm_playwright_sync(code):
-    """코랩 검증 완료: 네이버 모바일 지표에서 TTM 수익률 직접 추출"""
+    """코랩 검증 완료: 네이버 모바일 지표에서 TTM 수익률을 무조건 낚아채는 로직"""
     code = str(code).strip()
-    try: _ensure_browser_installed()
-    except: pass
+    yield_val = 0.0
+    try:
+        _ensure_browser_installed()
+    except:
+        pass
+
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
+            # 사용자님이 성공하셨던 iPhone 환경 설정
             context = browser.new_context(user_agent="Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)")
             page = context.new_page()
             page.goto(f"https://m.stock.naver.com/item/main.nhn#/stocks/{code}", timeout=30000)
-            page.wait_for_timeout(3500) # 코랩 검증시 가장 안정적이었던 시간
             
-            # [핵심 로직] 배당/분배금수익률 글자 옆의 숫자 무조건 낚아채기
+            # 지표 로딩 대기 (검증된 3.5초)
+            page.wait_for_timeout(3500)
+            page.evaluate("window.scrollBy(0, 400);") # 렌더링 유도
+
+            # [가장 강력한 JS 로직] dt/dd 구조뿐만 아니라 span/div 구조까지 다 뒤짐
             js_script = """
             (() => {
               const dts = Array.from(document.querySelectorAll('dt'));
@@ -61,17 +76,31 @@ def get_ttm_playwright_sync(code):
                   if (dd && dd.tagName.toLowerCase() === 'dd') return dd.innerText;
                 }
               }
+              const allElements = Array.from(document.querySelectorAll('span, em, div'));
+              for (const el of allElements) {
+                if (keywords.some(k => (el.innerText||'').includes(k))) {
+                  const parent = el.parentElement;
+                  if (parent) {
+                    const match = parent.innerText.match(/([0-9]+\\.[0-9]+)%/);
+                    if (match) return match[0];
+                  }
+                }
+              }
               return '';
             })();
             """
             raw_text = page.evaluate(js_script)
             browser.close()
+
             if raw_text:
                 match = re.search(r"([0-9]+(?:\.[0-9]+)?)", raw_text)
-                if match: return float(match.group(1)), f"✅ TTM({match.group(1)}%)"
-    except: pass
+                if match:
+                    yield_val = float(match.group(1))
+                    return yield_val, f"✅ TTM({yield_val}%)"
+    except Exception as e:
+        logger.warning(f"Playwright Fail ({code}): {e}")
+    
     return 0.0, ""
-
 
 
 
@@ -824,7 +853,42 @@ def fetch_dividend_yield_hybrid(code, category):
             return 0.0, "❌ 해외 에러"
 
 
+def smart_update_and_save():
+    """특별배당 관리용: Auto가 0인 종목만 골라 TTM을 긁어서 저장함"""
+    try:
+        df = load_stock_data_from_csv()
+        if df.empty: return False, "CSV 데이터가 없습니다."
+        
+        updated_count = 0
+        pbar = st.progress(0)
+        status_text = st.empty()
+        
+        for idx, row in df.iterrows():
+            code = str(row['종목코드']).strip()
+            name = str(row['종목명']).strip()
+            category = str(row.get('분류', '국내'))
+            
+            pbar.progress((idx + 1) / len(df))
+            status_text.text(f"지표 확인 중: {name}")
 
+            # 연배당금_크롤링_auto가 0.0인 국내 종목만 TTM 크롤링 실행
+            if float(row.get('연배당금_크롤링_auto', 0)) == 0 and category == '국내':
+                ttm_val, _ = get_ttm_playwright_sync(code)
+                if ttm_val > 0:
+                    # 'TTM_연배당률(크롤링)' 컬럼에 저장
+                    df.at[idx, 'TTM_연배당률(크롤링)'] = ttm_val
+                    updated_count += 1
+        
+        # CSV 저장 및 깃허브 전송
+        df.to_csv("stocks.csv", index=False, encoding='utf-8-sig')
+        save_to_github(df)
+        
+        pbar.empty()
+        status_text.empty()
+        return True, f"✅ {updated_count}개 종목 TTM 갱신 완료"
+        
+    except Exception as e:
+        return False, str(e)
 
 
 def update_dividend_rolling(current_history_str, new_dividend_amount):
