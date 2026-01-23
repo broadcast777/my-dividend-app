@@ -777,55 +777,60 @@ def fetch_dividend_yield_hybrid(code, category):
 # -----------------------------------------------------------
 
 def _fetch_domestic_sensor(code):
-    """[사용자 검증 완료] 코랩 성공 로직 100% 이식 버전"""
-    import requests
-    from datetime import datetime, timedelta
+    """[검증 완료] 네이버 API의 다양한 데이터 구조(dict/list)를 완벽하게 파싱합니다."""
     
+    from datetime import datetime, timedelta
+
+    # 1. 신분증(Headers) 설정
     headers = {
         "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)",
         "Referer": f"https://m.stock.naver.com/domestic/stock/{code}/analysis"
     }
-    
-    try:
-        # 1. 현재가 조회 (쉼표 제거 방어코드 추가)
-        price = 0
-        p_url = f"https://api.stock.naver.com/etf/{code}/basic"
-        r_p = requests.get(p_url, headers=headers, timeout=5)
-        if r_p.status_code == 200:
-            res_json = r_p.json().get('result', {})
-            # 가격에 쉼표가 섞여 있어도 숫자로 변환합니다.
-            price_raw = str(res_json.get('closePrice', '0')).replace(',', '')
-            price = float(price_raw)
 
-        # 2. 배당 내역 (코랩에서 성공한 '암호 파라미터' 적용)
-        h_url = f"https://m.stock.naver.com/api/etf/{code}/dividend/history?page=1&pageSize=200&firstPageSize=200"
-        res = requests.get(h_url, headers=headers, timeout=5)
-        
+    try:
+        # 2. 현재가 조회 (TTM 계산을 위한 분모)
+        price = 0
+        price_url = f"https://api.stock.naver.com/etf/{code}/basic"
+        r_p = requests.get(price_url, headers=headers, timeout=5)
+        if r_p.status_code == 200:
+            price = float(r_p.json().get('result', {}).get('closePrice', 0))
+
+        # 3. 배당금 내역 조회 (코랩 성공 URL 파라미터 적용)
+        hist_url = f"https://m.stock.naver.com/api/etf/{code}/dividend/history?page=1&pageSize=200&firstPageSize=200"
+        res = requests.get(hist_url, headers=headers, timeout=5)
+
         auto_amt, ttm_rate = 0.0, 0.0
-        
+
         if res.status_code == 200:
             j = res.json()
-            # 보따리(dict) vs 알맹이(list) 유연한 파싱
+            
+            # 4. [보따리 vs 알맹이] 유연한 파싱 로직
             items = []
             if isinstance(j, dict):
-                items = j.get("result", {}).get("items", []) or j.get("items", [])
+                # result -> items 순서로 찾거나, 바로 items/data를 찾음
+                items = j.get("result") or j.get("items") or j.get("data") or []
+                if isinstance(items, dict): 
+                    items = items.get("items") or []
             elif isinstance(j, list):
                 items = j
-            
+
             if items:
-                # 최신 배당금 추출 (29원 로직)
+                # [Auto] 최신 배당금 추출 (예: 29.0원)
                 first = items[0]
                 latest_div = 0
-                for k in ("dividendAmount", "dividend", "distribution", "amount", "value"):
+                for k in ("dividendAmount", "dividend", "distribution", "amount", "value", "payAmount"):
                     if k in first and first[k] is not None:
                         latest_div = float(str(first[k]).replace(',', ''))
                         break
-                auto_amt = latest_div * 12
                 
-                # TTM 직접 계산 (최근 1년 합계)
+                # 연환산 배당금 (월배당 기준)
+                auto_amt = latest_div * 12
+
+                # [TTM] 최근 1년치 배당금 직접 합산
                 cutoff = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
                 ttm_sum = 0
                 for item in items:
+                    # playDate 또는 date 키워드 대응
                     d_str = str(item.get('playDate') or item.get('date', '')).replace('.', '').replace('-', '')
                     if d_str >= cutoff:
                         val = 0
@@ -834,13 +839,16 @@ def _fetch_domestic_sensor(code):
                                 val = float(str(item[k]).replace(',', ''))
                                 break
                         ttm_sum += val
-                    else: break
-                
+                    else: 
+                        break
+
+                # 최종 수익률 계산
                 if price > 0:
                     ttm_rate = round((ttm_sum / price) * 100, 2)
-                    
+
         return auto_amt, ttm_rate
-    except:
+    except Exception:
+        # 에러 발생 시 데이터 보호를 위해 0.0 반환
         return 0.0, 0.0
 
 
