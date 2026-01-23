@@ -412,18 +412,35 @@ def load_and_process_data(df_raw, is_admin=False):
             price = get_safe_price(broker, code, category)
             if not price: price = 0 
 
-            crawled_div = float(row.get('연배당금_크롤링', 0))
-            manual_div = float(row.get('연배당금', 0))        
+            # [수정] 데이터 준비 (Auto, TTM, 수동, 기존)
+            auto_val = float(row.get('연배당금_크롤링_auto', 0) or 0)
+            ttm_rate = float(row.get('TTM_연배당률(크롤링)', 0) or 0)
+            manual_val = float(row.get('연배당금', 0) or 0)
+            old_crawled = float(row.get('연배당금_크롤링', 0) or 0)
             months = int(row.get('신규상장개월수', 0))
 
-            # 신규 상장 종목 연환산
-            if 0 < months < 12:
-                target_div = (manual_div / months * 12) if manual_div > 0 else crawled_div
-                display_name = f"{name} ⭐"
-            else:
-                target_div = crawled_div if crawled_div > 0 else manual_div
+            # [수정] 우선순위 로직 적용 (신규 > Auto > TTM > 수동 > 기존)
+            if 0 < months < 12 and manual_val > 0:
+                target_div = (manual_val / months) * 12
+                display_name = f"{name} ⭐({months}개월)"
+            
+            elif auto_val > 0: # 1순위: Auto
+                target_div = auto_val
+                display_name = name
+                
+            elif ttm_rate > 0 and price > 0: # 2순위: TTM
+                target_div = price * (ttm_rate / 100)
+                display_name = f"{name} (TTM)"
+                
+            elif manual_val > 0: # 3순위: 수동
+                target_div = manual_val
+                display_name = name
+                
+            else: # 4순위: 기존
+                target_div = old_crawled
                 display_name = name
 
+            # 수익률 계산 (가격이 없으면 0)
             yield_val = (target_div / price * 100) if price > 0 else 0
 
             if is_admin and (yield_val < 2.0 or yield_val > 25.0): display_name = f"🚫 {display_name}"
