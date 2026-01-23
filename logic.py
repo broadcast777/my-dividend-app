@@ -827,22 +827,53 @@ def _fetch_overseas_sensor(code):
 
 def smart_update_and_save():
     """
-    [핵심] 앱에서 버튼 누르면 실행되는 함수
+    [핵심] 앱에서 버튼 누르면 실행되는 함수 (성공/실패/보호 카운팅 기능 추가)
     모든 종목을 돌며 Auto(1순위)와 TTM(2순위) 데이터를 채우고 깃허브에 저장합니다.
     """
-    import sys  # 👈 [추가됨] 이 한 줄이 빠져서 에러가 났던 겁니다!
+    import sys
+    import time
+    import streamlit as st # 화면 표시용
     
     try:
         # 1. CSV 파일 로드
         df = load_stock_data_from_csv()
-        if df.empty: return False, "CSV 파일을 찾을 수 없습니다."
+        if df.empty: return False, "❌ CSV 파일을 찾을 수 없거나 비어있습니다."
         
+        total_count = len(df)
         success_count = 0
+        fail_count = 0
+        protected_count = 0 # 신규 상장 보호 카운트
+        
+        # [UI] 진행률 표시줄
+        progress_text = "데이터 갱신 시작..."
+        my_bar = st.progress(0, text=progress_text)
+        status_text = st.empty() # 실시간 상태 메시지
         
         # 2. 전체 종목 루프
         for idx, row in df.iterrows():
             code = str(row['종목코드']).strip()
+            name = row['종목명']
             category = str(row.get('분류', '국내')).strip()
+            
+            # 신규 상장 개월수 확인
+            try: months = int(row.get('신규상장개월수', 0))
+            except: months = 0
+            
+            # -----------------------------------------------------
+            # [조건] 신규 상장(1년 미만)은 크롤링 보호 (기존 데이터 유지)
+            # -----------------------------------------------------
+            if 0 < months < 12:
+                protected_count += 1
+                status_text.markdown(f"🛡️ **[{idx+1}/{total_count}] {name}** (신규 {months}개월) -> 보호됨(건너뜀)")
+                time.sleep(0.05) # 너무 빠르면 안 보여서 살짝 대기
+                # 진행률 바 업데이트만 하고 다음으로 넘어감
+                my_bar.progress((idx + 1) / total_count, text=f"진행률: {int((idx+1)/total_count*100)}%")
+                continue
+            
+            # -----------------------------------------------------
+            # [일반] 나머지 종목은 크롤링 진행
+            # -----------------------------------------------------
+            status_text.markdown(f"🔄 **[{idx+1}/{total_count}] {name}** 데이터 수집 중...")
             
             try:
                 if category == '국내':
@@ -850,24 +881,32 @@ def smart_update_and_save():
                 else:
                     val, rate = _fetch_overseas_sensor(code)
                 
-                # 데이터 업데이트 (값이 있을 때만)
-                df.at[idx, '연배당금_크롤링_auto'] = val
+                # 데이터 업데이트 (값이 0보다 클 때만)
+                if val > 0: df.at[idx, '연배당금_크롤링_auto'] = val
                 if rate > 0: df.at[idx, 'TTM_연배당률(크롤링)'] = rate
                 
                 success_count += 1
-                time.sleep(0.1) # 서버 부하 방지
                 
             except Exception as e:
+                fail_count += 1
                 logger.warning(f"Update fail {code}: {e}")
-                continue
+                # 실패해도 멈추지 않고 진행
+            
+            # 서버 부하 방지 및 진행률 업데이트
+            time.sleep(0.1) 
+            my_bar.progress((idx + 1) / total_count, text=f"진행률: {int((idx+1)/total_count*100)}%")
                 
-        # 3. 깃허브 저장 (이미 logic.py에 있는 함수 활용)
+        # 3. 마무리 및 저장
+        final_msg = f"✨ 완료! (성공: {success_count} / 실패: {fail_count} / 🛡️신규보호: {protected_count}개)"
+        status_text.success(final_msg)
+        my_bar.empty() # 진행바 제거
+        
+        # 깃허브 저장
         if hasattr(sys.modules[__name__], 'save_to_github'):
             return save_to_github(df)
         else:
-            # save_to_github 함수가 없으면 로컬 저장 시도
             df.to_csv("stocks.csv", index=False, encoding='utf-8-sig')
-            return True, f"✅ 로컬 저장 완료! ({success_count}개 갱신)"
+            return True, f"✅ 로컬 저장 완료! {final_msg}"
             
     except Exception as e:
         return False, f"스마트 업데이트 실패: {e}"
