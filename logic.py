@@ -502,53 +502,60 @@ def load_and_process_data(df_raw, is_admin=False):
 # -----------------------------------------------------------
 @st.cache_data(ttl=1800)
 def load_stock_data_from_csv():
+  
     import os
+    
+    import io
+
     file_path = "stocks.csv"
+    
+    # 1. 파일 존재 여부 확인
+    if not os.path.exists(file_path):
+        logger.error(f"❌ 파일을 찾을 수 없습니다: {file_path}")
+        return pd.DataFrame()
 
-    for _ in range(3):
+    for attempt in range(3):
         try:
-            if not os.path.exists(file_path):
-                # 빈 프레임을 반환하되 필수 컬럼을 보장
-                df_empty = pd.DataFrame()
-                required_cols = ['종목코드', '종목명', '연배당금_크롤링_auto', '연배당률_크롤링', '배당기록', '연배당금_크롤링']
-                for c in required_cols:
-                    df_empty[c] = pd.Series(dtype='object' if c in ['종목코드','종목명','배당기록'] else 'float')
-                return df_empty
+            # 2. 파일 읽기 (utf-8-sig로 BOM 유령 1차 제거)
+            with open(file_path, 'r', encoding='utf-8-sig', errors='replace') as f:
+                content = f.read()
+            
+            # 3. 메모리 상에서 읽기 (구분자 문제 방지)
+            df = pd.read_csv(io.StringIO(content), dtype=str)
+            
+            # 4. 컬럼명 '완전 세척' (눈에 안 보이는 모든 특수문자 제거)
+            def _clean_header(c):
+                import re
+                if not c: return ""
+                # 한글, 영문, 숫자, 언더바(_) 외의 모든 '유령' 문자 제거
+                return re.sub(r'[^가-힣a-zA-Z0-9_]', '', str(c)).strip()
 
-            # encoding='utf-8-sig'로 BOM 제거 시도, 모든 컬럼을 우선 문자열로 읽음
-            df = pd.read_csv(file_path, dtype=str, encoding='utf-8-sig')
-            # 컬럼명 정규화: strip + BOM 제거 + 보이지 않는 문자 제거
-            def _normalize_col(c):
-                if c is None: return ""
-                s = str(c)
-                s = s.replace('\ufeff', '').strip()
-                # 추가로 제어문자 제거
-                s = "".join(ch for ch in s if ord(ch) >= 32)
-                return s
-            df.columns = [_normalize_col(c) for c in df.columns]
+            df.columns = [_clean_header(c) for c in df.columns]
 
-            # 필수 컬럼 보장: 없으면 기본값으로 생성
-            if '연배당금_크롤링' not in df.columns:
-                df['연배당금_크롤링'] = 0.0
-            if '연배당금_크롤링_auto' not in df.columns:
-                df['연배당금_크롤링_auto'] = 0.0
-            if '연배당률_크롤링' not in df.columns:
-                df['연배당률_크롤링'] = 0.0
-            if '배당기록' not in df.columns:
-                df['배당기록'] = ""
+            # 5. 필수 컬럼인 '종목코드'가 있는지 최종 확인
             if '종목코드' not in df.columns:
-                # 인덱스를 코드로 사용하거나 빈 문자열로 채움
-                df['종목코드'] = df.index.astype(str).apply(lambda x: x.zfill(6) if x.isdigit() else x)
+                # 만약 첫 번째 컬럼이 종목코드 같은데 이름이 틀린 거라면 강제 개명
+                if len(df.columns) > 0:
+                    df.rename(columns={df.columns[0]: '종목코드'}, inplace=True)
+                else:
+                    raise ValueError("CSV 파일에 데이터가 없습니다.")
 
-            # 종목코드 컬럼도 문자열 정규화(공백 제거)
-            df['종목코드'] = df['종목코드'].astype(str).str.strip()
+            # 6. 데이터 정규화 (앞뒤 공백 제거)
+            df['종목코드'] = df['종목코드'].str.strip()
+            
+            # 7. 수치형 컬럼들 기본값 세팅 (에러 방지)
+            numeric_cols = ['연배당금_크롤링_auto', '연배당률_크롤링', '연배당금_크롤링']
+            for col in numeric_cols:
+                if col not in df.columns:
+                    df[col] = "0.0"
+                df[col] = df[col].fillna("0.0").str.replace(',', '')
 
             return df
+
         except Exception as e:
-            logger.warning(f"CSV load attempt failed: {e}")
+            logger.warning(f"⚠️ CSV 로드 시도 {attempt+1}회 실패: {e}")
             time.sleep(0.5)
 
-    logger.error("CSV Load Failed after retries")
     return pd.DataFrame()
 
 
