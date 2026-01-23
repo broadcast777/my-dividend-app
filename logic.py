@@ -840,40 +840,60 @@ def fetch_dividend_yield_hybrid(code, category):
             return 0.0, "❌ 해외 에러"
 
 
-def smart_update_and_save():
-    """특별배당 관리용: Auto가 0인 종목만 골라 TTM을 긁어서 저장함"""
+# [logic.py 상단: reset_auto_data 함수 추가]
+
+def reset_auto_data(code):
+    """특별배당 관리용: Auto 데이터를 0.0으로 리셋하여 TTM이나 수동값이 적용되게 함"""
     try:
         df = load_stock_data_from_csv()
-        if df.empty: return False, "CSV 데이터가 없습니다."
+        idx = df[df['종목코드'] == str(code).strip()].index
+        if not idx.empty:
+            # 🥇 1순위인 Auto 값을 0으로 밀어서 2순위(TTM)가 나오게 함
+            df.at[idx[0], '연배당금_크롤링_auto'] = 0.0
+            # 안전을 위해 CSV 저장
+            df.to_csv("stocks.csv", index=False, encoding='utf-8-sig')
+            return True, "Auto 데이터를 성공적으로 삭제했습니다."
+        return False, "해당 종목을 찾을 수 없습니다."
+    except Exception as e:
+        return False, f"삭제 중 오류: {str(e)}"
+
+# [logic.py 하단: smart_update_and_save 함수 보강]
+
+def smart_update_and_save():
+    """전체 종목 갱신: Auto가 0인 종목은 TTM을 긁어오고, 나머지는 정상 갱신"""
+    try:
+        df = load_stock_data_from_csv()
+        if df.empty: return False, "CSV 데이터 로드 실패"
         
         updated_count = 0
         pbar = st.progress(0)
-        status_text = st.empty()
         
         for idx, row in df.iterrows():
             code = str(row['종목코드']).strip()
-            name = str(row['종목명']).strip()
             category = str(row.get('분류', '국내'))
-            
             pbar.progress((idx + 1) / len(df))
-            status_text.text(f"지표 확인 중: {name}")
 
-            # 연배당금_크롤링_auto가 0.0인 국내 종목만 TTM 크롤링 실행
+            # 🥇 [핵심] 연배당금_크롤링_auto가 0.0이면 -> TTM 크롤링 실행
             if float(row.get('연배당금_크롤링_auto', 0)) == 0 and category == '국내':
                 ttm_val, _ = get_ttm_playwright_sync(code)
                 if ttm_val > 0:
-                    # 'TTM_연배당률(크롤링)' 컬럼에 저장
                     df.at[idx, 'TTM_연배당률(크롤링)'] = ttm_val
                     updated_count += 1
+            else:
+                # 일반적인 경우: 최신 배당금 갱신 시도
+                y_val, msg = fetch_dividend_yield_hybrid(code, category)
+                if y_val > 0:
+                    df.at[idx, '연배당률_크롤링'] = y_val
+                    # API 조회 성공 시 금액도 업데이트
+                    if "API" in msg:
+                        m = re.search(r'\((\d+)원\)', msg)
+                        if m: df.at[idx, '연배당금_크롤링_auto'] = float(m.group(1)) * 12
+                    updated_count += 1
         
-        # CSV 저장 및 깃허브 전송
         df.to_csv("stocks.csv", index=False, encoding='utf-8-sig')
         save_to_github(df)
-        
         pbar.empty()
-        status_text.empty()
-        return True, f"✅ {updated_count}개 종목 TTM 갱신 완료"
-        
+        return True, f"✅ {updated_count}개 종목 업데이트 완료"
     except Exception as e:
         return False, str(e)
 
