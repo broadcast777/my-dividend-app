@@ -23,6 +23,76 @@ from logger import logger
 import sqlite3  # DB 에러 처리를 위해 추가
 
 
+
+
+
+
+# [여기에 추가하세요]
+def _ensure_browser_installed():
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            try: p.chromium.launch(headless=True)
+            except: subprocess.run(["playwright", "install", "chromium"], check=True)
+    except: pass
+
+def get_ttm_playwright_sync(code):
+    """코랩 검증 완료: 네이버 모바일 지표에서 TTM 수익률 직접 추출"""
+    code = str(code).strip()
+    try: _ensure_browser_installed()
+    except: pass
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
+            context = browser.new_context(user_agent="Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)")
+            page = context.new_page()
+            page.goto(f"https://m.stock.naver.com/item/main.nhn#/stocks/{code}", timeout=30000)
+            page.wait_for_timeout(3500) # 코랩 검증시 가장 안정적이었던 시간
+            
+            # [핵심 로직] 배당/분배금수익률 글자 옆의 숫자 무조건 낚아채기
+            js_script = """
+            (() => {
+              const dts = Array.from(document.querySelectorAll('dt'));
+              const keywords = ['배당수익률', '분배금수익률', '수익률'];
+              for (const dt of dts) {
+                const text = (dt.innerText || '').replace(/\\s/g, '');
+                if (keywords.some(k => text.includes(k))) {
+                  let dd = dt.nextElementSibling;
+                  if (dd && dd.tagName.toLowerCase() === 'dd') return dd.innerText;
+                }
+              }
+              return '';
+            })();
+            """
+            raw_text = page.evaluate(js_script)
+            browser.close()
+            if raw_text:
+                match = re.search(r"([0-9]+(?:\.[0-9]+)?)", raw_text)
+                if match: return float(match.group(1)), f"✅ TTM({match.group(1)}%)"
+    except: pass
+    return 0.0, ""
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # -----------------------------------------------------------
 # [SECTION 1] 날짜 및 스케줄링 헬퍼 (공통 도구)
 # -----------------------------------------------------------
@@ -401,74 +471,88 @@ def load_and_process_data(df_raw, is_admin=False):
 
     results = [None] * len(df_raw)
     
-    # 3. 병렬 처리 작업자
+ # 3. 병렬 처리 작업자 (수정된 로직)
     def process_row(idx, row):
         try:
             code = str(row.get('종목코드', '')).strip()
             name = str(row.get('종목명', '')).strip()
             category = str(row.get('분류', '국내')).strip()
             
-            # 가격 조회 (Safe Logic 적용)
+            # (A) 가격 조회 (Safe Logic 적용)
             price = get_safe_price(broker, code, category)
             if not price: price = 0 
 
-            crawled_div = float(row.get('연배당금_크롤링', 0))
-            manual_div = float(row.get('연배당금', 0))        
+            # (B) 데이터 후보군 준비 (CSV 컬럼 매칭)
+            auto = float(row.get('연배당금_크롤링_auto', 0))     # 1순위 후보
+            ttm_saved = float(row.get('TTM_연배당률(크롤링)', 0)) # 2순위 후보 (Auto가 0일 때)
+            man = float(row.get('연배당금', 0))               # 3순위 후보
+            old = float(row.get('연배당금_크롤링', 0))         # 4순위 후보
             months = int(row.get('신규상장개월수', 0))
 
-            # 신규 상장 종목 연환산
-            if 0 < months < 12:
-                target_div = (manual_div / months * 12) if manual_div > 0 else crawled_div
-                display_name = f"{name} ⭐"
+            yield_val = 0.0
+            status_msg = ""
+
+            # (C) 4단계 우선순위 결정 로직 (사용자 핵심 요구사항)
+            # 🥇 1순위: Auto (자동 크롤링된 배당금 합계)
+            if auto > 0:
+                yield_val = (auto / price * 100) if price > 0 else 0
+                status_msg = "⚡ Auto"
+            
+            # 🥈 2순위: TTM (특별배당 등으로 Auto를 0으로 밀었을 때 화면값 대체)
+            elif ttm_saved > 0:
+                yield_val = ttm_saved
+                status_msg = "✅ TTM대체"
+            
+            # 🥉 3순위: Manual (사용자 수동 입력값)
+            elif man > 0:
+                # 신규 상장 종목일 경우 연환산 적용
+                if 0 < months < 12:
+                    yield_val = ((man / months * 12) / price * 100) if price > 0 else 0
+                else:
+                    yield_val = (man / price * 100) if price > 0 else 0
+                status_msg = "🔧 수동"
+            
+            # 🎖 4순위: Old (구버전 크롤링 데이터)
+            elif old > 0:
+                yield_val = (old / price * 100) if price > 0 else 0
+                status_msg = "⚠️ Old"
+            
             else:
-                target_div = crawled_div if crawled_div > 0 else manual_div
-                display_name = name
+                status_msg = "❌ N/A"
 
-            yield_val = (target_div / price * 100) if price > 0 else 0
-
-            if is_admin and (yield_val < 2.0 or yield_val > 25.0): display_name = f"🚫 {display_name}"
+            # (D) 디스플레이 설정
+            display_name = name
+            if 0 < months < 12:
+                display_name = f"{name} ⭐"
+            
+            if is_admin and (yield_val < 2.0 or yield_val > 25.0): 
+                display_name = f"🚫 {display_name}"
 
             price_fmt = f"{int(price):,}원" if category == '국내' else f"${price:.2f}"
             
-            csv_type = str(row.get('유형', '-'))
-            auto_asset_type = classify_asset(row) 
-            
-            final_type = csv_type
-            if '채권' in auto_asset_type: final_type = '채권'
-            elif '커버드콜' in auto_asset_type: final_type = '커버드콜'
-            elif '리츠' in auto_asset_type: final_type = '리츠'
-
+            # (E) 최종 데이터 패키징
             return idx, {
                 '코드': code, 
                 '종목명': display_name,
-                '블로그링크': str(row.get('블로그링크', '#')),
-                '금융링크': f"https://finance.naver.com/item/main.naver?code={code}" if category == '국내' else f"https://finance.yahoo.com/quote/{code}",
                 '현재가': price_fmt, 
-                '연배당률': yield_val,
+                '연배당률': round(yield_val, 2),
+                '비고': status_msg, # 현재 어떤 데이터를 쓰고 있는지 화면에 표시
                 '환구분': get_hedge_status(name, category),
                 '배당락일': str(row.get('배당락일', '-')), 
                 '분류': category,
-                '유형': final_type, 
-                '자산유형': auto_asset_type,
-                '캘린더링크': None, 
+                '유형': str(row.get('유형', '-')), 
+                '자산유형': classify_asset(row),
+                '블로그링크': str(row.get('블로그링크', '#')),
+                '금융링크': f"https://finance.naver.com/item/main.naver?code={code}" if category == '국내' else f"https://finance.yahoo.com/quote/{code}",
                 'pure_name': name.replace("🚫 ", "").replace(" (필터대상)", ""), 
                 '신규상장개월수': months,
                 '배당기록': str(row.get('배당기록', '')),
-                '검색라벨': str(row.get('검색라벨', f"[{code}] {display_name}"))
+                '연배당금_크롤링_auto': auto,
+                'TTM_연배당률(크롤링)': ttm_saved
             }
         except Exception as e:
             logger.error(f"Row Processing Error ({idx}): {e}")
             return idx, None
-
-    # 스레드 풀 실행 (yfinance 충돌 완화를 위해 워커 수 조절 가능)
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = {executor.submit(process_row, idx, row): idx for idx, row in df_raw.iterrows()}
-        for future in as_completed(futures):
-            idx, result = future.result()
-            results[idx] = result
-
-    final_data = [r for r in results if r is not None]
-    return pd.DataFrame(final_data).sort_values('연배당률', ascending=False) if final_data else pd.DataFrame()
 
 
 # -----------------------------------------------------------
