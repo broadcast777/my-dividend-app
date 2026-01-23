@@ -336,23 +336,23 @@ def render_admin_tools(df_raw):
         # -------------------------------------------------------------
         with st.expander("⚡ 전체 종목 자동 업데이트 (스마트)"):
             st.info("신규 상장(1년 미만)과 저배당주는 건너뜁니다.\nAuto가 0인 종목은 TTM(2순위)을 크롤링합니다.")
+    # logic.py에 있는 스마트 함수 호출 (변수 3개로 받기!)
+            success, msg, failed_list = logic.smart_update_and_save() # 👈 failed_list 추가
             
-            # logic.py에 있는 스마트 함수 호출 (변수 3개로 받기!)
-                    success, msg, failed_list = logic.smart_update_and_save() # 👈 failed_list 추가
-                    
-                    if success:
-                        st.success(msg)
-                        
-                        # [추가] 실패한 종목이 있다면 리스트로 보여주기
-                        if failed_list:
-                            with st.expander("⚠️ 실패한 종목 확인 (업데이트 제외됨)"):
-                                for f_name in failed_list:
-                                    st.write(f"- {f_name}")
-                                    
-                        time.sleep(2)
-                        st.rerun()
-                    else:
-                        st.error(msg)
+            if success:
+                st.success(msg)
+                
+                # [추가] 실패한 종목이 있다면 리스트로 보여주기
+                if failed_list:
+                    with st.expander("⚠️ 실패한 종목 확인 (업데이트 제외됨)"):
+                        for f_name in failed_list:
+                            st.write(f"- {f_name}")
+                            
+                time.sleep(2)
+                st.rerun()
+            else:
+                st.error(msg)          
+  
         st.markdown("---")
         if st.checkbox("네, 덮어써도 좋습니다."):
             if st.button("🚀 깃허브에 영구 저장", type="primary", use_container_width=True):
