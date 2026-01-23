@@ -1,7 +1,7 @@
 """
-프로젝트: 배당 팽이 (Dividend Top) v2.9
+프로젝트: 배당 팽이 (Dividend Top) v3.0
 파일명: logic.py
-설명: 금융 API 연동, 데이터 크롤링, 캘린더 파일 생성 (브라우저 자동 설치 및 해외 자동화 패치 적용)
+설명: 금융 API 연동, 데이터 크롤링, 캘린더 파일 생성 (네이버 API 직접 호출 패치 + 브라우저 자동 설치)
 업데이트: 2026.01.23
 """
 
@@ -34,7 +34,7 @@ if not logging.getLogger().handlers:
 logger = logging.getLogger(__name__)
 
 # -----------------------------------------------------------
-# [SECTION 0] Playwright 브라우저 자동 설치 및 크롤링 헬퍼
+# [SECTION 0] TTM 데이터 확보 (API 우선 + Playwright 방어)
 # -----------------------------------------------------------
 
 def _ensure_browser_installed():
@@ -53,11 +53,34 @@ def _ensure_browser_installed():
 
 def get_ttm_playwright_sync(code):
     """
-    [최종 방어] 화면 전체 텍스트 스캔 + 브라우저 자동 설치 기능 포함.
+    [최종 방어] 
+    1단계: 네이버 API (JSON) 직접 호출 -> 브라우저 없이 0.1초 해결
+    2단계: 실패 시 Playwright로 화면 전체 스캔
     """
-    yield_val = 0.0
+    code = str(code).strip()
     
-    # 1차 시도: 그냥 실행해본다.
+    # -----------------------------------------------------------
+    # [1단계] 네이버 ETF API 직접 찌르기 (치트키)
+    # -----------------------------------------------------------
+    try:
+        # ETF용 API (472150 등)
+        url = f"https://api.stock.naver.com/etf/{code}/basic"
+        res = requests.get(url, timeout=3, headers={"User-Agent": "Mozilla/5.0"})
+        
+        if res.status_code == 200:
+            data = res.json()
+            # API 응답 안에 'dividendYield'가 있는지 확인
+            if 'result' in data and data['result']:
+                y_val = data['result'].get('dividendYield')
+                if y_val and float(y_val) > 0:
+                    return float(y_val), f"✅ 네이버API({y_val}%)"
+    except Exception:
+        pass # API 실패하면 조용히 다음 단계로
+
+    # -----------------------------------------------------------
+    # [2단계] Playwright (브라우저 크롤링)
+    # -----------------------------------------------------------
+    yield_val = 0.0
     try:
         yield_val, msg = _run_crawling(code)
         if yield_val > 0: return yield_val, msg
@@ -405,8 +428,6 @@ def get_hedge_status(name, category):
 # [SECTION 3] 데이터 로드 및 처리
 # -----------------------------------------------------------
 
-# [logic.py -> load_and_process_data 함수 전체 교체]
-
 @st.cache_data(ttl=1800, show_spinner=False)
 def load_and_process_data(df_raw, is_admin=False):
     if df_raw.empty: return pd.DataFrame()
@@ -433,7 +454,7 @@ def load_and_process_data(df_raw, is_admin=False):
     except Exception as e:
         logger.error(f"Data Preprocessing Error: {e}")
 
-    # 2. 브로커 초기화 (단순 시세 조회용)
+    # 2. 브로커 초기화
     try:
         broker = mojito.KoreaInvestment(
             api_key=st.secrets["kis"]["app_key"],
@@ -453,20 +474,23 @@ def load_and_process_data(df_raw, is_admin=False):
             name = str(row.get('종목명', '')).strip()
             category = str(row.get('분류', '국내')).strip()
             
-            # (A) 가격 조회 (Safe Logic)
+            # (A) 가격 조회
             price = get_safe_price(broker, code, category)
             if not price: price = 0
 
-            # (B) 데이터 준비 (CSV에서 값 읽기)
+            # (B) 데이터 준비
             auto_div = float(row.get('연배당금_크롤링_auto', 0)) # 1순위
             manual_div = float(row.get('연배당금', 0))         # 3순위
             old_div = float(row.get('연배당금_크롤링', 0))      # 4순위
-            saved_ttm_yield = float(row.get('TTM_연배당률(크롤링)', 0))  # 2순위 (저장된 값)
+            
+            # [변경] 기존에 저장된 'TTM 수익률(%)' 불러오기
+            saved_ttm_yield = float(row.get('TTM_연배당률(크롤링)', 0))  # 2순위 후보 (기존값)
 
-            # (C) 우선순위 로직 (순수 계산만 수행, 크롤링 X)
+            # (C) 우선순위 로직
             final_div = 0
             calc_yield = 0
             status_msg = ""
+            new_ttm_yield = 0 
             
             # 🥇 1순위: Auto
             if auto_div > 0:
@@ -474,27 +498,27 @@ def load_and_process_data(df_raw, is_admin=False):
                 calc_yield = (final_div / price * 100) if price > 0 else 0
                 status_msg = "⚡ Auto"
 
-            # 🥈 2순위: TTM (CSV에 저장된 값 사용)
-            elif saved_ttm_yield > 0:
-                calc_yield = saved_ttm_yield
-                # 수익률로 금액 역산
-                final_div = int(price * (saved_ttm_yield / 100)) if price > 0 else 0
-                status_msg = f"✅ 웹크롤링({saved_ttm_yield}%)"
-
-            # 🥉 3순위: 수동
-            elif manual_div > 0:
-                final_div = manual_div
-                calc_yield = (final_div / price * 100) if price > 0 else 0
-                status_msg = "🔧 수동"
-            
-            # 4순위: Old
-            elif old_div > 0:
-                final_div = old_div
-                calc_yield = (final_div / price * 100) if price > 0 else 0
-                status_msg = "⚠️ Old"
-            
             else:
-                status_msg = "❌ 갱신필요"
+                # 🥈 2순위: TTM (여기서는 저장된 값만 사용! 크롤링 X)
+                if calc_yield == 0 and saved_ttm_yield > 0:
+                    calc_yield = saved_ttm_yield
+                    # 저장된 수익률로 금액 역산
+                    final_div = int(price * (saved_ttm_yield / 100)) if price > 0 else 0
+                    status_msg = f"✅ 웹크롤링({saved_ttm_yield}%)"
+                    new_ttm_yield = saved_ttm_yield 
+
+                # 🥉 3순위: 수동
+                if calc_yield == 0:
+                    if manual_div > 0:
+                        final_div = manual_div
+                        calc_yield = (final_div / price * 100) if price > 0 else 0
+                        status_msg = "🔧 수동"
+                    elif old_div > 0:
+                        final_div = old_div
+                        calc_yield = (final_div / price * 100) if price > 0 else 0
+                        status_msg = "⚠️ Old"
+                    else:
+                        status_msg = "❌ N/A"
 
             # (D) 신규 상장 종목 처리
             months = int(row.get('신규상장개월수', 0))
@@ -505,9 +529,9 @@ def load_and_process_data(df_raw, is_admin=False):
             else:
                 display_name = name
 
-            # (E) 반환 데이터 구성
             price_fmt = f"{int(price):,}원" if category == '국내' else f"${price:.2f}"
-            
+            final_ttm_save = new_ttm_yield if new_ttm_yield > 0 else saved_ttm_yield
+
             csv_type = str(row.get('유형', '-'))
             auto_asset_type = classify_asset(row)
             final_type = '채권' if '채권' in auto_asset_type else \
@@ -532,25 +556,21 @@ def load_and_process_data(df_raw, is_admin=False):
                 '배당기록': str(row.get('배당기록', '')),
                 '검색라벨': str(row.get('검색라벨', f"[{code}] {display_name}")),
                 '비고': status_msg,
-                
-                # 데이터 보존
                 '연배당금_크롤링_auto': auto_div,
                 '연배당금': manual_div,
                 '연배당금_크롤링': old_div,
-                'TTM_연배당률(크롤링)': saved_ttm_yield 
+                'TTM_연배당률(크롤링)': final_ttm_save 
             }
         except Exception as e:
             logger.error(f"Row Processing Error ({idx}): {e}")
             return idx, None
 
-    # 4. 스레드 풀 실행 (계산만 하므로 빠름)
     with ThreadPoolExecutor(max_workers=10) as executor:
         futures = {executor.submit(process_row, idx, row): idx for idx, row in df_raw.iterrows()}
         for future in as_completed(futures):
             idx, result = future.result()
             results[idx] = result
 
-    # 5. 결과 수집
     final_data = [r for r in results if r is not None]
     
     if final_data:
@@ -589,6 +609,7 @@ def load_stock_data_from_csv():
                 return s
             df.columns = [_normalize_col(c) for c in df.columns]
 
+            # 필수 컬럼 보장
             if '연배당금_크롤링' not in df.columns: df['연배당금_크롤링'] = 0.0
             if '연배당금_크롤링_auto' not in df.columns: df['연배당금_크롤링_auto'] = 0.0
             if '연배당률_크롤링' not in df.columns: df['연배당률_크롤링'] = 0.0
@@ -774,7 +795,7 @@ def fetch_dividend_yield_hybrid(code, category):
 
 def smart_update_and_save():
     """
-    [스마트 전체 갱신 (강력한 타입 체크 + 재시도 로직)]
+    [스마트 전체 갱신 (강력한 타입 체크 + API 우선 + 재시도 로직)]
     """
     try:
         df = load_stock_data_from_csv()
@@ -828,7 +849,6 @@ def smart_update_and_save():
                         y_val, src = fetch_dividend_yield_hybrid(code, category)
                         if y_val > 0:
                             df.at[idx, '연배당률_크롤링'] = float(y_val)
-                            import re
                             m = re.search(r'\(([\d,\.]+)원\)', str(src))
                             if m:
                                 val = int(m.group(1).replace(',', '').split('.')[0])
@@ -837,21 +857,16 @@ def smart_update_and_save():
                     except: pass
 
                 # 2. TTM 크롤링 (Auto가 0일 때)
-                # [수정] 값을 다시 읽어서 확인
                 check_auto = to_float(df.at[idx, '연배당금_크롤링_auto'])
                 
                 if check_auto == 0:
                     try:
+                        # 여기서 API 호출이 포함된 새로운 함수가 실행됩니다.
                         ttm_yield, _ = get_ttm_playwright_sync(code)
                         if ttm_yield > 0:
-                            # [중요] float로 명시적 변환 후 저장
                             df.at[idx, 'TTM_연배당률(크롤링)'] = float(ttm_yield)
-                            
-                            # TTM이 성공했으면 카운트 증가 (잠금 상태라도 TTM은 갱신해줌)
-                            updated_count += 1
-                            # logger.info(f"TTM 갱신 성공: {name} -> {ttm_yield}%")
-                    except Exception as e:
-                        # logger.warning(f"TTM 실패 {name}: {e}")
+                            if is_locked: updated_count += 1
+                    except Exception:
                         pass
 
             # ----------------------------------
