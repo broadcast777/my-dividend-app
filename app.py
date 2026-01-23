@@ -1316,7 +1316,7 @@ def main():
         
         # (2) [NEW] 크롤링된 Auto 데이터를 저장용 변수(df_dirty)에 강제 주입
         #     -> 이렇게 해야 '저장' 버튼 누를 때 0원이 아닌 51원이 저장됨!
-        if not df_calculated.empty and 'df_dirty' in st.session_state:
+        if df_calculated is not None and not df_calculated.empty and 'df_dirty' in st.session_state:
             try:
                 # 종목코드를 기준으로 매핑 (순서 섞임 방지)
                 auto_map = df_calculated.set_index('종목코드')['연배당금_크롤링_auto'].to_dict()
