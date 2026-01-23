@@ -487,26 +487,95 @@ def reset_auto_data(code):
 # -----------------------------------------------------------
 # [SECTION 6] 배당 조회 (버튼 및 Auto용)
 # -----------------------------------------------------------
+# [logic.py의 fetch_dividend_yield_hybrid 함수를 이걸로 통째로 교체하세요]
+
 def fetch_dividend_yield_hybrid(code, category):
+    """
+    [복구 + 강화]
+    1. 네이버 API 시도 (빠름)
+    2. 실패 시 HTML 정밀 크롤링 시도 (리츠/일반주식 대응 - 예전 방식 복구)
+    """
     code = str(code).strip()
+    
     if category == '국내':
+        # ---------------------------------------------------
+        # [시도 1] API (ETF 전용 - 빠름)
+        # ---------------------------------------------------
         try:
             url = f"https://m.stock.naver.com/api/etf/{code}/dividend/history?pageSize=1"
-            res = requests.get(url, timeout=3, headers={"User-Agent": "Mozilla/5.0"})
+            res = requests.get(url, timeout=2, headers={"User-Agent": "Mozilla/5.0"})
             if res.status_code == 200:
                 data = res.json()
                 items = data.get('result', {}).get('items', [])
                 if items:
                     amt = items[0].get('dividendAmount') or items[0].get('amount') or 0
                     amt = float(str(amt).replace(',', ''))
+                    
                     if amt > 0:
                         price = get_safe_price(None, code, '국내')
                         if price > 0:
                             y = (amt * 12) / price * 100
-                            return round(y, 2), f"✅ 실시간({int(amt)}원)"
+                            return round(y, 2), f"✅ API({int(amt)}원)"
         except: pass
+
+        # ---------------------------------------------------
+        # [시도 2] HTML 크롤링 (리츠/일반주식용 - 강력함)
+        # ---------------------------------------------------
+        try:
+            # 네이버 금융 메인 페이지 (PC 버전이 데이터가 확실함)
+            url = f"https://finance.naver.com/item/main.naver?code={code}"
+            res = requests.get(url, timeout=3, headers={"User-Agent": "Mozilla/5.0"})
+            html = res.text
+            
+            # 1. 현재가 찾기
+            price = 0
+            m_price = re.search(r'no_today.*<span class="blind">([\d,]+)</span>', html)
+            if m_price:
+                price = int(m_price.group(1).replace(',', ''))
+            
+            if price == 0:
+                price = get_safe_price(None, code, '국내')
+
+            # 2. 주당배당금(DPS) 찾기 (화면 중간 '주당배당금' 테이블)
+            # "주당배당금" 텍스트 뒤에 나오는 숫자 중 가장 최근 것
+            if "주당배당금" in html:
+                # 테이블 행 찾기
+                soup = BeautifulSoup(html, 'html.parser')
+                dps_rows = soup.find_all('th', string=re.compile('주당배당금'))
+                
+                if dps_rows:
+                    # 해당 행의 td들 가져오기
+                    parent = dps_rows[0].parent
+                    tds = parent.find_all('td')
+                    # 뒤에서부터 유효한 숫자 찾기 (최근 예상치 or 확정치)
+                    for td in reversed(tds):
+                        txt = td.get_text().strip().replace(',', '')
+                        if txt.isdigit() and int(txt) > 0:
+                            dps = int(txt)
+                            # 월배당인지 확인 불가하므로, 단순 수익률 계산보다는 값 반환에 의의
+                            # 리츠의 경우 보통 연배당금이 찍힘
+                            if price > 0:
+                                y = (dps / price) * 100
+                                return round(y, 2), f"✅ 웹크롤링({dps}원)"
+                            break
+        except: pass
+        
+        # ---------------------------------------------------
+        # [시도 3] 모바일 페이지 텍스트 스캔 (최후통첩)
+        # ---------------------------------------------------
+        try:
+            url = f"https://m.stock.naver.com/item/main.nhn#/stocks/{code}"
+            res = requests.get(url, timeout=3, headers={"User-Agent": "Mozilla/5.0"})
+            # 정규식으로 배당수익률 XX.XX% 찾기
+            m = re.search(r'배당수익률.*?([\d\.]+)\s*%', res.text)
+            if m:
+                return float(m.group(1)), "✅ 웹스캔(%)"
+        except: pass
+
         return 0.0, "⚠️ 조회 실패"
+
     else:
+        # [해외 종목] (기존 유지)
         try:
             tk = yf.Ticker(code)
             divs = tk.dividends
@@ -514,6 +583,10 @@ def fetch_dividend_yield_hybrid(code, category):
                 cut = pd.Timestamp.now(tz=divs.index.tz) - pd.Timedelta(days=365)
                 usd = float(divs[divs.index >= cut].sum())
                 p = tk.fast_info.get('last_price')
+                if not p:
+                    h = tk.history(period='1d')
+                    if not h.empty: p = h['Close'].iloc[-1]
+                
                 if p and p > 0:
                     y = (usd / p) * 100
                     return round(y, 2), f"✅ 야후(${usd:.2f})"
