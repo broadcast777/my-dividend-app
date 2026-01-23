@@ -11,3 +11,5 @@ supabase
 git+https://github.com/sharebook-kr/mojito.git
 PyGithub
 cryptography
+playwright
+nest_asyncio  
