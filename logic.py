@@ -405,6 +405,8 @@ def get_hedge_status(name, category):
 # [SECTION 3] 데이터 로드 및 처리
 # -----------------------------------------------------------
 
+# [logic.py -> load_and_process_data 함수 전체 교체]
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def load_and_process_data(df_raw, is_admin=False):
     if df_raw.empty: return pd.DataFrame()
@@ -431,7 +433,7 @@ def load_and_process_data(df_raw, is_admin=False):
     except Exception as e:
         logger.error(f"Data Preprocessing Error: {e}")
 
-    # 2. 브로커 초기화
+    # 2. 브로커 초기화 (단순 시세 조회용)
     try:
         broker = mojito.KoreaInvestment(
             api_key=st.secrets["kis"]["app_key"],
@@ -451,21 +453,20 @@ def load_and_process_data(df_raw, is_admin=False):
             name = str(row.get('종목명', '')).strip()
             category = str(row.get('분류', '국내')).strip()
             
-            # (A) 가격 조회
+            # (A) 가격 조회 (Safe Logic)
             price = get_safe_price(broker, code, category)
             if not price: price = 0
 
-            # (B) 데이터 준비
+            # (B) 데이터 준비 (CSV에서 값 읽기)
             auto_div = float(row.get('연배당금_크롤링_auto', 0)) # 1순위
             manual_div = float(row.get('연배당금', 0))         # 3순위
             old_div = float(row.get('연배당금_크롤링', 0))      # 4순위
-            saved_ttm_yield = float(row.get('TTM_연배당률(크롤링)', 0))  # 2순위
+            saved_ttm_yield = float(row.get('TTM_연배당률(크롤링)', 0))  # 2순위 (저장된 값)
 
-            # (C) 우선순위 로직
+            # (C) 우선순위 로직 (순수 계산만 수행, 크롤링 X)
             final_div = 0
             calc_yield = 0
             status_msg = ""
-            new_ttm_yield = 0 
             
             # 🥇 1순위: Auto
             if auto_div > 0:
@@ -473,40 +474,27 @@ def load_and_process_data(df_raw, is_admin=False):
                 calc_yield = (final_div / price * 100) if price > 0 else 0
                 status_msg = "⚡ Auto"
 
+            # 🥈 2순위: TTM (CSV에 저장된 값 사용)
+            elif saved_ttm_yield > 0:
+                calc_yield = saved_ttm_yield
+                # 수익률로 금액 역산
+                final_div = int(price * (saved_ttm_yield / 100)) if price > 0 else 0
+                status_msg = f"✅ 웹크롤링({saved_ttm_yield}%)"
+
+            # 🥉 3순위: 수동
+            elif manual_div > 0:
+                final_div = manual_div
+                calc_yield = (final_div / price * 100) if price > 0 else 0
+                status_msg = "🔧 수동"
+            
+            # 4순위: Old
+            elif old_div > 0:
+                final_div = old_div
+                calc_yield = (final_div / price * 100) if price > 0 else 0
+                status_msg = "⚠️ Old"
+            
             else:
-                # 🥈 2순위: TTM
-                crawled_yield = 0
-                pw_msg = ""
-                if category == '국내':
-                    try:
-                        crawled_yield, pw_msg = get_ttm_playwright_sync(code)
-                    except NameError:
-                        crawled_yield = 0
-
-                    if crawled_yield > 0:
-                        calc_yield = crawled_yield
-                        final_div = int(price * (crawled_yield / 100)) if price > 0 else 0
-                        status_msg = pw_msg
-                        new_ttm_yield = crawled_yield
-                
-                if calc_yield == 0 and saved_ttm_yield > 0:
-                    calc_yield = saved_ttm_yield
-                    final_div = int(price * (saved_ttm_yield / 100)) if price > 0 else 0
-                    status_msg = f"💾 TTM(저장됨: {saved_ttm_yield}%)"
-                    new_ttm_yield = saved_ttm_yield
-
-                # 🥉 3순위: 수동
-                if calc_yield == 0:
-                    if manual_div > 0:
-                        final_div = manual_div
-                        calc_yield = (final_div / price * 100) if price > 0 else 0
-                        status_msg = "🔧 수동"
-                    elif old_div > 0:
-                        final_div = old_div
-                        calc_yield = (final_div / price * 100) if price > 0 else 0
-                        status_msg = "⚠️ Old"
-                    else:
-                        status_msg = "❌ N/A"
+                status_msg = "❌ 갱신필요"
 
             # (D) 신규 상장 종목 처리
             months = int(row.get('신규상장개월수', 0))
@@ -517,9 +505,9 @@ def load_and_process_data(df_raw, is_admin=False):
             else:
                 display_name = name
 
+            # (E) 반환 데이터 구성
             price_fmt = f"{int(price):,}원" if category == '국내' else f"${price:.2f}"
-            final_ttm_save = new_ttm_yield if new_ttm_yield > 0 else saved_ttm_yield
-
+            
             csv_type = str(row.get('유형', '-'))
             auto_asset_type = classify_asset(row)
             final_type = '채권' if '채권' in auto_asset_type else \
@@ -544,21 +532,25 @@ def load_and_process_data(df_raw, is_admin=False):
                 '배당기록': str(row.get('배당기록', '')),
                 '검색라벨': str(row.get('검색라벨', f"[{code}] {display_name}")),
                 '비고': status_msg,
+                
+                # 데이터 보존
                 '연배당금_크롤링_auto': auto_div,
                 '연배당금': manual_div,
                 '연배당금_크롤링': old_div,
-                'TTM_연배당률(크롤링)': final_ttm_save 
+                'TTM_연배당률(크롤링)': saved_ttm_yield 
             }
         except Exception as e:
             logger.error(f"Row Processing Error ({idx}): {e}")
             return idx, None
 
+    # 4. 스레드 풀 실행 (계산만 하므로 빠름)
     with ThreadPoolExecutor(max_workers=10) as executor:
         futures = {executor.submit(process_row, idx, row): idx for idx, row in df_raw.iterrows()}
         for future in as_completed(futures):
             idx, result = future.result()
             results[idx] = result
 
+    # 5. 결과 수집
     final_data = [r for r in results if r is not None]
     
     if final_data:
