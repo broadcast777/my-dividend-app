@@ -830,6 +830,8 @@ def smart_update_and_save():
     [핵심] 앱에서 버튼 누르면 실행되는 함수
     모든 종목을 돌며 Auto(1순위)와 TTM(2순위) 데이터를 채우고 깃허브에 저장합니다.
     """
+    import sys  # 👈 [추가됨] 이 한 줄이 빠져서 에러가 났던 겁니다!
+    
     try:
         # 1. CSV 파일 로드
         df = load_stock_data_from_csv()
@@ -841,9 +843,6 @@ def smart_update_and_save():
         for idx, row in df.iterrows():
             code = str(row['종목코드']).strip()
             category = str(row.get('분류', '국내')).strip()
-            
-            # 신규 상장이나 수동 관리 종목은 건너뛰고 싶으면 여기서 if문 추가 가능
-            # 하지만 일단은 데이터를 다 채워두는 게 좋습니다.
             
             try:
                 if category == '국내':
