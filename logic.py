@@ -877,8 +877,7 @@ def _fetch_overseas_sensor(code):
 
 def smart_update_and_save():
     """
-    [개선] 자동 저장 기능을 제거하고, 갱신 결과(성공/실패/보호)를 리포트합니다.
-    갱신된 데이터는 세션 상태에 보관되어 사용자가 직접 저장 버튼을 누를 때 확정됩니다.
+    [수정됨] 자동 저장 제거 + TTM 저장 로직 강화
     """
     import sys
     import time
@@ -889,11 +888,15 @@ def smart_update_and_save():
         df = load_stock_data_from_csv()
         if df.empty: return False, "❌ CSV 파일을 찾을 수 없습니다.", []
         
+        # [중요] TTM 저장용 컬럼이 없으면 미리 0.0으로 채워서 생성
+        if 'TTM_연배당률(크롤링)' not in df.columns:
+            df['TTM_연배당률(크롤링)'] = 0.0
+        
         total_count = len(df)
         success_count = 0
         fail_count = 0
         protected_count = 0
-        failed_list = [] # 실패한 종목명을 담을 리스트
+        failed_list = []
         
         # [UI] 진행률 표시줄
         my_bar = st.progress(0, text="스마트 업데이트 준비 중...")
@@ -905,7 +908,7 @@ def smart_update_and_save():
             name = row['종목명']
             category = str(row.get('분류', '국내')).strip()
             
-            # 신규 상장 개월수 확인 (12개월 미만 보호)
+            # 신규 상장 보호 (기존 로직 유지)
             try: months = int(row.get('신규상장개월수', 0))
             except: months = 0
             
@@ -918,36 +921,56 @@ def smart_update_and_save():
             status_text.markdown(f"🔄 **[{idx+1}/{total_count}] {name}** 수집 중...")
             
             try:
+                # 데이터 수집 (센서 호출)
                 if category == '국내':
+                    # val=연배당금(Auto), rate=TTM수익률
                     val, rate = _fetch_domestic_sensor(code)
                 else:
                     val, rate = _fetch_overseas_sensor(code)
                 
-                # 데이터가 정상적으로 수집된 경우에만 반영
+                # ---------------------------------------------------------
+                # [핵심 수정] 데이터 저장 로직 강화
+                # ---------------------------------------------------------
+                data_updated = False
+                
+                # 1) 연배당금(Auto) 저장
                 if val > 0:
                     df.at[idx, '연배당금_크롤링_auto'] = val
-                    if rate > 0: df.at[idx, 'TTM_연배당률(크롤링)'] = rate
+                    data_updated = True
+                
+                # 2) TTM 수익률 저장 (조건: rate가 0보다 크면 무조건 저장)
+                if rate > 0:
+                    df.at[idx, 'TTM_연배당률(크롤링)'] = rate
+                    # 혹시 CSV 헤더가 옛날 이름일 경우를 대비해 이중 저장
+                    if 'TTM_연배당률크롤링' in df.columns:
+                        df.at[idx, 'TTM_연배당률크롤링'] = rate
+                    data_updated = True
+                
+                # 결과 카운팅
+                if data_updated:
                     success_count += 1
                 else:
+                    # 둘 다 0이면 실패로 간주
                     fail_count += 1
-                    failed_list.append(name) # 실패 리스트 추가
+                    failed_list.append(name)
                     
             except Exception as e:
                 fail_count += 1
                 failed_list.append(name)
-                logger.warning(f"Update fail {name}({code}): {e}")
+                # logger.warning(f"Update fail {name}: {e}")
             
-            time.sleep(0.1) # 서버 부하 방지
+            time.sleep(0.1)
             my_bar.progress((idx + 1) / total_count)
                 
-        # 3. 마무리 (세션에 결과 보관)
+        # 3. 마무리
         my_bar.empty()
-        st.session_state['df_dirty'] = df # 👈 중요: 변경된 데이터를 세션에 저장 (저장 버튼이 쓸 데이터)
+        status_text.empty()
         
-        # 결과 메시지 구성
+        # 세션에 결과 데이터 저장 (저장 버튼이 가져다 쓸 예정)
+        st.session_state['df_dirty'] = df
+        
         final_msg = f"✨ 갱신 완료! (성공: {success_count} / 실패: {fail_count} / 🛡️보호: {protected_count}개)"
         
-        # 실패한 종목이 있다면 상세 로그 출력용 데이터 포함
         return True, final_msg, failed_list
             
     except Exception as e:
