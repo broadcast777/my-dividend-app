@@ -941,9 +941,7 @@ def smart_update_and_save():
                 # 2) TTM 수익률 저장 (조건: rate가 0보다 크면 무조건 저장)
                 if rate > 0:
                     df.at[idx, 'TTM_연배당률(크롤링)'] = rate
-                    # 혹시 CSV 헤더가 옛날 이름일 경우를 대비해 이중 저장
-                    if 'TTM_연배당률크롤링' in df.columns:
-                        df.at[idx, 'TTM_연배당률크롤링'] = rate
+
                     data_updated = True
                 
                 # 결과 카운팅
