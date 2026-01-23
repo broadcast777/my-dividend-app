@@ -28,20 +28,7 @@ import sqlite3  # DB 에러 처리를 위해 추가
 # [상단 import 뭉치에 추가]
 import subprocess
 
-def _ensure_browser_installed():
-    """브라우저 미설치 시 자동 설치 (Streamlit Cloud 환경 대비)"""
-    try:
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as p:
-            try:
-                p.chromium.launch(headless=True)
-            except:
-                # 브라우저가 없으면 설치 명령 실행
-                subprocess.run(["playwright", "install", "chromium"], check=True)
-                # 리눅스 의존성 패키지도 필요한 경우 대비 (선택사항)
-                # subprocess.run(["playwright", "install-deps"], check=True)
-    except:
-        pass
+
 
 def get_ttm_playwright_sync(code):
     """코랩 검증 완료: 네이버 모바일 지표에서 TTM 수익률을 무조건 낚아채는 로직"""
