@@ -415,9 +415,7 @@ def get_hedge_status(name, category):
     return "⚡환노출" if any(x in name_str for x in ['미국', 'GLOBAL', 'S&P500', '나스닥', '국제']) else "-"
 
 
-# -----------------------------------------------------------
-# [SECTION 3] 메인 데이터 로드 및 병렬 처리 엔진
-# -----------------------------------------------------------
+# [logic.py -> load_and_process_data 함수 전체 교체]
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def load_and_process_data(df_raw, is_admin=False):
@@ -425,7 +423,7 @@ def load_and_process_data(df_raw, is_admin=False):
 
     # 1. 데이터 전처리 (결측치 방어)
     try:
-        num_cols = ['연배당금', '연배당률', '현재가', '신규상장개월수', '연배당금_크롤링']
+        num_cols = ['연배당금', '연배당률', '현재가', '신규상장개월수', '연배당금_크롤링', '연배당금_크롤링_auto']
         for col in num_cols:
             if col in df_raw.columns:
                 # 문자가 섞여있을 경우 강제 변환 후 NaN은 0으로
@@ -460,9 +458,7 @@ def load_and_process_data(df_raw, is_admin=False):
 
     results = [None] * len(df_raw)
     
-    # 3. 병렬 처리 작업자
-# [logic.py -> load_and_process_data 내부의 process_row 함수 교체]
-    
+    # 3. 병렬 처리 작업자 함수 (내부 정의)
     def process_row(idx, row):
         try:
             code = str(row.get('종목코드', '')).strip()
@@ -473,14 +469,14 @@ def load_and_process_data(df_raw, is_admin=False):
             price = get_safe_price(broker, code, category)
             if not price: price = 0
 
-            # (B) 데이터 준비 (모든 후보군 불러오기)
-            # 1순위 후보: Auto (최신 크롤링)
+            # (B) 데이터 준비
+            # 1순위: Auto (최신 자동 크롤링)
             auto_div = float(row.get('연배당금_크롤링_auto', 0))
             
-            # 3순위 후보: Manual (수동 입력)
+            # 3순위: Manual (수동 입력)
             manual_div = float(row.get('연배당금', 0))
             
-            # 4순위 후보: Old (구버전 데이터)
+            # 4순위: Old (구버전 데이터)
             old_div = float(row.get('연배당금_크롤링', 0))
 
             # (C) 4단 방어 우선순위 결정 로직
@@ -488,41 +484,41 @@ def load_and_process_data(df_raw, is_admin=False):
             calc_yield = 0
             status_msg = ""
             
-            # 🥇 1순위: Auto (최신 자동 크롤링)
+            # 🥇 1순위: Auto
             if auto_div > 0:
                 final_div = auto_div
                 calc_yield = (final_div / price * 100) if price > 0 else 0
                 status_msg = "⚡ Auto"
 
             else:
-                # 1순위 실패 시 -> 🥈 2순위: Playwright (TTM 웹 크롤링) 진입
-                # (속도 저하 방지를 위해 '국내' 종목이면서 'Auto'가 실패했을 때만 실행)
+                # 1순위 실패 -> 🥈 2순위: Playwright (TTM 웹 크롤링)
+                # 속도 저하 방지를 위해 '국내' 종목이면서 Auto가 실패했을 때만 실행
                 ttm_yield = 0
+                pw_msg = ""
+                
                 if category == '국내':
-                    # 여기서 아까 만든 Playwright 함수 호출!
-                    # (get_ttm_playwright_sync 함수가 logic.py에 있어야 함)
                     try:
+                        # logic.py 상단에 정의된 함수 호출
                         ttm_yield, pw_msg = get_ttm_playwright_sync(code)
                     except NameError:
-                        # 함수가 없을 경우 대비
                         ttm_yield = 0
                         pw_msg = ""
 
                     if ttm_yield > 0:
                         calc_yield = ttm_yield
-                        # 수익률(%)을 기반으로 배당금(원) 역산
+                        # 수익률로 배당금 역산 (현재가 * 수익률)
                         final_div = int(price * (ttm_yield / 100)) if price > 0 else 0
-                        status_msg = pw_msg  # 예: "✅ 웹크롤링(2.39%)"
+                        status_msg = pw_msg # "✅ 웹크롤링(2.39%)"
 
-                # 2순위(Playwright)도 실패했거나 해외 종목인 경우
+                # 2순위도 실패했거나 해외 종목인 경우
                 if calc_yield == 0:
-                    # 🥉 3순위: Manual (수동 입력)
+                    # 🥉 3순위: Manual
                     if manual_div > 0:
                         final_div = manual_div
                         calc_yield = (final_div / price * 100) if price > 0 else 0
                         status_msg = "🔧 수동"
                     
-                    # 🛡️ 4순위: Old (구버전 데이터)
+                    # 🛡️ 4순위: Old
                     elif old_div > 0:
                         final_div = old_div
                         calc_yield = (final_div / price * 100) if price > 0 else 0
@@ -532,8 +528,8 @@ def load_and_process_data(df_raw, is_admin=False):
                         status_msg = "❌ N/A"
 
             # (D) 신규 상장 종목 처리
-            # 3순위(수동)를 사용할 때만 '월 배당 * 12' 로직 적용 (Auto나 TTM은 이미 연수익률임)
             months = int(row.get('신규상장개월수', 0))
+            # 3순위(수동)를 사용할 때만 월할 계산 적용
             if 0 < months < 12 and "수동" in status_msg:
                 final_div = (manual_div / months * 12)
                 calc_yield = (final_div / price * 100) if price > 0 else 0
@@ -541,7 +537,7 @@ def load_and_process_data(df_raw, is_admin=False):
             else:
                 display_name = name
 
-            # (E) 데이터 포장 및 반환
+            # (E) 데이터 포장
             price_fmt = f"{int(price):,}원" if category == '국내' else f"${price:.2f}"
             
             csv_type = str(row.get('유형', '-'))
@@ -567,19 +563,35 @@ def load_and_process_data(df_raw, is_admin=False):
                 '신규상장개월수': months,
                 '배당기록': str(row.get('배당기록', '')),
                 '검색라벨': str(row.get('검색라벨', f"[{code}] {display_name}")),
-                '비고': status_msg, # 이 컬럼을 화면에 띄우면 현재 상태 확인 가능!
+                '비고': status_msg,
                 
                 # 데이터 보존 (CSV 저장용)
                 '연배당금_크롤링_auto': auto_div,
                 '연배당금': manual_div,
                 '연배당금_크롤링': old_div,
-                # TTM 값은 이번에 계산된 값으로 저장할지 여부 결정 (여기선 계산된 값 저장 추천)
                 'TTM_배당금': final_div if "웹크롤링" in status_msg else row.get('TTM_배당금', 0)
             }
         except Exception as e:
             logger.error(f"Row Processing Error ({idx}): {e}")
             return idx, None
 
+    # 4. 스레드 풀 실행
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(process_row, idx, row): idx for idx, row in df_raw.iterrows()}
+        for future in as_completed(futures):
+            idx, result = future.result()
+            results[idx] = result
+
+    # 5. 결과 수집 및 안전한 반환 (AttributeError 방지)
+    final_data = [r for r in results if r is not None]
+    
+    if final_data:
+        result_df = pd.DataFrame(final_data)
+        if '연배당률' in result_df.columns:
+            return result_df.sort_values('연배당률', ascending=False)
+        return result_df
+    else:
+        return pd.DataFrame() # 빈 프레임 반환
 # -----------------------------------------------------------
 # [SECTION 4] 데이터 파일 관리 (GitHub/CSV)
 # -----------------------------------------------------------
