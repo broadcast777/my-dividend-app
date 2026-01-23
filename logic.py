@@ -21,7 +21,7 @@ import json
 from github import Github
 from logger import logger
 import sqlite3  # DB 에러 처리를 위해 추가
-
+import sys
 
 # -----------------------------------------------------------
 # [SECTION 1] 날짜 및 스케줄링 헬퍼 (공통 도구)
@@ -604,7 +604,7 @@ def detect_special_dividend(annual_from_latest, existing_annual, price):
 
 
 # -----------------------------------------------------------
-# [SECTION 6] 실시간 배당 정보 크롤링 (Hybrid)
+# [SECTION 6] 실시간 배당 정보 크롤링 (Hybrid) /배당률 조회 돋보기버튼임 app.py
 # -----------------------------------------------------------
 
 def fetch_dividend_yield_hybrid(code, category):
@@ -770,63 +770,69 @@ def fetch_dividend_yield_hybrid(code, category):
 # -----------------------------------------------------------
 
 def _fetch_domestic_sensor(code):
-    """(내부용) 네이버에서 연배당금(Auto)과 TTM수익률 가져오기 (아이폰 위장 적용)"""
+    """[코랩 검증 완료] 400 에러 방지 및 TTM 직접 계산 로직"""
     import requests
+    from datetime import datetime, timedelta
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)",
+        "Referer": f"https://m.stock.naver.com/domestic/stock/{code}/analysis"
+    }
     
     try:
-        # [핵심] 이게 없어서 실패했습니다. (아이폰인 척하는 신분증)
-        headers = {
-            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148", 
-            "Referer": f"https://m.stock.naver.com/domestic/stock/{code}/analysis"
-        }
-        
-        # 1. 배당금 내역 조회
-        urls = [
-            f"https://m.stock.naver.com/api/etf/{code}/dividend/history",
-            f"https://m.stock.naver.com/api/stock/{code}/dividend/history"
-        ]
+        # 1. 현재가 조회 (TTM 계산의 분모)
+        price = 0
+        p_url = f"https://api.stock.naver.com/etf/{code}/basic"
+        r_p = requests.get(p_url, headers=headers, timeout=5)
+        if r_p.status_code == 200:
+            price = float(r_p.json().get('result', {}).get('closePrice', 0))
+
+        # 2. 배당금 내역 조회 (firstPageSize=200 파라미터 필수!)
+        h_url = f"https://m.stock.naver.com/api/etf/{code}/dividend/history?page=1&pageSize=200&firstPageSize=200"
+        res = requests.get(h_url, headers=headers, timeout=5)
         
         auto_amt = 0.0
-        
-        for url in urls:
-            try:
-                # 신분증(headers)을 제출하며 요청
-                full_url = f"{url}?page=1&pageSize=200&firstPageSize=200"
-                r = requests.get(full_url, headers=headers, timeout=3)
-                
-                if r.status_code == 200:
-                    data = r.json()
-                    items = []
-                    if isinstance(data, dict):
-                         items = data.get('result', {}).get('items', []) or data.get('items', [])
-                    elif isinstance(data, list):
-                        items = data
-                        
-                    if items:
-                        first = items[0]
-                        for k in ["dividendAmount", "dividend", "distribution", "amount"]:
-                            if k in first and first[k] is not None:
-                                amt_str = str(first[k]).replace(',', '')
-                                auto_amt = float(amt_str) * 12
-                                break
-                        if auto_amt > 0: break
-            except:
-                continue
-
-        # 2. TTM 수익률 조회 (여기도 신분증 제출해서 뚫어야 함)
-        info_url = f"https://m.stock.naver.com/api/stock/{code}/integration"
-        r2 = requests.get(info_url, headers=headers, timeout=3) # headers 필수!
-        
         ttm_rate = 0.0
-        if r2.status_code == 200:
-            try:
-                ttm_rate = float(r2.json().get('totalInfo', {}).get('dividendYield', 0))
-            except:
-                pass
-            
-        return auto_amt, ttm_rate
         
-    except Exception:
+        if res.status_code == 200:
+            j = res.json()
+            # 보따리(dict)든 알맹이(list)든 다 처리
+            items = []
+            if isinstance(j, dict):
+                items = j.get("result", {}).get("items", []) or j.get("items", [])
+            elif isinstance(j, list):
+                items = j
+            
+            if items:
+                # [Auto] 최신 배당금 추출 (29원 등)
+                first = items[0]
+                latest_div = 0
+                for k in ("dividendAmount", "dividend", "distribution", "amount", "value"):
+                    if k in first and first[k] is not None:
+                        latest_div = float(str(first[k]).replace(',', ''))
+                        break
+                auto_amt = latest_div * 12 # 연환산
+                
+                # [TTM] 최근 1년치 배당금 직접 합산 (가장 확실한 방법)
+                cutoff = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
+                ttm_sum = 0
+                for item in items:
+                    d_str = str(item.get('playDate') or item.get('date', '')).replace('.', '').replace('-', '')
+                    if d_str >= cutoff:
+                        val = 0
+                        for k in ("dividendAmount", "dividend", "distribution", "amount"):
+                            if k in item and item[k] is not None:
+                                val = float(str(item[k]).replace(',', ''))
+                                break
+                        ttm_sum += val
+                    else: break
+                
+                # 최종 수익률 계산
+                if price > 0:
+                    ttm_rate = round((ttm_sum / price) * 100, 2)
+                    
+        return auto_amt, ttm_rate
+    except:
         return 0.0, 0.0
 
 def _fetch_overseas_sensor(code):
@@ -854,27 +860,27 @@ def _fetch_overseas_sensor(code):
 
 def smart_update_and_save():
     """
-    [핵심] 앱에서 버튼 누르면 실행되는 함수 (성공/실패/보호 카운팅 기능 추가)
-    모든 종목을 돌며 Auto(1순위)와 TTM(2순위) 데이터를 채우고 깃허브에 저장합니다.
+    [개선] 자동 저장 기능을 제거하고, 갱신 결과(성공/실패/보호)를 리포트합니다.
+    갱신된 데이터는 세션 상태에 보관되어 사용자가 직접 저장 버튼을 누를 때 확정됩니다.
     """
     import sys
     import time
-    import streamlit as st # 화면 표시용
+    import streamlit as st
     
     try:
-        # 1. CSV 파일 로드
+        # 1. 최신 데이터 로드
         df = load_stock_data_from_csv()
-        if df.empty: return False, "❌ CSV 파일을 찾을 수 없거나 비어있습니다."
+        if df.empty: return False, "❌ CSV 파일을 찾을 수 없습니다.", []
         
         total_count = len(df)
         success_count = 0
         fail_count = 0
-        protected_count = 0 # 신규 상장 보호 카운트
+        protected_count = 0
+        failed_list = [] # 실패한 종목명을 담을 리스트
         
         # [UI] 진행률 표시줄
-        progress_text = "데이터 갱신 시작..."
-        my_bar = st.progress(0, text=progress_text)
-        status_text = st.empty() # 실시간 상태 메시지
+        my_bar = st.progress(0, text="스마트 업데이트 준비 중...")
+        status_text = st.empty()
         
         # 2. 전체 종목 루프
         for idx, row in df.iterrows():
@@ -882,25 +888,17 @@ def smart_update_and_save():
             name = row['종목명']
             category = str(row.get('분류', '국내')).strip()
             
-            # 신규 상장 개월수 확인
+            # 신규 상장 개월수 확인 (12개월 미만 보호)
             try: months = int(row.get('신규상장개월수', 0))
             except: months = 0
             
-            # -----------------------------------------------------
-            # [조건] 신규 상장(1년 미만)은 크롤링 보호 (기존 데이터 유지)
-            # -----------------------------------------------------
             if 0 < months < 12:
                 protected_count += 1
-                status_text.markdown(f"🛡️ **[{idx+1}/{total_count}] {name}** (신규 {months}개월) -> 보호됨(건너뜀)")
-                time.sleep(0.05) # 너무 빠르면 안 보여서 살짝 대기
-                # 진행률 바 업데이트만 하고 다음으로 넘어감
-                my_bar.progress((idx + 1) / total_count, text=f"진행률: {int((idx+1)/total_count*100)}%")
+                status_text.markdown(f"🛡️ **[{idx+1}/{total_count}] {name}** -> 신규 종목 보호됨")
+                my_bar.progress((idx + 1) / total_count)
                 continue
             
-            # -----------------------------------------------------
-            # [일반] 나머지 종목은 크롤링 진행
-            # -----------------------------------------------------
-            status_text.markdown(f"🔄 **[{idx+1}/{total_count}] {name}** 데이터 수집 중...")
+            status_text.markdown(f"🔄 **[{idx+1}/{total_count}] {name}** 수집 중...")
             
             try:
                 if category == '국내':
@@ -908,35 +906,35 @@ def smart_update_and_save():
                 else:
                     val, rate = _fetch_overseas_sensor(code)
                 
-                # 데이터 업데이트 (값이 0보다 클 때만)
-                if val > 0: df.at[idx, '연배당금_크롤링_auto'] = val
-                if rate > 0: df.at[idx, 'TTM_연배당률(크롤링)'] = rate
-                
-                success_count += 1
-                
+                # 데이터가 정상적으로 수집된 경우에만 반영
+                if val > 0:
+                    df.at[idx, '연배당금_크롤링_auto'] = val
+                    if rate > 0: df.at[idx, 'TTM_연배당률(크롤링)'] = rate
+                    success_count += 1
+                else:
+                    fail_count += 1
+                    failed_list.append(name) # 실패 리스트 추가
+                    
             except Exception as e:
                 fail_count += 1
-                logger.warning(f"Update fail {code}: {e}")
-                # 실패해도 멈추지 않고 진행
+                failed_list.append(name)
+                logger.warning(f"Update fail {name}({code}): {e}")
             
-            # 서버 부하 방지 및 진행률 업데이트
-            time.sleep(0.1) 
-            my_bar.progress((idx + 1) / total_count, text=f"진행률: {int((idx+1)/total_count*100)}%")
+            time.sleep(0.1) # 서버 부하 방지
+            my_bar.progress((idx + 1) / total_count)
                 
-        # 3. 마무리 및 저장
-        final_msg = f"✨ 완료! (성공: {success_count} / 실패: {fail_count} / 🛡️신규보호: {protected_count}개)"
-        status_text.success(final_msg)
-        my_bar.empty() # 진행바 제거
+        # 3. 마무리 (세션에 결과 보관)
+        my_bar.empty()
+        st.session_state['df_dirty'] = df # 👈 중요: 변경된 데이터를 세션에 저장 (저장 버튼이 쓸 데이터)
         
-        # 깃허브 저장
-        if hasattr(sys.modules[__name__], 'save_to_github'):
-            return save_to_github(df)
-        else:
-            df.to_csv("stocks.csv", index=False, encoding='utf-8-sig')
-            return True, f"✅ 로컬 저장 완료! {final_msg}"
+        # 결과 메시지 구성
+        final_msg = f"✨ 갱신 완료! (성공: {success_count} / 실패: {fail_count} / 🛡️보호: {protected_count}개)"
+        
+        # 실패한 종목이 있다면 상세 로그 출력용 데이터 포함
+        return True, final_msg, failed_list
             
     except Exception as e:
-        return False, f"스마트 업데이트 실패: {e}"
+        return False, f"스마트 업데이트 중 오류 발생: {e}", []
 
 
 
