@@ -765,7 +765,113 @@ def fetch_dividend_yield_hybrid(code, category):
             logger.exception(f"해외 배당 조회 예외: {code} - {e}")
             return 0.0, "❌ 해외 에러"
 
+# -----------------------------------------------------------
+# [SECTION 7] 스마트 업데이트 (전체 종목 일괄 갱신)
+# -----------------------------------------------------------
 
+def _fetch_domestic_sensor(code):
+    """(내부용) 네이버에서 연배당금(Auto)과 TTM수익률 가져오기"""
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0", 
+            "Referer": f"https://m.stock.naver.com/domestic/stock/{code}/analysis"
+        }
+        # 1. 배당금 내역 (pageSize=200으로 넓게 탐색)
+        hist_url = f"https://m.stock.naver.com/api/etf/{code}/dividend/history?page=1&pageSize=200"
+        r = requests.get(hist_url, headers=headers, timeout=5)
+        
+        auto_amt = 0.0
+        if r.status_code == 200:
+            items = r.json().get('result', {}).get('items', [])
+            if items:
+                # 첫 번째 유효한 배당금 찾기
+                first = items[0]
+                for k in ["dividendAmount", "dividend", "distribution"]:
+                    if k in first and first[k]:
+                        auto_amt = float(str(first[k]).replace(',', '')) * 12
+                        break
+                        
+        # 2. TTM 수익률 (정보 페이지)
+        info_url = f"https://m.stock.naver.com/api/stock/{code}/integration"
+        r2 = requests.get(info_url, headers=headers, timeout=5)
+        ttm_rate = 0.0
+        if r2.status_code == 200:
+            ttm_rate = float(r2.json().get('totalInfo', {}).get('dividendYield', 0))
+            
+        return auto_amt, ttm_rate
+    except:
+        return 0.0, 0.0
+
+def _fetch_overseas_sensor(code):
+    """(내부용) 야후에서 연배당금($)과 TTM수익률 가져오기"""
+    try:
+        ticker = yf.Ticker(code)
+        # 1. 연배당금 (최근 1년 합계)
+        divs = ticker.dividends
+        if not divs.empty:
+            cutoff = pd.Timestamp.now(tz=divs.index.tz) - pd.Timedelta(days=365)
+            annual_sum = float(divs[divs.index >= cutoff].sum())
+        else:
+            annual_sum = 0.0
+            
+        # 2. TTM 수익률
+        ttm_yield = ticker.info.get('trailingAnnualDividendYield', 0)
+        if ttm_yield == 0: ttm_yield = ticker.info.get('dividendYield', 0)
+        
+        # 0.08 -> 8.0 변환
+        if 0 < ttm_yield < 1: ttm_yield *= 100
+            
+        return annual_sum, round(ttm_yield, 2)
+    except:
+        return 0.0, 0.0
+
+def smart_update_and_save():
+    """
+    [핵심] 앱에서 버튼 누르면 실행되는 함수
+    모든 종목을 돌며 Auto(1순위)와 TTM(2순위) 데이터를 채우고 깃허브에 저장합니다.
+    """
+    try:
+        # 1. CSV 파일 로드
+        df = load_stock_data_from_csv()
+        if df.empty: return False, "CSV 파일을 찾을 수 없습니다."
+        
+        success_count = 0
+        
+        # 2. 전체 종목 루프
+        for idx, row in df.iterrows():
+            code = str(row['종목코드']).strip()
+            category = str(row.get('분류', '국내')).strip()
+            
+            # 신규 상장이나 수동 관리 종목은 건너뛰고 싶으면 여기서 if문 추가 가능
+            # 하지만 일단은 데이터를 다 채워두는 게 좋습니다.
+            
+            try:
+                if category == '국내':
+                    val, rate = _fetch_domestic_sensor(code)
+                else:
+                    val, rate = _fetch_overseas_sensor(code)
+                
+                # 데이터 업데이트 (값이 있을 때만)
+                df.at[idx, '연배당금_크롤링_auto'] = val
+                if rate > 0: df.at[idx, 'TTM_연배당률(크롤링)'] = rate
+                
+                success_count += 1
+                time.sleep(0.1) # 서버 부하 방지
+                
+            except Exception as e:
+                logger.warning(f"Update fail {code}: {e}")
+                continue
+                
+        # 3. 깃허브 저장 (이미 logic.py에 있는 함수 활용)
+        if hasattr(sys.modules[__name__], 'save_to_github'):
+            return save_to_github(df)
+        else:
+            # save_to_github 함수가 없으면 로컬 저장 시도
+            df.to_csv("stocks.csv", index=False, encoding='utf-8-sig')
+            return True, f"✅ 로컬 저장 완료! ({success_count}개 갱신)"
+            
+    except Exception as e:
+        return False, f"스마트 업데이트 실패: {e}"
 
 
 
