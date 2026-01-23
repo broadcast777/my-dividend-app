@@ -30,55 +30,128 @@ from playwright.sync_api import sync_playwright
 
 
 
-def get_ttm_playwright_sync(code):
+# [logic.py -> smart_update_and_save 함수 교체]
+
+def smart_update_and_save():
     """
-    [최종 검증 완료] Playwright로 화면 전체 텍스트를 스캔하여 배당/분배금 수익률을 찾아냅니다.
-    Colab 테스트를 통과한 강력한 Regex 스캔 방식입니다.
+    [스마트 전체 갱신 (해외 자동화 포함)]
+    1. 국내: 기존과 동일 (Auto 0이면 TTM 크롤링, 아니면 일반 갱신)
+    2. 해외: yfinance를 통해 '최근 1년 배당금 합계($)'를 계산하여 Auto에 저장 (NEW!)
+    3. 공통: '수동(Manual) 값이 있고 Auto가 0'인 경우(잠금)는 건너뜀.
     """
-    yield_val = 0.0
     try:
-        with sync_playwright() as p:
-            # 브라우저 실행 (headless=True: 화면 안 띄움)
-            browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
-            context = browser.new_context(
-                user_agent="Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)"
-            )
-            page = context.new_page()
-            
-            # 페이지 이동
-            url = f"https://m.stock.naver.com/item/main.nhn#/stocks/{code}"
-            page.goto(url, timeout=30000)
-            
-            # 로딩 대기 (데이터가 뜰 때까지 충분히)
-            page.wait_for_timeout(3000)
-            
-            # [핵심] 스크롤을 끝까지 내려서 혹시 숨어있는 데이터 로딩 유도
-            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-            page.wait_for_timeout(1000)
-            
-            # 1. 화면의 모든 텍스트 가져오기 (태그 무시하고 눈에 보이는 글자 전부)
-            body_text = page.inner_text("body")
-            
-            # 2. 정규표현식으로 '배당수익률' 또는 '분배금수익률' 뒤에 나오는 숫자(%) 찾기
-            # 패턴 설명: (키워드) -> (공백/문자 조금 건너뛰고) -> (숫자.숫자)%
-            import re
-            pattern = re.compile(r'(?:배당수익률|분배금수익률).*?([\d\.]+)\s*%', re.DOTALL)
-            
-            match = pattern.search(body_text)
-            
-            if match:
-                # 찾은 숫자 추출 (예: 12.42)
-                yield_val = float(match.group(1))
-            
-            browser.close()
-            
-            if yield_val > 0:
-                return yield_val, f"✅ 웹크롤링({yield_val}%)"
-                
-    except Exception as e:
-        logger.warning(f"Playwright Scan Fail ({code}): {e}")
+        df = load_stock_data_from_csv()
+        if df.empty: return False, "CSV 파일이 비어있습니다."
         
-    return 0.0, ""
+        updated_count = 0
+        skipped_count = 0
+        
+        # 진행률 표시
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        total = len(df)
+        
+        for idx, row in df.iterrows():
+            code = str(row['종목코드']).strip()
+            name = str(row['종목명']).strip()
+            category = str(row.get('분류', '국내')).strip()
+            
+            # 진행상황 업데이트
+            progress_bar.progress((idx + 1) / total)
+            status_text.text(f"검사 중: {name} ({idx+1}/{total})")
+            
+            # [필터 1] 신규 상장 종목 건너뛰기
+            try: months = int(row.get('신규상장개월수', 0))
+            except: months = 0
+            if 0 < months < 12:
+                skipped_count += 1
+                continue
+
+            # [스마트 잠금] 수동 입력이 있고, Auto가 0이면 -> 사용자가 끈 것으로 간주
+            current_auto = float(row.get('연배당금_크롤링_auto', 0))
+            current_manual = float(row.get('연배당금', 0))
+            is_locked = (current_manual > 0) and (current_auto == 0)
+            
+            # -----------------------------------------------------------
+            # 🇰🇷 [국내 종목] 갱신 로직
+            # -----------------------------------------------------------
+            if category == '국내':
+                if not is_locked:
+                    try:
+                        y_val, src = fetch_dividend_yield_hybrid(code, category)
+                        if y_val > 0:
+                            df.at[idx, '연배당률_크롤링'] = float(y_val)
+                            # 금액(원) 파싱
+                            import re
+                            m = re.search(r'\(([\d,\.]+)원\)', str(src))
+                            if m:
+                                val = int(m.group(1).replace(',', '').split('.')[0])
+                                df.at[idx, '연배당금_크롤링_auto'] = float(val) * 12
+                            updated_count += 1
+                    except: pass
+
+                # Auto가 없으면 TTM 크롤링 (2순위)
+                if float(df.at[idx, '연배당금_크롤링_auto']) == 0:
+                    try:
+                        ttm_yield, _ = get_ttm_playwright_sync(code)
+                        if ttm_yield > 0:
+                            df.at[idx, 'TTM_연배당률(크롤링)'] = ttm_yield
+                            if is_locked: updated_count += 1
+                    except: pass
+
+            # -----------------------------------------------------------
+            # 🇺🇸 [해외 종목] 갱신 로직 (추가된 부분!)
+            # -----------------------------------------------------------
+            elif category == '해외':
+                if not is_locked:
+                    try:
+                        ticker = yf.Ticker(code)
+                        
+                        # 1. 배당 내역 가져오기
+                        divs = ticker.dividends
+                        
+                        # 2. 최근 1년(365일)치만 필터링해서 합산
+                        if not divs.empty:
+                            # timezone 처리 (tz-aware)
+                            now = pd.Timestamp.now(tz=divs.index.tz)
+                            cutoff = now - pd.Timedelta(days=365)
+                            
+                            # 최근 1년 합계 계산 (USD)
+                            recent_divs = divs[divs.index >= cutoff]
+                            usd_sum = float(recent_divs.sum())
+                            
+                            if usd_sum > 0:
+                                # [중요] 달러 금액을 Auto 컬럼에 저장!
+                                df.at[idx, '연배당금_크롤링_auto'] = usd_sum
+                                
+                                # 현재가 가져와서 수익률도 업데이트
+                                price = ticker.fast_info.get('last_price')
+                                if not price:
+                                    hist = ticker.history(period="1d")
+                                    if not hist.empty: price = hist['Close'].iloc[-1]
+                                
+                                if price and price > 0:
+                                    yield_pct = (usd_sum / price) * 100
+                                    df.at[idx, '연배당률_크롤링'] = round(yield_pct, 2)
+                                
+                                updated_count += 1
+                    except Exception as e:
+                        # logger.warning(f"해외 갱신 실패 ({code}): {e}")
+                        pass
+
+        # 저장
+        df.to_csv("stocks.csv", index=False, encoding='utf-8-sig')
+        if "github" in st.secrets:
+            save_to_github(df)
+            
+        status_text.empty()
+        progress_bar.empty()
+        
+        return True, f"✅ 스마트 갱신 완료! (갱신: {updated_count}개 / 스킵: {skipped_count}개)"
+        
+    except Exception as e:
+        logger.error(f"Smart Update Error: {e}")
+        return False, f"갱신 중 오류 발생: {e}"
 
 
 
