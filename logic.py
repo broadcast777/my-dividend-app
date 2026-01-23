@@ -774,7 +774,7 @@ def fetch_dividend_yield_hybrid(code, category):
 
 def smart_update_and_save():
     """
-    [스마트 전체 갱신 (국내 TTM + 해외 자동화)]
+    [스마트 전체 갱신 (강력한 타입 체크 + 재시도 로직)]
     """
     try:
         df = load_stock_data_from_csv()
@@ -787,6 +787,12 @@ def smart_update_and_save():
         status_text = st.empty()
         total = len(df)
         
+        # 브라우저 설치 확인 (미리 한 번 실행)
+        try:
+            _ensure_browser_installed()
+        except:
+            pass
+
         for idx, row in df.iterrows():
             code = str(row['종목코드']).strip()
             name = str(row['종목명']).strip()
@@ -795,22 +801,34 @@ def smart_update_and_save():
             progress_bar.progress((idx + 1) / total)
             status_text.text(f"검사 중: {name} ({idx+1}/{total})")
             
+            # [필터] 신규 상장
             try: months = int(row.get('신규상장개월수', 0))
             except: months = 0
             if 0 < months < 12:
                 skipped_count += 1
                 continue
 
-            current_auto = float(row.get('연배당금_크롤링_auto', 0))
-            current_manual = float(row.get('연배당금', 0))
+            # [값 읽기 및 타입 변환]
+            def to_float(val):
+                try: return float(val)
+                except: return 0.0
+
+            current_auto = to_float(row.get('연배당금_크롤링_auto', 0))
+            current_manual = to_float(row.get('연배당금', 0))
+            
             is_locked = (current_manual > 0) and (current_auto == 0)
             
+            # ----------------------------------
+            # 🇰🇷 국내 종목
+            # ----------------------------------
             if category == '국내':
+                # 1. 일반 크롤링 (Auto)
                 if not is_locked:
                     try:
                         y_val, src = fetch_dividend_yield_hybrid(code, category)
                         if y_val > 0:
                             df.at[idx, '연배당률_크롤링'] = float(y_val)
+                            import re
                             m = re.search(r'\(([\d,\.]+)원\)', str(src))
                             if m:
                                 val = int(m.group(1).replace(',', '').split('.')[0])
@@ -818,14 +836,27 @@ def smart_update_and_save():
                             updated_count += 1
                     except: pass
 
-                if float(df.at[idx, '연배당금_크롤링_auto']) == 0:
+                # 2. TTM 크롤링 (Auto가 0일 때)
+                # [수정] 값을 다시 읽어서 확인
+                check_auto = to_float(df.at[idx, '연배당금_크롤링_auto'])
+                
+                if check_auto == 0:
                     try:
                         ttm_yield, _ = get_ttm_playwright_sync(code)
                         if ttm_yield > 0:
-                            df.at[idx, 'TTM_연배당률(크롤링)'] = ttm_yield
-                            if is_locked: updated_count += 1
-                    except: pass
+                            # [중요] float로 명시적 변환 후 저장
+                            df.at[idx, 'TTM_연배당률(크롤링)'] = float(ttm_yield)
+                            
+                            # TTM이 성공했으면 카운트 증가 (잠금 상태라도 TTM은 갱신해줌)
+                            updated_count += 1
+                            # logger.info(f"TTM 갱신 성공: {name} -> {ttm_yield}%")
+                    except Exception as e:
+                        # logger.warning(f"TTM 실패 {name}: {e}")
+                        pass
 
+            # ----------------------------------
+            # 🇺🇸 해외 종목
+            # ----------------------------------
             elif category == '해외':
                 if not is_locked:
                     try:
@@ -834,8 +865,7 @@ def smart_update_and_save():
                         if not divs.empty:
                             now = pd.Timestamp.now(tz=divs.index.tz)
                             cutoff = now - pd.Timedelta(days=365)
-                            recent_divs = divs[divs.index >= cutoff]
-                            usd_sum = float(recent_divs.sum())
+                            usd_sum = float(divs[divs.index >= cutoff].sum())
                             
                             if usd_sum > 0:
                                 df.at[idx, '연배당금_크롤링_auto'] = usd_sum
@@ -843,20 +873,20 @@ def smart_update_and_save():
                                 if not price:
                                     hist = ticker.history(period="1d")
                                     if not hist.empty: price = hist['Close'].iloc[-1]
-                                
                                 if price and price > 0:
                                     yield_pct = (usd_sum / price) * 100
                                     df.at[idx, '연배당률_크롤링'] = round(yield_pct, 2)
                                 updated_count += 1
-                    except Exception:
-                        pass
+                    except: pass
 
+        # 저장
         df.to_csv("stocks.csv", index=False, encoding='utf-8-sig')
         if "github" in st.secrets:
             save_to_github(df)
             
         status_text.empty()
         progress_bar.empty()
+        
         return True, f"✅ 스마트 갱신 완료! (갱신: {updated_count}개 / 스킵: {skipped_count}개)"
         
     except Exception as e:
