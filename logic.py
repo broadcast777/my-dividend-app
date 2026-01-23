@@ -22,6 +22,8 @@ from github import Github
 from logger import logger
 import sqlite3  # DB 에러 처리를 위해 추가
 from playwright.sync_api import sync_playwright
+import os           # 파일 경로 확인용
+import subprocess   # 브라우저 자동 설치 명령어 실행용
 
 
 
@@ -29,54 +31,121 @@ from playwright.sync_api import sync_playwright
 
 
 
+# -----------------------------------------------------------
+# [교체 및 추가] TTM 데이터 확보 (API 계산기 + Playwright + 자동설치)
+# -----------------------------------------------------------
+
+def _ensure_browser_installed():
+    """브라우저가 없으면 자동으로 설치 명령어를 실행합니다."""
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            try:
+                p.chromium.launch(headless=True)
+            except Exception:
+                # logger.info("⚠️ 브라우저 설치 중...")
+                subprocess.run(["playwright", "install", "chromium"], check=True)
+    except Exception:
+        pass
+
+def get_ttm_or_calculate(code):
+    """
+    [최종 솔루션]
+    1. 네이버 배당 내역 API를 호출하여 최근 1년치 배당금을 '직접 합산'합니다. (가장 정확, 액티브ETF 해결)
+    2. 실패 시, 화면 크롤링(Playwright)을 시도합니다.
+    """
+    code = str(code).strip()
+    
+    # -----------------------------------------------------------
+    # [1단계] 네이버 배당 내역 API로 TTM 직접 계산 (필살기)
+    # -----------------------------------------------------------
+    try:
+        # 1. 현재가 조회 (계산용)
+        price_url = f"https://api.stock.naver.com/etf/{code}/basic"
+        price_res = requests.get(price_url, timeout=3, headers={"User-Agent": "Mozilla/5.0"})
+        current_price = 0
+        if price_res.status_code == 200:
+            p_data = price_res.json()
+            if 'result' in p_data and 'closePrice' in p_data['result']:
+                current_price = float(p_data['result']['closePrice'])
+
+        # 2. 배당 내역 조회
+        hist_url = f"https://m.stock.naver.com/api/etf/{code}/dividend/history?pageSize=20"
+        res = requests.get(hist_url, timeout=5, headers={"User-Agent": "Mozilla/5.0"})
+        
+        if res.status_code == 200 and current_price > 0:
+            data = res.json()
+            items = []
+            
+            # JSON 구조 파싱
+            if isinstance(data, list): items = data
+            elif isinstance(data, dict):
+                items = data.get('result', []) or data.get('items', [])
+            
+            if items:
+                ttm_sum = 0
+                # 오늘 기준 1년 전 날짜
+                cutoff_date = (datetime.date.today() - datetime.timedelta(days=365)).strftime("%Y%m%d")
+                
+                for item in items:
+                    # 날짜 확인
+                    d_date = str(item.get('paymentDate') or item.get('dividendDate') or "").replace(".", "")
+                    # 금액 확인
+                    amt = item.get('dividendAmount') or item.get('amount') or 0
+                    
+                    if d_date >= cutoff_date:
+                        ttm_sum += float(amt)
+                
+                if ttm_sum > 0:
+                    # 수익률 계산: (1년 합계 / 현재가) * 100
+                    final_yield = round((ttm_sum / current_price) * 100, 2)
+                    return final_yield, f"✅ API계산({int(ttm_sum)}원/{final_yield}%)"
+
+    except Exception:
+        pass # 계산 실패 시 크롤링으로 넘어감
+
+    # -----------------------------------------------------------
+    # [2단계] Playwright (브라우저 크롤링 - 최후의 수단)
+    # -----------------------------------------------------------
+    return get_ttm_playwright_sync(code)
 
 def get_ttm_playwright_sync(code):
-    """
-    [2순위 방어] Playwright를 사용하여 네이버 모바일 페이지의 TTM 배당수익률을 직접 크롤링합니다.
-    """
+    """실제 크롤링 로직 (브라우저 자동 설치 기능 포함)"""
     yield_val = 0.0
+    
+    # 1. 설치 확인
+    try: _ensure_browser_installed()
+    except: pass
+
+    # 2. 크롤링 시도
     try:
         with sync_playwright() as p:
-            # 브라우저 실행 (headless=True: 화면 안 띄움)
             browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
-            context = browser.new_context(
-                user_agent="Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)"
-            )
+            context = browser.new_context(user_agent="Mozilla/5.0")
             page = context.new_page()
             
-            # 페이지 이동
             url = f"https://m.stock.naver.com/item/main.nhn#/stocks/{code}"
-            page.goto(url, timeout=20000) # 타임아웃 20초
-            
-            # 로딩 대기 (안전하게 2초)
+            page.goto(url, timeout=30000)
             page.wait_for_timeout(2000)
             
-            # '배당수익률' 텍스트가 있는 dt 태그의 다음 dd 태그 찾기
-            # XPath 사용
-            xpath = "//dt[contains(normalize-space(.),'배당수익률')]/following-sibling::dd[1]"
+            # 스크롤 내려서 데이터 로딩 유도
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            page.wait_for_timeout(1000)
             
-            try:
-                # 요소가 나타날 때까지 최대 3초 대기
-                if page.locator(f"xpath={xpath}").count() > 0:
-                    element = page.locator(f"xpath={xpath}").first
-                    text = element.inner_text().strip()
-                    
-                    # "연 2.39%" -> 2.39 숫자 추출
-                    import re
-                    match = re.search(r"([0-9]+(?:\.[0-9]+)?)", text)
-                    if match:
-                        yield_val = float(match.group(1))
-            except Exception:
-                pass 
-
+            body_text = page.inner_text("body")
+            
+            # 정규식으로 '배당수익률' 찾기
+            pattern = re.compile(r'(?:배당수익률|분배금수익률).*?([\d\.]+)\s*%', re.DOTALL)
+            match = pattern.search(body_text)
+            
             browser.close()
             
-            if yield_val > 0:
-                return yield_val, f"✅ 웹크롤링({yield_val}%)"
-                
+            if match:
+                val = float(match.group(1))
+                return val, f"✅ 웹크롤링({val}%)"
+            
     except Exception as e:
-        # Playwright 관련 에러는 로그만 남기고 0 반환
-        logger.warning(f"Playwright Fail ({code}): {e}")
+        logger.warning(f"Crawling Failed {code}: {e}")
         
     return 0.0, ""
 
@@ -686,82 +755,6 @@ def detect_special_dividend(annual_from_latest, existing_annual, price):
         return False, ""
 
 
-#-------------------------------------
-
-
-
-def get_ttm_playwright_sync(code):
-    """
-    [2순위 방어] Playwright를 사용하여 네이버 모바일 페이지의 TTM 배당수익률을 직접 크롤링합니다.
-    """
-    yield_val = 0.0
-    try:
-        with sync_playwright() as p:
-            # 브라우저 실행 (headless=True: 화면 안 띄움)
-            browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
-            context = browser.new_context(
-                user_agent="Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)"
-            )
-            page = context.new_page()
-            
-            # 페이지 이동
-            url = f"https://m.stock.naver.com/item/main.nhn#/stocks/{code}"
-            page.goto(url, timeout=20000) # 타임아웃 20초
-            
-            # 로딩 대기 (안전하게 2초)
-            page.wait_for_timeout(2000)
-            
-            # '배당수익률' 텍스트가 있는 dt 태그의 다음 dd 태그 찾기
-            # XPath 사용
-            xpath = "//dt[contains(normalize-space(.),'배당수익률')]/following-sibling::dd[1]"
-            
-            try:
-                # 요소가 나타날 때까지 최대 3초 대기
-                if page.locator(f"xpath={xpath}").count() > 0:
-                    element = page.locator(f"xpath={xpath}").first
-                    text = element.inner_text().strip()
-                    
-                    # "연 2.39%" -> 2.39 숫자 추출
-                    import re
-                    match = re.search(r"([0-9]+(?:\.[0-9]+)?)", text)
-                    if match:
-                        yield_val = float(match.group(1))
-            except Exception:
-                pass 
-
-            browser.close()
-            
-            if yield_val > 0:
-                return yield_val, f"✅ 웹크롤링({yield_val}%)"
-                
-    except Exception as e:
-        # Playwright 관련 에러는 로그만 남기고 0 반환
-        logger.warning(f"Playwright Fail ({code}): {e}")
-        
-    return 0.0, ""
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # -----------------------------------------------------------
 # [SECTION 6] 실시간 배당 정보 크롤링 (Hybrid)
 # -----------------------------------------------------------
@@ -923,7 +916,118 @@ def fetch_dividend_yield_hybrid(code, category):
         except Exception as e:
             logger.exception(f"해외 배당 조회 예외: {code} - {e}")
             return 0.0, "❌ 해외 에러"
+# -----------------------------------------------------------
+# [추가] 스마트 갱신 로직 (TTM 계산 기능 연동)
+# -----------------------------------------------------------
 
+def smart_update_and_save():
+    try:
+        df = load_stock_data_from_csv()
+        if df.empty: return False, "CSV 파일이 비어있습니다."
+        
+        updated_count = 0
+        skipped_count = 0
+        
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        total = len(df)
+        
+        # 브라우저 설치 미리 체크
+        try: _ensure_browser_installed()
+        except: pass
+        
+        for idx, row in df.iterrows():
+            code = str(row['종목코드']).strip()
+            name = str(row['종목명']).strip()
+            category = str(row.get('분류', '국내')).strip()
+            
+            progress_bar.progress((idx + 1) / total)
+            status_text.text(f"검사 중: {name} ({idx+1}/{total})")
+            
+            # [필터] 신규 상장 건너뛰기
+            try: months = int(row.get('신규상장개월수', 0))
+            except: months = 0
+            if 0 < months < 12:
+                skipped_count += 1
+                continue
+
+            # [잠금 확인]
+            def to_float(x):
+                try: return float(x)
+                except: return 0.0
+
+            current_auto = to_float(row.get('연배당금_크롤링_auto', 0))
+            current_manual = to_float(row.get('연배당금', 0))
+            is_locked = (current_manual > 0) and (current_auto == 0)
+            
+            # ----------------------------------
+            # 🇰🇷 국내 종목
+            # ----------------------------------
+            if category == '국내':
+                # 1. 일반 크롤링 (Auto 값)
+                if not is_locked:
+                    try:
+                        y_val, src = fetch_dividend_yield_hybrid(code, category)
+                        if y_val > 0:
+                            df.at[idx, '연배당률_크롤링'] = float(y_val)
+                            # 금액 파싱
+                            m = re.search(r'\(([\d,\.]+)원\)', str(src))
+                            if m:
+                                val = int(m.group(1).replace(',', '').split('.')[0])
+                                df.at[idx, '연배당금_크롤링_auto'] = float(val) * 12
+                            updated_count += 1
+                    except: pass 
+
+                # 2. TTM 갱신 (Auto가 0이거나 잠금 상태일 때 -> 2순위 데이터 확보)
+                check_auto = to_float(df.at[idx, '연배당금_크롤링_auto'])
+                
+                if check_auto == 0 or is_locked:
+                    try:
+                        # 위에서 만든 'API 계산기' 호출
+                        ttm_yield, _ = get_ttm_or_calculate(code)
+                        if ttm_yield > 0:
+                            df.at[idx, 'TTM_연배당률(크롤링)'] = float(ttm_yield)
+                            if is_locked: updated_count += 1
+                    except: pass
+
+            # ----------------------------------
+            # 🇺🇸 해외 종목 (기존 로직 유지)
+            # ----------------------------------
+            elif category == '해외':
+                if not is_locked:
+                    try:
+                        ticker = yf.Ticker(code)
+                        divs = ticker.dividends
+                        if not divs.empty:
+                            now = pd.Timestamp.now(tz=divs.index.tz)
+                            cutoff = now - pd.Timedelta(days=365)
+                            usd_sum = float(divs[divs.index >= cutoff].sum())
+                            
+                            if usd_sum > 0:
+                                df.at[idx, '연배당금_크롤링_auto'] = usd_sum
+                                price = ticker.fast_info.get('last_price')
+                                if not price:
+                                    hist = ticker.history(period="1d")
+                                    if not hist.empty: price = hist['Close'].iloc[-1]
+                                if price and price > 0:
+                                    yield_pct = (usd_sum / price) * 100
+                                    df.at[idx, '연배당률_크롤링'] = round(yield_pct, 2)
+                                updated_count += 1
+                    except: pass
+
+        # 최종 저장
+        df.to_csv("stocks.csv", index=False, encoding='utf-8-sig')
+        if "github" in st.secrets:
+            save_to_github(df)
+            
+        status_text.empty()
+        progress_bar.empty()
+        
+        return True, f"✅ 스마트 갱신 완료! (갱신: {updated_count}개 / 스킵: {skipped_count}개)"
+        
+    except Exception as e:
+        logger.error(f"Smart Update Error: {e}")
+        return False, f"갱신 중 오류 발생: {e}"
 
 
 
