@@ -770,36 +770,63 @@ def fetch_dividend_yield_hybrid(code, category):
 # -----------------------------------------------------------
 
 def _fetch_domestic_sensor(code):
-    """(내부용) 네이버에서 연배당금(Auto)과 TTM수익률 가져오기"""
+    """(내부용) 네이버에서 연배당금(Auto)과 TTM수익률 가져오기 (아이폰 위장 적용)"""
+    import requests
+    
     try:
+        # [핵심] 이게 없어서 실패했습니다. (아이폰인 척하는 신분증)
         headers = {
-            "User-Agent": "Mozilla/5.0", 
+            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148", 
             "Referer": f"https://m.stock.naver.com/domestic/stock/{code}/analysis"
         }
-        # 1. 배당금 내역 (pageSize=200으로 넓게 탐색)
-        hist_url = f"https://m.stock.naver.com/api/etf/{code}/dividend/history?page=1&pageSize=200"
-        r = requests.get(hist_url, headers=headers, timeout=5)
+        
+        # 1. 배당금 내역 조회
+        urls = [
+            f"https://m.stock.naver.com/api/etf/{code}/dividend/history",
+            f"https://m.stock.naver.com/api/stock/{code}/dividend/history"
+        ]
         
         auto_amt = 0.0
-        if r.status_code == 200:
-            items = r.json().get('result', {}).get('items', [])
-            if items:
-                # 첫 번째 유효한 배당금 찾기
-                first = items[0]
-                for k in ["dividendAmount", "dividend", "distribution"]:
-                    if k in first and first[k]:
-                        auto_amt = float(str(first[k]).replace(',', '')) * 12
-                        break
+        
+        for url in urls:
+            try:
+                # 신분증(headers)을 제출하며 요청
+                full_url = f"{url}?page=1&pageSize=200&firstPageSize=200"
+                r = requests.get(full_url, headers=headers, timeout=3)
+                
+                if r.status_code == 200:
+                    data = r.json()
+                    items = []
+                    if isinstance(data, dict):
+                         items = data.get('result', {}).get('items', []) or data.get('items', [])
+                    elif isinstance(data, list):
+                        items = data
                         
-        # 2. TTM 수익률 (정보 페이지)
+                    if items:
+                        first = items[0]
+                        for k in ["dividendAmount", "dividend", "distribution", "amount"]:
+                            if k in first and first[k] is not None:
+                                amt_str = str(first[k]).replace(',', '')
+                                auto_amt = float(amt_str) * 12
+                                break
+                        if auto_amt > 0: break
+            except:
+                continue
+
+        # 2. TTM 수익률 조회 (여기도 신분증 제출해서 뚫어야 함)
         info_url = f"https://m.stock.naver.com/api/stock/{code}/integration"
-        r2 = requests.get(info_url, headers=headers, timeout=5)
+        r2 = requests.get(info_url, headers=headers, timeout=3) # headers 필수!
+        
         ttm_rate = 0.0
         if r2.status_code == 200:
-            ttm_rate = float(r2.json().get('totalInfo', {}).get('dividendYield', 0))
+            try:
+                ttm_rate = float(r2.json().get('totalInfo', {}).get('dividendYield', 0))
+            except:
+                pass
             
         return auto_amt, ttm_rate
-    except:
+        
+    except Exception:
         return 0.0, 0.0
 
 def _fetch_overseas_sensor(code):
