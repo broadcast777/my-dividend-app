@@ -896,19 +896,14 @@ def reset_auto_data(code):
         return False, f"❌ 오류 발생: {e}"
 
 def smart_update_and_save():
-    """
-    [수정됨] 자동 저장 제거 + TTM 저장 로직 강화 + 수동 잠금(-1.0) 확인
-    """
-    import sys
-    import time
-    import streamlit as st
+  
     
     try:
-        # 1. 최신 데이터 로드
+        # 1. 데이터 로드 (이때 제가 아까 드린 'Clean Load' 함수를 쓰면 열이 더 깔끔해집니다)
         df = load_stock_data_from_csv()
         if df.empty: return False, "❌ CSV 파일을 찾을 수 없습니다.", []
         
-        # [중요] TTM 저장용 컬럼이 없으면 미리 0.0으로 채워서 생성
+        # TTM 컬럼 이름 표준화 (혹시 없으면 생성)
         if 'TTM_연배당률(크롤링)' not in df.columns:
             df['TTM_연배당률(크롤링)'] = 0.0
         
@@ -918,91 +913,60 @@ def smart_update_and_save():
         protected_count = 0
         failed_list = []
         
-        # [UI] 진행률 표시줄
-        my_bar = st.progress(0, text="스마트 업데이트 준비 중...")
+        my_bar = st.progress(0, text="스마트 업데이트 중...")
         status_text = st.empty()
         
-        # 2. 전체 종목 루프
         for idx, row in df.iterrows():
             code = str(row['종목코드']).strip()
             name = row['종목명']
             category = str(row.get('분류', '국내')).strip()
             
-            # 신규 상장 보호 (기존 로직 유지)
+            # [보호 1] 신규 상장 보호
             try: months = int(row.get('신규상장개월수', 0))
             except: months = 0
-            
             if 0 < months < 12:
                 protected_count += 1
-                status_text.markdown(f"🛡️ **[{idx+1}/{total_count}] {name}** -> 신규 종목 보호됨")
                 my_bar.progress((idx + 1) / total_count)
                 continue
             
-            status_text.markdown(f"🔄 **[{idx+1}/{total_count}] {name}** 수집 중...")
-            
-            # ---------------------------------------------------------
-            # [NEW] -1.0 잠금 확인 로직 (여기가 추가되었습니다!)
-            # ---------------------------------------------------------
+            # [보호 2] 사용자 수동 잠금(-1.0) 확인
             current_auto = float(row.get('연배당금_크롤링_auto', 0) or 0)
             if current_auto == -1.0:
                 protected_count += 1
-                status_text.markdown(f"🔒 **[{idx+1}/{total_count}] {name}** -> 수동 보호 모드 (건너뜀)")
+                status_text.markdown(f"🔒 **{name}** -> 보호됨 (건너뜀)")
                 my_bar.progress((idx + 1) / total_count)
                 continue
-            # ---------------------------------------------------------
             
             try:
-                # 데이터 수집 (센서 호출)
+                # 2. 데이터 수집 (배당금과 TTM 수익률을 동시에 가져옴)
                 if category == '국내':
-                    # val=연배당금(Auto), rate=TTM수익률
                     val, rate = _fetch_domestic_sensor(code)
                 else:
                     val, rate = _fetch_overseas_sensor(code)
                 
-                # ---------------------------------------------------------
-                # [핵심 수정] 데이터 저장 로직 강화
-                # ---------------------------------------------------------
-                data_updated = False
-                
-                # 1) 연배당금(Auto) 저장
-                if val > 0:
-                    df.at[idx, '연배당금_크롤링_auto'] = val
-                    data_updated = True
-                
-                # 2) TTM 수익률 저장 (조건: rate가 0보다 크면 무조건 저장)
-                if rate > 0:
-                    df.at[idx, 'TTM_연배당률(크롤링)'] = rate
-                    data_updated = True
-                
-                # 결과 카운팅
-                if data_updated:
+                # 3. [핵심] 두 칸에 정확히 세트로 저장
+                if val > 0 or rate > 0:
+                    # 괄호가 포함된 정확한 컬럼명에만 꽂습니다.
+                    df.at[idx, '연배당금_크롤링_auto'] = float(val)
+                    df.at[idx, 'TTM_연배당률(크롤링)'] = float(rate)
                     success_count += 1
                 else:
-                    # 둘 다 0이면 실패로 간주
                     fail_count += 1
                     failed_list.append(name)
                     
-            except Exception as e:
+            except Exception:
                 fail_count += 1
                 failed_list.append(name)
-                # logger.warning(f"Update fail {name}: {e}")
             
-            time.sleep(0.1)
+            time.sleep(0.05)
             my_bar.progress((idx + 1) / total_count)
                 
-        # 3. 마무리
-        my_bar.empty()
-        status_text.empty()
-        
-        # 세션에 결과 데이터 저장 (저장 버튼이 가져다 쓸 예정)
+        # 4. 세션 세팅 및 마무리
         st.session_state['df_dirty'] = df
-        
-        final_msg = f"✨ 갱신 완료! (성공: {success_count} / 실패: {fail_count} / 🛡️보호: {protected_count}개)"
-        
-        return True, final_msg, failed_list
+        return True, f"✨ 완료! (성공:{success_count}, 실패:{fail_count}, 🔒보호:{protected_count})", failed_list
             
     except Exception as e:
-        return False, f"스마트 업데이트 중 오류 발생: {e}", []
+        return False, f"오류 발생: {e}", []
 
 
 
