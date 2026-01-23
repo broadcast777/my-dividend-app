@@ -770,7 +770,7 @@ def fetch_dividend_yield_hybrid(code, category):
 # -----------------------------------------------------------
 
 def _fetch_domestic_sensor(code):
-    """[코랩 검증 완료] 400 에러 방지 및 TTM 직접 계산 로직"""
+    """[사용자 검증 완료] 코랩 성공 로직 100% 이식 버전"""
     import requests
     from datetime import datetime, timedelta
     
@@ -780,23 +780,25 @@ def _fetch_domestic_sensor(code):
     }
     
     try:
-        # 1. 현재가 조회 (TTM 계산의 분모)
+        # 1. 현재가 조회 (쉼표 제거 방어코드 추가)
         price = 0
         p_url = f"https://api.stock.naver.com/etf/{code}/basic"
         r_p = requests.get(p_url, headers=headers, timeout=5)
         if r_p.status_code == 200:
-            price = float(r_p.json().get('result', {}).get('closePrice', 0))
+            res_json = r_p.json().get('result', {})
+            # 가격에 쉼표가 섞여 있어도 숫자로 변환합니다.
+            price_raw = str(res_json.get('closePrice', '0')).replace(',', '')
+            price = float(price_raw)
 
-        # 2. 배당금 내역 조회 (firstPageSize=200 파라미터 필수!)
+        # 2. 배당 내역 (코랩에서 성공한 '암호 파라미터' 적용)
         h_url = f"https://m.stock.naver.com/api/etf/{code}/dividend/history?page=1&pageSize=200&firstPageSize=200"
         res = requests.get(h_url, headers=headers, timeout=5)
         
-        auto_amt = 0.0
-        ttm_rate = 0.0
+        auto_amt, ttm_rate = 0.0, 0.0
         
         if res.status_code == 200:
             j = res.json()
-            # 보따리(dict)든 알맹이(list)든 다 처리
+            # 보따리(dict) vs 알맹이(list) 유연한 파싱
             items = []
             if isinstance(j, dict):
                 items = j.get("result", {}).get("items", []) or j.get("items", [])
@@ -804,16 +806,16 @@ def _fetch_domestic_sensor(code):
                 items = j
             
             if items:
-                # [Auto] 최신 배당금 추출 (29원 등)
+                # 최신 배당금 추출 (29원 로직)
                 first = items[0]
                 latest_div = 0
                 for k in ("dividendAmount", "dividend", "distribution", "amount", "value"):
                     if k in first and first[k] is not None:
                         latest_div = float(str(first[k]).replace(',', ''))
                         break
-                auto_amt = latest_div * 12 # 연환산
+                auto_amt = latest_div * 12
                 
-                # [TTM] 최근 1년치 배당금 직접 합산 (가장 확실한 방법)
+                # TTM 직접 계산 (최근 1년 합계)
                 cutoff = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
                 ttm_sum = 0
                 for item in items:
@@ -827,13 +829,13 @@ def _fetch_domestic_sensor(code):
                         ttm_sum += val
                     else: break
                 
-                # 최종 수익률 계산
                 if price > 0:
                     ttm_rate = round((ttm_sum / price) * 100, 2)
                     
         return auto_amt, ttm_rate
     except:
         return 0.0, 0.0
+
 
 def _fetch_overseas_sensor(code):
     """(내부용) 야후에서 연배당금($)과 TTM수익률 가져오기"""
