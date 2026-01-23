@@ -334,23 +334,31 @@ def render_admin_tools(df_raw):
         # -------------------------------------------------------------
         # [핵심 변경] 로직을 logic.py로 이사시켜서 코드가 짧아짐 (기능은 더 강력해짐!)
         # -------------------------------------------------------------
+        # -------------------------------------------------------------
+        # [수정 완료] 버튼을 누를 때만 작동하도록 트리거 추가
+        # -------------------------------------------------------------
         with st.expander("⚡ 전체 종목 자동 업데이트 (스마트)"):
             st.info("신규 상장(1년 미만)과 저배당주는 건너뜁니다.\nAuto가 0인 종목은 TTM(2순위)을 크롤링합니다.")
-    # logic.py에 있는 스마트 함수 호출 (변수 3개로 받기!)
-            success, msg, failed_list = logic.smart_update_and_save() # 👈 failed_list 추가
             
-            if success:
-                st.success(msg)
-                
-                # [추가] 실패한 종목이 있다면 리스트로 보여주기
-                if failed_list:
-                    with st.expander("⚠️ 실패한 종목 확인 (업데이트 제외됨)"):
-                        for f_name in failed_list:
-                            st.write(f"- {f_name}")
-                            
-               
-            else:
-                st.error(msg)          
+            # 1. 여기에 버튼 트리거가 반드시 있어야 합니다!
+            if st.button("🔄 스마트 갱신 시작", key="btn_smart_update", use_container_width=True):
+                with st.spinner("⏳ 전체 종목 배당 데이터 수집 중..."):
+                    
+                    # 2. 버튼 안쪽으로 들여쓰기 되어야 버튼 누를 때만 실행됩니다.
+                    success, msg, failed_list = logic.smart_update_and_save()
+                    
+                    if success:
+                        st.success(msg)
+                        
+                        # 실패한 종목 리스트 출력
+                        if failed_list:
+                            with st.expander("⚠️ 일부 종목 업데이트 제외 (데이터 없음)"):
+                                for f_name in failed_list:
+                                    st.write(f"- {f_name}")
+                        
+                        st.info("💡 결과가 마음에 드신다면 아래 '영구 저장' 버튼을 눌러주세요.")
+                    else:
+                        st.error(msg)
   
         st.markdown("---")
         if st.checkbox("네, 덮어써도 좋습니다."):
