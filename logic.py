@@ -875,9 +875,29 @@ def _fetch_overseas_sensor(code):
     except:
         return 0.0, 0.0
 
+def reset_auto_data(code):
+    """Auto 데이터를 -1.0으로 설정하여 스마트 갱신에서 영구 제외"""
+    try:
+        # 1. 최신 데이터 불러오기
+        df = load_stock_data_from_csv()
+        
+        if code in df['종목코드'].values:
+            # 2. 해당 종목의 Auto 값을 -1.0으로 변경 (잠금 표시)
+            df.loc[df['종목코드'] == code, '연배당금_크롤링_auto'] = -1.0
+            
+            # 3. 변경된 내용을 깃허브(파일)에 저장
+            success, msg = save_to_github(df)
+            if success:
+                return True, f"✅ [{code}] 보호 모드 활성화 (스마트 갱신 제외)"
+            else:
+                return False, f"❌ 저장 실패: {msg}"
+        return False, "❌ 종목 코드를 찾을 수 없습니다."
+    except Exception as e:
+        return False, f"❌ 오류 발생: {e}"
+
 def smart_update_and_save():
     """
-    [수정됨] 자동 저장 제거 + TTM 저장 로직 강화
+    [수정됨] 자동 저장 제거 + TTM 저장 로직 강화 + 수동 잠금(-1.0) 확인
     """
     import sys
     import time
@@ -920,6 +940,17 @@ def smart_update_and_save():
             
             status_text.markdown(f"🔄 **[{idx+1}/{total_count}] {name}** 수집 중...")
             
+            # ---------------------------------------------------------
+            # [NEW] -1.0 잠금 확인 로직 (여기가 추가되었습니다!)
+            # ---------------------------------------------------------
+            current_auto = float(row.get('연배당금_크롤링_auto', 0) or 0)
+            if current_auto == -1.0:
+                protected_count += 1
+                status_text.markdown(f"🔒 **[{idx+1}/{total_count}] {name}** -> 수동 보호 모드 (건너뜀)")
+                my_bar.progress((idx + 1) / total_count)
+                continue
+            # ---------------------------------------------------------
+            
             try:
                 # 데이터 수집 (센서 호출)
                 if category == '국내':
@@ -941,7 +972,6 @@ def smart_update_and_save():
                 # 2) TTM 수익률 저장 (조건: rate가 0보다 크면 무조건 저장)
                 if rate > 0:
                     df.at[idx, 'TTM_연배당률(크롤링)'] = rate
-
                     data_updated = True
                 
                 # 결과 카운팅
