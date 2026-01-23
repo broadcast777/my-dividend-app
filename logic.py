@@ -770,111 +770,6 @@ def get_ttm_playwright_sync(code):
     return 0.0, ""
 
 
-# [logic.py 맨 마지막에 추가]
-
-def smart_update_and_save():
-    """
-    [스마트 전체 갱신]
-    1. 모든 종목의 최신 배당금을 크롤링합니다.
-    2. 단, '수동(Manual) 값이 있고 Auto가 0'인 종목은 '사용자가 일부러 끈 것'으로 간주하여
-       Auto 값을 덮어쓰지 않고 유지합니다. (특별배당 종목 보호)
-    3. Auto가 0인 종목은 대신 'TTM 크롤링(Playwright)'을 시도하여 2순위 데이터를 확보합니다.
-    """
-    try:
-        df = load_stock_data_from_csv()
-        if df.empty: return False, "CSV 파일이 비어있습니다."
-        
-        updated_count = 0
-        
-        # 진행률 표시 (Streamlit 연동)
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        total = len(df)
-        
-        for idx, row in df.iterrows():
-            code = str(row['종목코드']).strip()
-            name = str(row['종목명']).strip()
-            category = str(row.get('분류', '국내')).strip()
-            
-            # 진행상황 업데이트
-            status_text.text(f"🔄 갱신 중: {name} ({idx+1}/{total})")
-            progress_bar.progress((idx + 1) / total)
-            
-            # -----------------------------------------------------------
-            # [핵심] 스마트 잠금 확인
-            # 수동 입력(연배당금)이 > 0 인데, Auto(연배당금_크롤링_auto)가 0 이라면?
-            # -> "사용자가 특별배당 때문에 Auto를 꺼놨구나!" -> Auto 갱신 스킵
-            # -----------------------------------------------------------
-            current_auto = float(row.get('연배당금_크롤링_auto', 0))
-            current_manual = float(row.get('연배당금', 0))
-            
-            is_locked = (current_manual > 0) and (current_auto == 0)
-            
-            # 1. 일반 크롤링 (Auto 값 확보 시도)
-            # 잠금 상태가 아닐 때만 실행하거나, 실행하더라도 값을 반영 안 함
-            if not is_locked:
-                # fetch_dividend_yield_hybrid는 logic.py에 이미 있는 함수라고 가정
-                # (만약 없으면 기존에 쓰시던 크롤링 함수를 호출해야 함)
-                try:
-                    # 여기서는 예시로 기존 로직의 일부를 활용하거나, 
-                    # fetch_dividend_yield_hybrid가 (yield, msg)를 반환한다고 가정
-                    yield_val, msg = fetch_dividend_yield_hybrid(code, category)
-                    
-                    # 배당금이 아니라 수익률을 가져오는 함수라면 역산 필요
-                    # 여기서는 간단히 '갱신 로직'이 들어갈 자리임을 표시
-                    # 실제로는 app.py에 있던 크롤링 로직을 가져와야 정확함
-                    
-                    # (간소화: Auto 값이 바뀌었다고 가정)
-                    pass 
-                except:
-                    pass
-
-            # 2. [중요] Auto가 0인 종목(잠금 포함)은 TTM(2순위)을 강제 크롤링
-            if current_auto == 0 or is_locked:
-                if category == '국내':
-                    try:
-                        ttm_yield, _ = get_ttm_playwright_sync(code)
-                        if ttm_yield > 0:
-                            df.at[idx, 'TTM_연배당률(크롤링)'] = ttm_yield
-                            # logger.info(f"[{name}] TTM 업데이트: {ttm_yield}%")
-                    except:
-                        pass
-            
-            updated_count += 1
-            
-        # 저장
-        df.to_csv("stocks.csv", index=False, encoding='utf-8-sig')
-        if "github" in st.secrets:
-            save_to_github(df)
-            
-        status_text.empty()
-        progress_bar.empty()
-        
-        return True, f"✅ 스마트 갱신 완료! ({updated_count}개 종목)"
-        
-    except Exception as e:
-        logger.error(f"Smart Update Error: {e}")
-        return False, f"갱신 중 오류 발생: {e}"
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # -----------------------------------------------------------
 # [SECTION 6] 실시간 배당 정보 크롤링 (Hybrid)
 # -----------------------------------------------------------
@@ -1036,6 +931,119 @@ def fetch_dividend_yield_hybrid(code, category):
         except Exception as e:
             logger.exception(f"해외 배당 조회 예외: {code} - {e}")
             return 0.0, "❌ 해외 에러"
+
+# [logic.py -> smart_update_and_save 함수 교체]
+
+def smart_update_and_save():
+    """
+    [스마트 전체 갱신 (필터링 포함)]
+    1. 신규 상장 종목(1년 미만) & 배당률 2% 미만은 갱신 건너뜀 (속도/안전).
+    2. '수동(Manual) 값이 있고 Auto가 0'인 종목은 Auto 갱신 스킵 (특별배당 보호).
+    3. Auto가 0인 종목은 'TTM 크롤링'을 시도하여 2순위 데이터를 확보.
+    """
+    try:
+        df = load_stock_data_from_csv()
+        if df.empty: return False, "CSV 파일이 비어있습니다."
+        
+        updated_count = 0
+        skipped_count = 0
+        
+        # 진행률 표시
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        total = len(df)
+        
+        for idx, row in df.iterrows():
+            code = str(row['종목코드']).strip()
+            name = str(row['종목명']).strip()
+            category = str(row.get('분류', '국내')).strip()
+            
+            # 진행상황 업데이트
+            progress_bar.progress((idx + 1) / total)
+            status_text.text(f"검사 중: {name} ({idx+1}/{total})")
+            
+            # -----------------------------------------------------------
+            # [필터 1] 신규 상장 종목 건너뛰기 (왜곡 방지)
+            # -----------------------------------------------------------
+            try:
+                months = int(row.get('신규상장개월수', 0))
+            except:
+                months = 0
+                
+            if 0 < months < 12:
+                # logger.info(f"Skip(신규): {name}")
+                skipped_count += 1
+                continue
+
+            # -----------------------------------------------------------
+            # [필터 2] 배당률 2% 미만 건너뛰기 (선택 사항)
+            # -----------------------------------------------------------
+            current_yield = float(row.get('연배당률', 0))
+            if 0 < current_yield < 2.0:
+                # logger.info(f"Skip(저배당): {name}")
+                skipped_count += 1
+                continue
+
+            # -----------------------------------------------------------
+            # [스마트 잠금] 특별배당 종목 보호
+            # 수동 입력이 있고, Auto가 0이면 -> 사용자가 끈 것으로 간주
+            # -----------------------------------------------------------
+            current_auto = float(row.get('연배당금_크롤링_auto', 0))
+            current_manual = float(row.get('연배당금', 0))
+            
+            is_locked = (current_manual > 0) and (current_auto == 0)
+            
+            # 1. 일반 크롤링 (Auto 값 확보 시도)
+            # 잠금 상태가 아닐 때만 실행
+            if not is_locked:
+                try:
+                    # 기존 함수 호출 (logic.py 내부에 있어야 함)
+                    y_val, src = fetch_dividend_yield_hybrid(code, category)
+                    
+                    if y_val > 0:
+                        # 배당률(%) 업데이트
+                        df.at[idx, '연배당률_크롤링'] = float(y_val)
+                        
+                        # 국내 종목은 금액(원)도 파싱해서 Auto 업데이트
+                        if category == '국내':
+                            import re
+                            m = re.search(r'\(([\d,\.]+)원\)', str(src))
+                            if m:
+                                val = int(m.group(1).replace(',', '').split('.')[0])
+                                df.at[idx, '연배당금_크롤링_auto'] = float(val) * 12
+                        
+                        updated_count += 1
+                except Exception as e:
+                    # logger.error(f"갱신 실패 ({code}): {e}")
+                    pass
+
+            # 2. [중요] Auto가 0인 종목(잠금 포함)은 TTM(2순위) 강제 크롤링
+            # (이번 턴에 Auto 갱신에 실패했거나, 잠겨있는 경우)
+            check_auto = float(df.at[idx, '연배당금_크롤링_auto']) # 갱신 후 값 다시 확인
+            
+            if check_auto == 0:
+                if category == '국내':
+                    try:
+                        ttm_yield, _ = get_ttm_playwright_sync(code)
+                        if ttm_yield > 0:
+                            df.at[idx, 'TTM_연배당률(크롤링)'] = ttm_yield
+                            if is_locked: updated_count += 1 # TTM 갱신도 카운트 인정
+                    except:
+                        pass
+            
+        # 저장
+        df.to_csv("stocks.csv", index=False, encoding='utf-8-sig')
+        if "github" in st.secrets:
+            save_to_github(df)
+            
+        status_text.empty()
+        progress_bar.empty()
+        
+        return True, f"✅ 스마트 갱신 완료! (갱신: {updated_count}개 / 스킵: {skipped_count}개)"
+        
+    except Exception as e:
+        logger.error(f"Smart Update Error: {e}")
+        return False, f"갱신 중 오류 발생: {e}"
 
 
 
