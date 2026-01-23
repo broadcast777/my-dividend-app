@@ -348,8 +348,7 @@ def render_admin_tools(df_raw):
                         for f_name in failed_list:
                             st.write(f"- {f_name}")
                             
-                time.sleep(2)
-                st.rerun()
+               
             else:
                 st.error(msg)          
   
@@ -384,8 +383,7 @@ def render_admin_tools(df_raw):
                     if success:
                         st.balloons()
                         st.success(msg)
-                        time.sleep(2)
-                        st.rerun()
+                     
                     else:
                         st.error(msg)
 
