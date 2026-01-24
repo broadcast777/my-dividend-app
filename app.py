@@ -1192,14 +1192,63 @@ def render_roadmap_page(df):
 
 
 def render_stocklist_page(df):
-    """📃 전체 종목 리스트 페이지 렌더링"""
+    """📃 전체 종목 리스트 페이지 렌더링 (검색 & 필터 기능 추가)"""
+    
     st.info("💡 **이동 안내:** '코드' 클릭 시 블로그 분석글로, '🔗정보' 클릭 시 네이버/야후 금융 정보로 이동합니다. (**⭐ 표시는 상장 1년 미만 종목입니다.**)")
+    
+    # ---------------------------------------------------------
+    # [NEW] 검색 및 필터 도구 모음
+    # ---------------------------------------------------------
+    with st.container():
+        col_search, col_filter = st.columns([1, 1.5])
+        
+        # 1. 검색창 (종목명 or 코드)
+        with col_search:
+            search_keyword = st.text_input("🔍 종목 검색", placeholder="종목명 또는 코드(123456) 입력")
+            
+        # 2. 유형 필터 (멀티 선택 가능)
+        with col_filter:
+            # 데이터프레임에 있는 실제 유형들만 추출해서 옵션으로 제공
+            if not df.empty and '유형' in df.columns:
+                unique_types = sorted(df['유형'].unique().tolist())
+            else:
+                unique_types = ['리츠', '커버드콜', '고배당주', '배당성장', '혼합', '채권']
+                
+            selected_types = st.multiselect("🏷️ 유형 필터 (복수 선택 가능)", unique_types, default=[])
+
+    # ---------------------------------------------------------
+    # [NEW] 데이터 필터링 로직
+    # ---------------------------------------------------------
+    df_filtered = df.copy()
+    
+    # (1) 유형 필터 적용
+    if selected_types:
+        df_filtered = df_filtered[df_filtered['유형'].isin(selected_types)]
+        
+    # (2) 검색어 필터 적용
+    if search_keyword:
+        # 대소문자 무시하고 종목명이나 코드에 검색어가 포함되면 통과
+        mask = (
+            df_filtered['종목명'].astype(str).str.contains(search_keyword, case=False) | 
+            df_filtered['종목코드'].astype(str).str.contains(search_keyword, case=False)
+        )
+        df_filtered = df_filtered[mask]
+
+    # ---------------------------------------------------------
+    # 결과 렌더링 (필터링된 데이터인 df_filtered 사용)
+    # ---------------------------------------------------------
+    st.write(f"📊 **총 {len(df_filtered)}개** 종목이 표시됩니다.")
+    
     tab_all, tab_kor, tab_usa = st.tabs(["🌎 전체", "🇰🇷 국내", "🇺🇸 해외"])
     
-    with tab_all: ui.render_custom_table(df)
-    with tab_kor: ui.render_custom_table(df[df['분류'] == '국내'])
-    with tab_usa: ui.render_custom_table(df[df['분류'] == '해외'])
-
+    with tab_all: 
+        ui.render_custom_table(df_filtered)
+        
+    with tab_kor: 
+        ui.render_custom_table(df_filtered[df_filtered['분류'] == '국내'])
+        
+    with tab_usa: 
+        ui.render_custom_table(df_filtered[df_filtered['분류'] == '해외'])
 
 # ==========================================
 # [SECTION 5] 메인 애플리케이션 실행 엔진 (관제실)
