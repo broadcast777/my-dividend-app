@@ -1224,9 +1224,9 @@ def main():
         if st.query_params.get("admin", "false").lower() != "true":
             st.title("🚧 서비스 점검 중입니다")
             st.markdown("### 🔧 더 나은 기능을 위해 시스템 점검을 진행하고 있습니다.")
-            st.info("잠시 후 다시 접속해 주세요. (예상 시간: 30분 내외)")
+            st.info("잠시 후 다시 접속해 주세요.")
             st.divider()
-            st.caption("🐌 배당팽이 팀 드림")
+            st.caption("🐌 배당팽이 드림")
             st.stop()  # 🛑 여기서 앱 실행 강제 종료 (이 아래 코드는 실행되지 않음)
     # =================================================
     
