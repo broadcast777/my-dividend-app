@@ -1192,53 +1192,73 @@ def render_roadmap_page(df):
 
 
 def render_stocklist_page(df):
-    """📃 전체 종목 리스트 페이지 렌더링 (검색 & 필터 기능 추가)"""
+    """📃 전체 종목 리스트 페이지 렌더링 (자동완성 검색 + 토스 스타일 필터 + 탭 유지)"""
     
     st.info("💡 **이동 안내:** '코드' 클릭 시 블로그 분석글로, '🔗정보' 클릭 시 네이버/야후 금융 정보로 이동합니다. (**⭐ 표시는 상장 1년 미만 종목입니다.**)")
     
     # ---------------------------------------------------------
-    # [NEW] 검색 및 필터 도구 모음
+    # [설정] 검색 옵션 미리 만들기 (이름 + 코드 조합)
     # ---------------------------------------------------------
-    with st.container():
-        col_search, col_filter = st.columns([1, 1.5])
-        
-        # 1. 검색창 (종목명 or 코드)
-        with col_search:
-            search_keyword = st.text_input("🔍 종목 검색", placeholder="종목명 또는 코드(123456) 입력")
-            
-        # 2. 유형 필터 (멀티 선택 가능)
-        with col_filter:
-            # 데이터프레임에 있는 실제 유형들만 추출해서 옵션으로 제공
-            if not df.empty and '유형' in df.columns:
-                unique_types = sorted(df['유형'].unique().tolist())
-            else:
-                unique_types = ['리츠', '커버드콜', '고배당주', '배당성장', '혼합', '채권']
-                
-            selected_types = st.multiselect("🏷️ 유형 필터 (복수 선택 가능)", unique_types, default=[])
+    search_options = []
+    if not df.empty:
+        # 검색 편의성을 위해 '종목명 (코드)' 형태로 리스트 생성
+        search_options = df.apply(lambda x: f"{x['종목명']} ({x['코드']})", axis=1).tolist()
 
     # ---------------------------------------------------------
-    # [NEW] 데이터 필터링 로직
+    # 상단 도구 모음 (검색창 + 필터)
+    # ---------------------------------------------------------
+    with st.container():
+        col_search, col_filter = st.columns([1.5, 2]) # 필터 공간을 좀 더 확보 (Pills가 가로로 길어서)
+        
+        # 1. 검색창 (자동완성 펼침 기능)
+        with col_search:
+            selected_items = st.multiselect(
+                "🔍 종목 검색", 
+                options=search_options,
+                placeholder="이름/코드 입력 (자동완성)"
+            )
+            
+        # 2. [토스 스타일] 유형 필터 (Chips/Pills)
+        with col_filter:
+            # 데이터에서 유형 추출 (없으면 기본값)
+            if not df.empty and '유형' in df.columns:
+                unique_types = ["전체"] + sorted(df['유형'].unique().tolist())
+            else:
+                unique_types = ["전체", '리츠', '커버드콜', '고배당주', '배당성장', '혼합', '채권']
+            
+            # 클릭 한 번으로 필터링 (직관적)
+            selected_type = st.pills(
+                "🏷️ 유형 선택", 
+                unique_types, 
+                default="전체", 
+                selection_mode="single"
+            )
+
+    # ---------------------------------------------------------
+    # 데이터 필터링 로직
     # ---------------------------------------------------------
     df_filtered = df.copy()
     
-    # (1) 유형 필터 적용
-    if selected_types:
-        df_filtered = df_filtered[df_filtered['유형'].isin(selected_types)]
+    # (1) 검색어 필터 적용
+    if selected_items:
+        # 데이터프레임에도 '종목명 (코드)' 형식의 임시 컬럼을 만들어서 비교
+        df_filtered['검색라벨_temp'] = df_filtered.apply(lambda x: f"{x['종목명']} ({x['코드']})", axis=1)
+        df_filtered = df_filtered[df_filtered['검색라벨_temp'].isin(selected_items)]
+        df_filtered = df_filtered.drop(columns=['검색라벨_temp'])
         
-    # (2) 검색어 필터 적용
-    if search_keyword:
-        # 대소문자 무시하고 종목명이나 코드에 검색어가 포함되면 통과
-        mask = (
-            df_filtered['종목명'].astype(str).str.contains(search_keyword, case=False) | 
-            df_filtered['코드'].astype(str).str.contains(search_keyword, case=False)
-        )
-        df_filtered = df_filtered[mask]
+    # (2) 유형 필터 적용 ('전체'가 아닐 때만)
+    if selected_type and selected_type != "전체":
+        df_filtered = df_filtered[df_filtered['유형'] == selected_type]
 
     # ---------------------------------------------------------
-    # 결과 렌더링 (필터링된 데이터인 df_filtered 사용)
+    # 결과 렌더링 (탭 기능 유지됨)
     # ---------------------------------------------------------
-    st.write(f"📊 **총 {len(df_filtered)}개** 종목이 표시됩니다.")
+    if not df_filtered.empty:
+        st.caption(f"📊 총 **{len(df_filtered)}개** 종목이 표시됩니다.")
+    else:
+        st.warning("조건에 맞는 종목이 없습니다.")
     
+    # 👇 사용자님이 원하시던 탭 기능은 여기에 그대로 있습니다!
     tab_all, tab_kor, tab_usa = st.tabs(["🌎 전체", "🇰🇷 국내", "🇺🇸 해외"])
     
     with tab_all: 
