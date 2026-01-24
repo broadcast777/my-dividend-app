@@ -1216,7 +1216,7 @@ def main():
     # =================================================
     # 🚧 [점검 모드 설정] True = 점검중 / False = 정상
     # =================================================
-    MAINTENANCE_MODE = True  
+    MAINTENANCE_MODE = False  
     
     # 점검 모드가 켜져있고, 관리자(?admin=true)가 아니면 멈춤!
     if MAINTENANCE_MODE:
