@@ -1230,7 +1230,7 @@ def render_stocklist_page(df):
         # 대소문자 무시하고 종목명이나 코드에 검색어가 포함되면 통과
         mask = (
             df_filtered['종목명'].astype(str).str.contains(search_keyword, case=False) | 
-            df_filtered['종목코드'].astype(str).str.contains(search_keyword, case=False)
+            df_filtered['코드'].astype(str).str.contains(search_keyword, case=False)
         )
         df_filtered = df_filtered[mask]
 
