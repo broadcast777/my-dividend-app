@@ -1352,17 +1352,36 @@ def confirm_overwrite_dialog(final_name, user_id, user_email, save_data, existin
         st.rerun()
 
 def main():
+    # 1. 페이지 설정 (모바일 최적화를 위해 'centered'로 변경)
+    st.set_page_config(
+        page_title="배당팽이 포트폴리오",
+        page_icon="🐌",
+        layout="centered"  # 👈 wide 대신 centered를 쓰면 모바일에서 여백이 생겨 깔끔합니다.
+    )
+
     inject_ga()
     
-    # 1. 초기화 (세션 설정 + CSS 배전함 연결)
+    # 2. 초기화
     init_session_state() 
     ui.load_css() 
     
-    # 2. 안전 장치 (COPPA)
+    # ---------------------------------------------------------
+    # [심플 버전] 🐌 메인 타이틀
+    # ---------------------------------------------------------
+    # 불필요한 컬럼이나 버튼 없이 제목만 깔끔하게 배치
+    st.title("🐌 배당팽이 월배당 계산기")
+   
+    st.caption("나만의 배당 포트폴리오를 관리하고, 월별 예상 수입을 확인하세요.")
+    
+    st.divider() 
+    # ---------------------------------------------------------
+
+    # 3. 안전 장치 및 로깅
     #check_coppa_compliance() 
     
     logger.info("🚀 배당팽이 메인 엔진 가동")
     db.cleanup_old_tokens()
+
 
     # 2. 관리자 인증
     is_admin = False
