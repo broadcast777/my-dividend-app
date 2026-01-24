@@ -1203,12 +1203,24 @@ def render_stocklist_page(df):
         # 1. 검색 옵션 생성
         search_options = df.apply(lambda x: f"{x['종목명']} ({x['코드']})", axis=1).tolist()
         
-        # 2. [NEW] 배당 시기 자동 분류 (월초/월중/월말)
+        # 2. [수정] 배당 시기 자동 분류 (숫자 범위 판단 로직 적용)
         def classify_timing(text):
-            t = str(text)
-            if any(x in t for x in ['월초', '1~', '초순', '1일', '2일', '3일', '4일', '5일']): return "🟢 월초 (1~10일)"
-            if any(x in t for x in ['11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '중순']): return "🟡 월중 (11~20일)"
-            if any(x in t for x in ['월말', '마지막', '말일', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30', '31', '하순']): return "🔴 월말 (21~31일)"
+            import re
+            t = str(text).strip()
+            
+            # (1) 명확한 키워드 우선 처리 (숫자가 없거나 범위일 때)
+            if any(k in t for k in ['월초', '초순', '1~']): return "🟢 월초 (1~10일)"
+            if any(k in t for k in ['월말', '마지막', '말일', '하순']): return "🔴 월말 (21~31일)"
+            
+            # (2) 숫자 추출 및 범위 판단 (오해 방지 핵심 로직)
+            # "15일"에서 15만 쏙 뽑아냅니다.
+            match = re.search(r'(\d+)', t)
+            if match:
+                day = int(match.group(1))
+                if 1 <= day <= 10: return "🟢 월초 (1~10일)"
+                if 11 <= day <= 20: return "🟡 월중 (11~20일)"
+                if 21 <= day <= 31: return "🔴 월말 (21~31일)"
+                
             return "⚪ 기타/미정"
             
         df['배당시기_temp'] = df['배당락일'].apply(classify_timing)
@@ -1246,7 +1258,7 @@ def render_stocklist_page(df):
         with col_f2:
             # 2. [NEW] 배당 시기 필터
             timing_options = ["전체", "🟢 월초 (1~10일)", "🟡 월중 (11~20일)", "🔴 월말 (21~31일)"]
-            selected_timing = st.pills("📅 배당 시기", timing_options, default="전체", selection_mode="single")
+            selected_timing = st.pills("📅 배당락 시기", timing_options, default="전체", selection_mode="single")
 
     # ---------------------------------------------------------
     # 데이터 필터링 로직
