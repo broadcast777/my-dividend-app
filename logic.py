@@ -573,36 +573,7 @@ def save_to_github(df):
         logger.error(f"Github Save Error: {e}")
         return False, f"❌ 저장 실패: {str(e)}"
 
-# ---------- 배당 판정 설정 ----------
-DIV_OVERRIDE_REL_THRESHOLD = 0.30   # 기존 대비 상대 차이 30% 이상이면 의심
-DIV_ABS_YIELD_THRESHOLD = 10.0      # 연배당률 10% 초과면 의심
-DIV_MAX_ACCEPT_YIELD = 50.0         # 운영상 안전 상한
-# -------------------------------------
 
-def detect_special_dividend(annual_from_latest, existing_annual, price):
-    """
-    특별배당 의심 판정
-    반환: (special_flag: bool, reason: str)
-    """
-    try:
-        if annual_from_latest is None or annual_from_latest == 0:
-            return False, ""
-        # 절대 연배당률 기준
-        if price and price > 0:
-            yield_pct = (annual_from_latest / price) * 100.0
-            if yield_pct > DIV_MAX_ACCEPT_YIELD:
-                return True, f"yield_excess>{DIV_MAX_ACCEPT_YIELD}"
-            if yield_pct > DIV_ABS_YIELD_THRESHOLD:
-                return True, f"abs_yield>{DIV_ABS_YIELD_THRESHOLD}"
-        # 기존값 대비 상대 차이
-        if existing_annual and existing_annual > 0:
-            rel = abs(annual_from_latest - existing_annual) / existing_annual
-            if rel > DIV_OVERRIDE_REL_THRESHOLD:
-                return True, f"rel_diff>{DIV_OVERRIDE_REL_THRESHOLD}"
-        return False, ""
-    except Exception as e:
-        logger.warning(f"detect_special_dividend error: {e}")
-        return False, ""
 
 
 # -----------------------------------------------------------
