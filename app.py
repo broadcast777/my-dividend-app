@@ -329,13 +329,28 @@ def render_admin_tools(df_raw):
         st.write("") 
         
         # 5. 스마트 업데이트 (전체 종목 일괄 갱신)
-        with st.expander("⚡ 전체 종목 자동 업데이트 (스마트)"):
+        with st.expander("⚡ 전체/선택 종목 업데이트 (스마트)"):
             st.info("신규 상장(1년 미만)과 저배당주는 건너뜁니다.\nAuto가 0인 종목은 TTM(2순위)을 크롤링합니다.")
             
+            # [NEW] 갱신 대상 선택 기능 추가 (여기서 선택합니다)
+            all_stocks = df_raw['종목명'].tolist()
+            selected_targets = st.multiselect(
+                "갱신할 종목 선택 (비워두면 전체 갱신)", 
+                options=all_stocks,
+                placeholder="특정 종목만 갱신하려면 선택하세요"
+            )
+            
             if st.button("🔄 스마트 갱신 시작", key="btn_smart_update", use_container_width=True):
-                with st.spinner("⏳ 전체 종목 배당 데이터 수집 중..."):
+                # 선택된 게 없으면 None(전체), 있으면 리스트 전달
+                targets = selected_targets if selected_targets else None
+                
+                # 로딩 메시지도 상황에 맞게 변경
+                msg_target = f"선택한 {len(targets)}개 종목" if targets else "전체 종목"
+                
+                with st.spinner(f"⏳ {msg_target} 데이터 수집 중..."):
                     
-                    success, msg, failed_list = logic.smart_update_and_save()
+                    # [핵심] logic 함수에 명단(targets)을 같이 넘겨줍니다
+                    success, msg, failed_list = logic.smart_update_and_save(target_names=targets)
                     
                     if success:
                         st.success(msg)
