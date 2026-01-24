@@ -845,8 +845,11 @@ def reset_auto_data(code):
     except Exception as e:
         return False, f"❌ 오류 발생: {e}"
 
-def smart_update_and_save():
-    """전체 종목 배당 정보 일괄 업데이트 로직"""
+def smart_update_and_save(target_names=None):
+    """
+    전체 또는 선택된 종목의 배당 정보를 일괄 업데이트합니다.
+    target_names: 업데이트할 종목명 리스트 (None이면 전체)
+    """
     import time
     import streamlit as st
     
@@ -857,7 +860,12 @@ def smart_update_and_save():
         if 'TTM_연배당률(크롤링)' not in df.columns:
             df['TTM_연배당률(크롤링)'] = 0.0
         
-        total_count = len(df)
+        # [수정 1] 진행률 계산을 위한 전체 개수 설정
+        if target_names:
+            total_count = len(target_names)
+        else:
+            total_count = len(df)
+
         success_count = 0
         fail_count = 0
         protected_count = 0
@@ -866,23 +874,33 @@ def smart_update_and_save():
         my_bar = st.progress(0, text="스마트 업데이트 중...")
         status_text = st.empty()
         
+        # [수정 2] 진행률 바를 위한 별도 카운터
+        progress_idx = 0
+
         for idx, row in df.iterrows():
             code = str(row['종목코드']).strip()
             name = row['종목명']
             category = str(row.get('분류', '국내')).strip()
+            
+            # [수정 3] 선택된 목록에 없으면 건너뛰기 (핵심 기능)
+            if target_names and name not in target_names:
+                continue
+            
+            # 진행 카운트 증가
+            progress_idx += 1
             
             # 신규 상장 종목은 건너뜀
             try: months = int(row.get('신규상장개월수', 0))
             except: months = 0
             if 0 < months < 12:
                 protected_count += 1
-                my_bar.progress((idx + 1) / total_count)
+                my_bar.progress(progress_idx / total_count)
                 continue
             
             # 잠금 상태 확인 (-1.0)
             current_auto = float(row.get('연배당금_크롤링_auto', 0) or 0)
             
-            status_text.markdown(f"🔄 **[{idx+1}/{total_count}] {name}** 데이터 수집 중...")
+            status_text.markdown(f"🔄 **[{progress_idx}/{total_count}] {name}** 데이터 수집 중...")
             
             try:
                 # 센서 작동
@@ -918,7 +936,7 @@ def smart_update_and_save():
                 failed_list.append(name)
             
             time.sleep(0.05)
-            my_bar.progress((idx + 1) / total_count)
+            my_bar.progress(progress_idx / total_count)
                 
         my_bar.empty()
         status_text.empty()
