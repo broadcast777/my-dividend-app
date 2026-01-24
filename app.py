@@ -1192,83 +1192,98 @@ def render_roadmap_page(df):
 
 
 def render_stocklist_page(df):
-    """📃 전체 종목 리스트 페이지 렌더링 (자동완성 검색 + 토스 스타일 필터 + 탭 유지)"""
+    """📃 전체 종목 리스트 페이지 렌더링 (검색 + 유형 필터 + 배당 시기 필터)"""
     
     st.info("💡 **이동 안내:** '코드' 클릭 시 블로그 분석글로, '🔗정보' 클릭 시 네이버/야후 금융 정보로 이동합니다. (**⭐ 표시는 상장 1년 미만 종목입니다.**)")
     
     # ---------------------------------------------------------
-    # [설정] 검색 옵션 미리 만들기 (이름 + 코드 조합)
+    # [설정] 데이터 전처리 (검색용 라벨 + 배당 시기 분류)
     # ---------------------------------------------------------
-    search_options = []
     if not df.empty:
-        # 검색 편의성을 위해 '종목명 (코드)' 형태로 리스트 생성
+        # 1. 검색 옵션 생성
         search_options = df.apply(lambda x: f"{x['종목명']} ({x['코드']})", axis=1).tolist()
+        
+        # 2. [NEW] 배당 시기 자동 분류 (월초/월중/월말)
+        def classify_timing(text):
+            t = str(text)
+            if any(x in t for x in ['월초', '1~', '초순', '1일', '2일', '3일', '4일', '5일']): return "🟢 월초 (1~10일)"
+            if any(x in t for x in ['11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '중순']): return "🟡 월중 (11~20일)"
+            if any(x in t for x in ['월말', '마지막', '말일', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30', '31', '하순']): return "🔴 월말 (21~31일)"
+            return "⚪ 기타/미정"
+            
+        df['배당시기_temp'] = df['배당락일'].apply(classify_timing)
+    else:
+        search_options = []
 
     # ---------------------------------------------------------
-    # 상단 도구 모음 (검색창 + 필터)
+    # 상단 도구 모음
     # ---------------------------------------------------------
     with st.container():
-        col_search, col_filter = st.columns([1.5, 2]) # 필터 공간을 좀 더 확보 (Pills가 가로로 길어서)
+        # 검색창은 넓게, 필터는 아래로 배치
+        col_search = st.columns([1])[0]
         
-        # 1. 검색창 (자동완성 펼침 기능)
         with col_search:
             selected_items = st.multiselect(
                 "🔍 종목 검색", 
                 options=search_options,
                 placeholder="이름/코드 입력 (자동완성)"
             )
-            
-        # 2. [토스 스타일] 유형 필터 (Chips/Pills)
-        with col_filter:
-            # 데이터에서 유형 추출 (없으면 기본값)
+        
+        st.write("") # 간격 띄우기
+
+        # [필터 영역] 2단 구성 (유형 + 시기)
+        col_f1, col_f2 = st.columns(2)
+        
+        with col_f1:
+            # 1. 자산 유형 필터
             if not df.empty and '유형' in df.columns:
                 unique_types = ["전체"] + sorted(df['유형'].unique().tolist())
             else:
-                unique_types = ["전체", '리츠', '커버드콜', '고배당주', '배당성장', '혼합', '채권']
+                unique_types = ["전체"]
             
-            # 클릭 한 번으로 필터링 (직관적)
-            selected_type = st.pills(
-                "🏷️ 유형 선택", 
-                unique_types, 
-                default="전체", 
-                selection_mode="single"
-            )
+            selected_type = st.pills("🏷️ 자산 유형", unique_types, default="전체", selection_mode="single")
+
+        with col_f2:
+            # 2. [NEW] 배당 시기 필터
+            timing_options = ["전체", "🟢 월초 (1~10일)", "🟡 월중 (11~20일)", "🔴 월말 (21~31일)"]
+            selected_timing = st.pills("📅 배당 시기", timing_options, default="전체", selection_mode="single")
 
     # ---------------------------------------------------------
     # 데이터 필터링 로직
     # ---------------------------------------------------------
     df_filtered = df.copy()
     
-    # (1) 검색어 필터 적용
+    # (1) 검색어 필터
     if selected_items:
-        # 데이터프레임에도 '종목명 (코드)' 형식의 임시 컬럼을 만들어서 비교
         df_filtered['검색라벨_temp'] = df_filtered.apply(lambda x: f"{x['종목명']} ({x['코드']})", axis=1)
         df_filtered = df_filtered[df_filtered['검색라벨_temp'].isin(selected_items)]
         df_filtered = df_filtered.drop(columns=['검색라벨_temp'])
         
-    # (2) 유형 필터 적용 ('전체'가 아닐 때만)
+    # (2) 자산 유형 필터
     if selected_type and selected_type != "전체":
         df_filtered = df_filtered[df_filtered['유형'] == selected_type]
+        
+    # (3) [NEW] 배당 시기 필터
+    if selected_timing and selected_timing != "전체":
+        df_filtered = df_filtered[df_filtered['배당시기_temp'] == selected_timing]
+
+    # 임시 컬럼 삭제 (깔끔하게)
+    if '배당시기_temp' in df_filtered.columns:
+        df_filtered = df_filtered.drop(columns=['배당시기_temp'])
 
     # ---------------------------------------------------------
-    # 결과 렌더링 (탭 기능 유지됨)
+    # 결과 렌더링
     # ---------------------------------------------------------
     if not df_filtered.empty:
         st.caption(f"📊 총 **{len(df_filtered)}개** 종목이 표시됩니다.")
     else:
         st.warning("조건에 맞는 종목이 없습니다.")
     
-    # 👇 사용자님이 원하시던 탭 기능은 여기에 그대로 있습니다!
     tab_all, tab_kor, tab_usa = st.tabs(["🌎 전체", "🇰🇷 국내", "🇺🇸 해외"])
     
-    with tab_all: 
-        ui.render_custom_table(df_filtered)
-        
-    with tab_kor: 
-        ui.render_custom_table(df_filtered[df_filtered['분류'] == '국내'])
-        
-    with tab_usa: 
-        ui.render_custom_table(df_filtered[df_filtered['분류'] == '해외'])
+    with tab_all: ui.render_custom_table(df_filtered)
+    with tab_kor: ui.render_custom_table(df_filtered[df_filtered['분류'] == '국내'])
+    with tab_usa: ui.render_custom_table(df_filtered[df_filtered['분류'] == '해외'])
 
 # ==========================================
 # [SECTION 5] 메인 애플리케이션 실행 엔진 (관제실)
