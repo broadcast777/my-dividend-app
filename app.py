@@ -1,7 +1,8 @@
 """
-프로젝트: 배당 팽이 (Dividend Top) v3.0 (Final Release Candidate)
+프로젝트: 배당 팽이 (Dividend Top) - 메인 애플리케이션
 파일명: app.py
-설명: 모바일 최적화 + 탭 기능 안정화 + 역산기 단순화(Simpler Goal Tab)
+설명: 사용자 인터페이스(UI), 페이지 라우팅, 세션 관리, 데이터 시각화 담당
+최종 정리: 2026.01.24
 """
 
 import streamlit as st
@@ -15,12 +16,10 @@ from logger import logger
 from analytics import inject_ga
 import streamlit.components.v1 as components
 import re
-
-# [필수] 날짜 및 URL 라이브러리
 from datetime import datetime, timedelta
 import urllib.parse
 
-# [모듈화] 기능을 분리한 커스텀 파일들을 불러옵니다
+# 커스텀 모듈 로드
 import logic
 import ui
 import db
@@ -28,14 +27,18 @@ import recommendation
 import timeline
 
 
-# ==========================================
-# [SECTION 1] 기본 페이지 설정 및 초기화
-# ==========================================
+# =============================================================================
+# [SECTION 1] 기본 설정 및 초기화
+# =============================================================================
 
-# 앱의 타이틀과 가로 너비를 설정합니다
-st.set_page_config(page_title="배당팽이 대시보드", layout="wide")
+# 페이지 기본 설정 (모바일 최적화: centered)
+st.set_page_config(
+    page_title="배당팽이 포트폴리오",
+    page_icon="🐌",
+    layout="wide"  
+)
 
-# 📡 [RFID 센서] 브라우저 저장소(localStorage)와 URL 동기화
+# 브라우저 localStorage와 URL 파라미터 동기화 (RFID 센서 역할)
 components.html("""
 <script>
     try {
@@ -49,9 +52,11 @@ components.html("""
 </script>
 """, height=0)
 
-# [리팩토링 1] 세션 상태 초기화 함수
 def init_session_state():
-    """앱 전반에서 사용하는 모든 세션 변수를 안전하게 초기화합니다."""
+    """
+    세션 상태(Session State) 초기화
+    - 로그인 상태, 사용자 정보, 포트폴리오 데이터 등 전역 변수 관리
+    """
     defaults = {
         "is_logged_in": False,
         "user_info": None,
@@ -63,35 +68,38 @@ def init_session_state():
         "monthly_expense": 200, 
         "ai_result_cache": None,
         "show_ai_login": False,
-        "portfolio_map": {} # 데이터 유실 방지 금고
+        "portfolio_map": {} # 페이지 이동 간 데이터 보존용 금고
     }
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
 
-# 외부 데이터베이스(Supabase) 연결 초기화
+# DB 연결
 supabase = db.init_supabase()
 
 
-# ==========================================
-# [SECTION 2] 인증 및 보안 엔진
-# ==========================================
+# =============================================================================
+# [SECTION 2] 인증 시스템 (Supabase Auth)
+# =============================================================================
 
 def check_auth_status():
-    """로그인 상태 확인 및 콜백 처리"""
+    """로그인 세션 확인 및 OAuth 콜백 처리"""
     if not supabase: return
 
+    # 1. 기존 세션 확인
     try:
         session = supabase.auth.get_session()
         if session and session.user:
             st.session_state.is_logged_in = True
             st.session_state.user_info = session.user
+            # URL 정리
             for key in ["code", "old_id"]:
                 if key in st.query_params: del st.query_params[key]
             return 
     except Exception:
         pass
 
+    # 2. OAuth 콜백 처리 (로그인 직후 리다이렉트)
     query_params = st.query_params
     if "code" in query_params and not st.session_state.get("code_processed", False):
         st.session_state.code_processed = True
@@ -108,9 +116,9 @@ def check_auth_status():
             st.success("✅ 로그인되었습니다!")
             st.rerun()
         except Exception as e:
-            logger.error(f"🚨 [Auth Error] 인증 프로세스 중 예외 발생: {str(e)}", exc_info=True)
-            err_msg = str(e).lower()
-            if "verifier" in err_msg or "non-empty" in err_msg:
+            logger.error(f"🚨 [Auth Error] 인증 예외: {str(e)}", exc_info=True)
+            # 토큰 갱신 이슈 발생 시 재시도 유도
+            if "verifier" in str(e).lower() or "non-empty" in str(e).lower():
                 st.warning("🔄 보안 토큰 갱신 중... 잠시만 기다려주세요.")
                 for key in ["code", "old_id"]:
                     if key in st.query_params: del st.query_params[key]
@@ -123,12 +131,12 @@ def check_auth_status():
 check_auth_status()
 
 
-# ==========================================
-# [SECTION 3] UI 컴포넌트
-# ==========================================
+# =============================================================================
+# [SECTION 3] 공통 UI 컴포넌트
+# =============================================================================
 
 def render_login_ui():
-    """사이드바 상단 로그인 정보"""
+    """사이드바 상단: 로그인 사용자 정보 표시"""
     if not supabase: return
     is_logged_in = st.session_state.get("is_logged_in", False)
     user_info = st.session_state.get("user_info", None)
@@ -149,7 +157,7 @@ def render_login_ui():
                 st.rerun()
 
 def render_sidebar_footer():
-    """사이드바 하단 후원 버튼 (CSS 분리 적용됨)"""
+    """사이드바 하단: 후원 버튼"""
     bmc_url = "https://www.buymeacoffee.com/dividenpange"
     st.sidebar.markdown("---") 
     st.sidebar.markdown(f"""
@@ -161,13 +169,8 @@ def render_sidebar_footer():
         </div>
     """, unsafe_allow_html=True)
 
-
-# ==========================================
-# [SECTION 4] 페이지별 렌더링 함수
-# ==========================================
-
 def render_login_buttons(key_suffix="default"):
-    """예쁜 디자인의 로그인 버튼 세트 (CSS 분리 적용됨)"""
+    """소셜 로그인 버튼 렌더링 (카카오/구글)"""
     try:
         ctx = get_script_run_ctx()
         current_session_id = ctx.session_id
@@ -193,17 +196,18 @@ def render_login_buttons(key_suffix="default"):
                     st.stop()
             except: pass
 
-def render_admin_tools(df_raw):
 
-    """관리자 전용 도구 (기능 누락 없음 + 스마트 갱신 적용)"""
+# =============================================================================
+# [SECTION 4] 관리자 도구 (Admin Tools)
+# =============================================================================
+
+def render_admin_tools(df_raw):
+    """데이터 갱신 및 관리를 위한 관리자 전용 메뉴"""
     with st.sidebar:
         st.markdown("---")
         st.subheader("🛠️ 배당금 갱신 도구")
 
-        
-        # -------------------------------------------------------------
-        # 1. 종목 선택 및 기본 정보
-        # -------------------------------------------------------------
+        # 1. 종목 선택
         stock_options = {}
         for idx, row in df_raw.iterrows():
             name = row['종목명']
@@ -227,9 +231,7 @@ def render_admin_tools(df_raw):
                 st.caption(f"코드: {code}")
                 st.caption(f"분류: {category}")
             
-            # -------------------------------------------------------------
-            # 2. 배당률 조회 버튼 (기존 기능)
-            # -------------------------------------------------------------
+            # 2. 개별 종목 배당률 조회 (크롤링 테스트)
             with col_btn:
                 if st.button("🔍 배당률 조회", key="btn_auto_check", use_container_width=True):
                     with st.spinner("탐색 중..."):
@@ -242,7 +244,7 @@ def render_admin_tools(df_raw):
                             st.error("실패")
                             st.caption(f"원인: {src}")
                         
-                        # 조회값 저장
+                        # 조회값 임시 저장
                         try:
                             df_raw.loc[df_raw['종목코드'] == code, '연배당률_크롤링'] = float(y_val) if y_val else 0.0
                         except:
@@ -262,9 +264,7 @@ def render_admin_tools(df_raw):
 
             st.divider()
 
-            # -------------------------------------------------------------
-            # [NEW] 특별배당 대응: 1순위(Auto) 삭제 버튼 (새로 추가됨!)
-            # -------------------------------------------------------------
+            # 3. 데이터 우선순위 관리 (특별배당 대응)
             with st.expander("🚨 데이터 우선순위 관리 (특별배당 대응)"):
                 st.caption("Auto 값이 이상하게 높으면(특별배당), 여기서 삭제하여 **TTM(2순위)**이나 **수동(3순위)**이 적용되게 하세요.")
                 if st.button(f"🗑️ [{target_stock}] Auto 데이터 삭제", use_container_width=True):
@@ -278,9 +278,7 @@ def render_admin_tools(df_raw):
             
             st.divider()
 
-            # -------------------------------------------------------------
-            # 3. 수동 업데이트 도구 (기존 기능 유지)
-            # -------------------------------------------------------------
+            # 4. 수동 업데이트
             st.caption("👇 배당금 수동 업데이트")
             new_div = st.number_input("이번 달 확정 배당금 (또는 월평균)", value=0, step=10)
             
@@ -289,8 +287,6 @@ def render_admin_tools(df_raw):
                 new_total, new_hist = logic.update_dividend_rolling(cur_hist, new_div)
                 df_raw.loc[df_raw['종목코드'] == code, '배당기록'] = new_hist
                 df_raw.loc[df_raw['종목코드'] == code, '연배당금'] = new_total
-                
-                # 수동값은 크롤링값에도 백업
                 df_raw.loc[df_raw['종목코드'] == code, '연배당금_크롤링'] = new_total
                 
                 current_price = row.get('현재가', 0)
@@ -317,7 +313,6 @@ def render_admin_tools(df_raw):
                 if current_price and current_price > 0:
                     new_yield = round((new_total / current_price) * 100, 2)
                     df_raw.loc[df_raw['종목코드'] == code, '연배당률'] = new_yield
-                    # 크롤링 컬럼도 업데이트
                     df_raw.loc[df_raw['종목코드'] == code, '연배당금_크롤링'] = new_total 
                     df_raw.loc[df_raw['종목코드'] == code, '연배당률_크롤링'] = new_yield 
                     st.success(f"⚡ 적용 완료 ({new_total}원 / {new_yield}%)")
@@ -333,31 +328,21 @@ def render_admin_tools(df_raw):
 
         st.write("") 
         
-        # -------------------------------------------------------------
-        # [핵심 변경] 로직을 logic.py로 이사시켜서 코드가 짧아짐 (기능은 더 강력해짐!)
-        # -------------------------------------------------------------
-        # -------------------------------------------------------------
-        # [수정 완료] 버튼을 누를 때만 작동하도록 트리거 추가
-        # -------------------------------------------------------------
+        # 5. 스마트 업데이트 (전체 종목 일괄 갱신)
         with st.expander("⚡ 전체 종목 자동 업데이트 (스마트)"):
             st.info("신규 상장(1년 미만)과 저배당주는 건너뜁니다.\nAuto가 0인 종목은 TTM(2순위)을 크롤링합니다.")
             
-            # 1. 여기에 버튼 트리거가 반드시 있어야 합니다!
             if st.button("🔄 스마트 갱신 시작", key="btn_smart_update", use_container_width=True):
                 with st.spinner("⏳ 전체 종목 배당 데이터 수집 중..."):
                     
-                    # 2. 버튼 안쪽으로 들여쓰기 되어야 버튼 누를 때만 실행됩니다.
                     success, msg, failed_list = logic.smart_update_and_save()
                     
                     if success:
                         st.success(msg)
-                        
-                        # 실패한 종목 리스트 출력
                         if failed_list:
                             with st.expander("⚠️ 일부 종목 업데이트 제외 (데이터 없음)"):
                                 for f_name in failed_list:
                                     st.write(f"- {f_name}")
-                        
                         st.info("💡 결과가 마음에 드신다면 아래 '영구 저장' 버튼을 눌러주세요.")
                     else:
                         st.error(msg)
@@ -367,44 +352,28 @@ def render_admin_tools(df_raw):
             if st.button("🚀 깃허브에 영구 저장", type="primary", use_container_width=True):
                 with st.spinner("업로드 중..."):
                     
-                    # ---------------------------------------------------------
-                    # [유지] 사용자님이 가지고 계시던 디버깅 코드 (그대로 복구!)
-                    # ---------------------------------------------------------
-                    import importlib, inspect, sys
+                    # 로직 모듈 재로드 (안전장치)
+                    import importlib
                     try:
-                        st.sidebar.write("DEBUG logic module file:", getattr(logic, "__file__", None))
-                        st.sidebar.write("DEBUG has save_to_github:", hasattr(logic, "save_to_github"))
-                        if hasattr(logic, "save_to_github"):
-                            try:
-                                st.sidebar.write("DEBUG save_to_github source:", inspect.getsourcefile(logic.save_to_github))
-                            except Exception as _:
-                                st.sidebar.write("DEBUG save_to_github source: (unavailable)")
-                        st.sidebar.write("DEBUG sys.path head:", sys.path[:5])
-                        
                         importlib.reload(logic)
-                        st.sidebar.write("DEBUG after reload has save_to_github:", hasattr(logic, "save_to_github"))
-                    except Exception as e:
-                        logger.exception(f"render_admin_tools debug failed: {e}")
-                        st.sidebar.write("DEBUG: 모듈 진단 중 예외 발생. 로그 확인 필요.")
-                    # ---------------------------------------------------------
+                    except Exception: pass
 
                     target_df = st.session_state.get('df_dirty', df_raw)
                     success, msg = logic.save_to_github(target_df)
                     if success:
                         st.balloons()
                         st.success(msg)
-                     
                     else:
                         st.error(msg)
 
 
-# ==========================================
-# [SECTION 5] 메인 애플리케이션 실행 엔진 (관제실)
-# ==========================================
+# =============================================================================
+# [SECTION 5] 메인 페이지 (계산기 / 로드맵 / 리스트)
+# =============================================================================
 
-# 🚨 [추가된 함수] 삭제 확인 다이얼로그 (Dialog)
 @st.dialog("⚠️ 정말 삭제하시겠습니까?")
 def confirm_delete_dialog(target_names, opts, supabase):
+    """포트폴리오 삭제 확인 팝업"""
     st.write(f"선택하신 **{len(target_names)}개**의 포트폴리오가 영구적으로 삭제됩니다.")
     st.warning("이 작업은 되돌릴 수 없습니다.")
     
@@ -413,9 +382,7 @@ def confirm_delete_dialog(target_names, opts, supabase):
     if col_del1.button("✅ 네, 삭제합니다", type="primary", use_container_width=True):
         try:
             target_ids = [opts[name]['id'] for name in target_names]
-            # Supabase 'in' 쿼리로 일괄 삭제
             supabase.table("portfolios").delete().in_("id", target_ids).execute()
-            
             logger.info(f"🗑️ 포트폴리오 일괄 삭제: {len(target_ids)}건")
             st.rerun()
         except Exception as e:
@@ -424,10 +391,9 @@ def confirm_delete_dialog(target_names, opts, supabase):
     if col_del2.button("취소", use_container_width=True):
         st.rerun()
 
-# 💾 [추가된 함수] 덮어쓰기 확인 다이얼로그
 @st.dialog("💾 기존 파일 덮어쓰기")
 def confirm_overwrite_dialog(final_name, user_id, user_email, save_data, existing_id, supabase):
-    """이미 같은 이름의 포트폴리오가 있을 때 띄우는 팝업"""
+    """중복 이름 저장 시 덮어쓰기 확인 팝업"""
     st.write(f"이미 **'{final_name}'**이라는 이름의 포트폴리오가 존재합니다.")
     st.info("새로운 데이터로 덮어쓰시겠습니까?")
     
@@ -435,10 +401,9 @@ def confirm_overwrite_dialog(final_name, user_id, user_email, save_data, existin
     
     if col_ov1.button("🎮 네, 덮어씁니다", type="primary", use_container_width=True):
         try:
-            # 기존 ID를 찾아서 해당 데이터만 업데이트
             supabase.table("portfolios").update({
                 "ticker_data": save_data, 
-                "created_at": "now()" # 저장 시간 갱신
+                "created_at": "now()"
             }).eq("id", existing_id).execute()
             
             logger.info(f"🔄 기존 포트폴리오 덮어쓰기 완료: {final_name}")
@@ -453,19 +418,18 @@ def confirm_overwrite_dialog(final_name, user_id, user_email, save_data, existin
         st.rerun()
 
 def render_calculator_page(df):
-    """💰 배당금 계산기 페이지 렌더링"""
+    """💰 배당금 계산기 & 시뮬레이터"""
     
     if st.session_state.get("ai_modal_open", False):
         recommendation.show_wizard()
     
-    # 6-2. 포트폴리오 시뮬레이션
     all_data = []
     
     with st.expander("🧮 나만의 배당 포트폴리오 시뮬레이션", expanded=True):
-        # 1. 레이아웃 잡기
+        # 1. 레이아웃 (좌측 총액 / 우측 종목선택)
         col_total, col_select = st.columns([1, 2])
 
-        # [바코드(Dictionary) 매핑 시스템]
+        # 종목 검색 최적화 (이름 + 코드)
         code_col_name = next((c for c in df.columns if '코드' in c), '종목코드')
         name_col_name = next((c for c in df.columns if 'pure' in c or '명' in c), '종목명')
 
@@ -490,7 +454,7 @@ def render_calculator_page(df):
                 if real_name in saved_stocks:
                     default_selected_labels.append(label)
 
-        # 2. 종목 선택 (우측)
+        # 종목 선택기
         selected_search = col_select.multiselect(
             "📊 종목 선택 (이름 또는 코드로 검색)", 
             options=search_options, 
@@ -500,9 +464,8 @@ def render_calculator_page(df):
         selected = [label_to_real_name[opt] for opt in selected_search]
         st.session_state.selected_stocks = selected
 
-        # 3. [동기화 로직 정의]
+        # 데이터 동기화 함수들 (Top-down / Bottom-up)
         def sync_from_individual():
-            """개별 종목 수정 -> 총액 자동 합산 (Bottom-up)"""
             new_sum = 0
             amounts_map = {}
             for i, stock in enumerate(st.session_state.selected_stocks):
@@ -512,10 +475,9 @@ def render_calculator_page(df):
             
             st.session_state.total_invest = new_sum * 10000
             st.session_state.total_invest_input = new_sum 
-            st.session_state.portfolio_map = amounts_map # 금고 실시간 동기화
+            st.session_state.portfolio_map = amounts_map
 
         def sync_from_total():
-            """총액 수정 -> 개별 종목 비율대로 배분 (Top-down)"""
             new_total = st.session_state.total_invest_input
             st.session_state.total_invest = new_total * 10000
             
@@ -535,9 +497,9 @@ def render_calculator_page(df):
                 st.session_state[f"amt_{i}"] = val
                 amounts_map[stock] = val
             
-            st.session_state.portfolio_map = amounts_map # 금고 실시간 동기화
+            st.session_state.portfolio_map = amounts_map
 
-        # 4. 선행 초기화 (Pre-Initialization)
+        # 선행 초기화 (값 없을 때)
         if selected:
             init_sum = 0
             current_base_total = st.session_state.get("total_invest_input", 3000)
@@ -558,7 +520,7 @@ def render_calculator_page(df):
             st.session_state.total_invest_input = init_sum
             st.session_state.total_invest = init_sum * 10000
 
-        # 5. 총 투자 자산 입력창 (좌측)
+        # 총액 입력창
         if "total_invest_input" not in st.session_state:
             st.session_state.total_invest_input = int(st.session_state.total_invest / 10000)
 
@@ -571,7 +533,7 @@ def render_calculator_page(df):
             help="이 금액을 수정하면 아래 종목들에 비율대로 자동 배분됩니다."
         )
 
-        # 6. 하단 개별 입력 루프
+        # 개별 종목 입력 루프
         if selected:
             has_foreign_stock = any(df[df['pure_name'] == s_name].iloc[0]['분류'] == '해외' for s_name in selected)
             if has_foreign_stock:
@@ -586,7 +548,6 @@ def render_calculator_page(df):
             for i, stock in enumerate(selected):
                 
                 with cols_input[i % 2]:
-                    # 개별 금액 입력창
                     val = st.number_input(
                         f"{stock} (만원)", 
                         min_value=0, 
@@ -597,7 +558,7 @@ def render_calculator_page(df):
                     temp_total_sum += val
                     amounts_map[stock] = val
                     
-                    # 📊 비중 & 날짜 정보 & 개별 알림 버튼
+                    # 비중 & 배당일 정보 표시
                     current_weight = (val / current_total_view * 100)
                     stock_match = df[df['pure_name'] == stock]
                     
@@ -605,42 +566,37 @@ def render_calculator_page(df):
                         s_row = stock_match.iloc[0]
                         ex_date_view = s_row.get('배당락일', '-')
                         
-                        # [NEW] 단일/다중 분기 처리
                         info_text = f"**종목 비중 {current_weight:.1f}%**"
                         
                         if ex_date_view and ex_date_view not in ['-', 'nan', 'None']:
                             date_msg = f" | 📅 {ex_date_view}"
                             
-                            # 1개일 때: 버튼으로 유도 (즉시 실행)
                             if len(selected) == 1:
                                 cal_url = logic.get_google_cal_url(stock, ex_date_view)
                                 if cal_url:
                                     st.caption(f"{info_text}{date_msg}")
                                     
-                                    # 🔒 [보안 패치 완료] 로그인 상태 체크
                                     if st.session_state.get("is_logged_in", False):
                                         st.link_button("📅 배당 일정 등록", cal_url, use_container_width=True)
                                     else:
-                                        # 비로그인 시: 가짜 버튼 보여주고 누르면 경고
                                         if st.button("📅 배당 일정 등록", key=f"btn_cal_indi_{i}", use_container_width=True):
                                             st.toast("🔒 로그인 회원만 일정을 등록할 수 있습니다!", icon="🔒")
                                 else:
                                     st.caption(f"{info_text}{date_msg}")
-                            # 2개 이상일 때: 텍스트만 보여주고 하단 ICS 유도
                             else:
                                 st.caption(f"{info_text}{date_msg}")
                         else:
                             st.caption(f"{info_text} | 📅 날짜 미정")
             
-            # [핵심 추가 1] 페이지 이동 시 데이터 증발 방지를 위한 안전 저장
+            # 데이터 백업
             st.session_state['portfolio_map'] = amounts_map
 
-            # 🔄 최종 동기화 (오차 보정)
+            # 오차 보정
             if temp_total_sum * 10000 != st.session_state.total_invest:
                  st.session_state.total_invest = temp_total_sum * 10000
             total_invest = st.session_state.total_invest
 
-            # 🧮 데이터 역산 (비중)
+            # 비중 계산 및 결과 데이터 생성
             weights = {}
             if temp_total_sum > 0:
                 for s, amt in amounts_map.items():
@@ -648,7 +604,6 @@ def render_calculator_page(df):
             else:
                 for s in selected: weights[s] = 0
 
-            # 테이블 데이터 생성 (all_data)
             for stock in selected:
                 stock_match = df[df['pure_name'] == stock]
                 if not stock_match.empty:
@@ -663,7 +618,7 @@ def render_calculator_page(df):
                         '환구분': s_row.get('환구분', '-'), '배당락일': s_row.get('배당락일', '-')
                     })
             
-            # 로드맵 표시 (기존 코드 유지)
+            # 사이드바 로드맵
             timeline.display_sidebar_roadmap(df, weights, total_invest)
             
             if len(selected) > 1:
@@ -675,6 +630,7 @@ def render_calculator_page(df):
                     </div>
                 """, unsafe_allow_html=True)
 
+            # 결과 요약 (월 배당금)
             total_y_div = sum([(total_invest * (weights[n]/100) * (df[df['pure_name']==n].iloc[0]['연배당률']/100)) for n in selected])
             total_m = total_y_div / 12
             avg_y = sum([(df[df['pure_name']==n].iloc[0]['연배당률'] * (weights[n]/100)) for n in selected])
@@ -688,6 +644,7 @@ def render_calculator_page(df):
             with r3:
                 st.markdown(f"""<div style="background-color: #d4edda; color: #155724; padding: 15px; border-radius: 8px; border: 1px solid #c3e6cb; height: 100%; display: flex; flex-direction: column; justify-content: center;"><div style="font-weight: bold; font-size: 1.05em;">✅ 일반 계좌 대비 월 {total_m * 0.154:,.0f}원 이득!</div><div style="color: #6c757d; font-size: 0.8em; margin-top: 5px;">(비과세 및 과세이연 단순 가정입니다)</div></div>""", unsafe_allow_html=True)
 
+            # 차트 시각화
             st.write("")
             c_data = pd.DataFrame({'계좌 종류': ['일반 계좌', 'ISA/연금계좌'], '월 수령액': [total_m * 0.846, total_m]})
             chart_compare = alt.Chart(c_data).mark_bar(cornerRadiusTopLeft=10, cornerRadiusTopRight=10).encode(
@@ -699,8 +656,9 @@ def render_calculator_page(df):
             st.altair_chart(chart_compare, use_container_width=True)
 
             st.divider()
+            
+            # ICS 파일 생성 및 다운로드
             ics_data = logic.generate_portfolio_ics(all_data)
-            # [수정 완료] 캘린더 일괄 등록 -> 배당 일정 등록
             st.subheader("📅 배당 일정 등록")
             col_d1, col_d2 = st.columns([1.5, 1])
             with col_d1:
@@ -724,6 +682,8 @@ def render_calculator_page(df):
                 """)
             
             st.write("") 
+            
+            # 포트폴리오 저장 기능
             with st.container(border=True):
                 st.write("💾 **포트폴리오 저장 / 수정**")
                 if not st.session_state.get('is_logged_in', False):
@@ -746,18 +706,16 @@ def render_calculator_page(df):
                                     next_num = (cnt_res.count or 0) + 1
                                     final_name = f"포트폴리오 {next_num}"
                                 
-                                # 🚨 [안전장치 1] 중복 체크
+                                # 중복 체크
                                 check_res = supabase.table("portfolios").select("id").eq("user_id", user.id).eq("name", final_name).execute()
                                 
                                 if check_res.data:
-                                    # 중복 발생 -> 팝업 신호 보내기
                                     st.session_state.show_overwrite_dialog = {
                                         "name": final_name,
                                         "id": check_res.data[0]['id'],
                                         "data": save_data
                                     }
                                 else:
-                                    # 중복 없음 -> 바로 저장
                                     supabase.table("portfolios").insert({"user_id": user.id, "user_email": user.email, "name": final_name, "ticker_data": save_data}).execute()
                                     logger.info(f"💾 새 포트폴리오 저장: {final_name}")
                                     st.success(f"[{final_name}] 저장 완료!")
@@ -765,7 +723,7 @@ def render_calculator_page(df):
                                     time.sleep(1.0)
                                     st.rerun()
 
-                        else: # [🔄 기존 파일 수정 모드]
+                        else: # 수정 모드
                             exist_res = supabase.table("portfolios").select("id, name, created_at").eq("user_id", user.id).order("created_at", desc=True).execute()
                             if not exist_res.data:
                                 st.warning("수정할 포트폴리오가 없습니다. 새로 만들어주세요.")
@@ -774,19 +732,16 @@ def render_calculator_page(df):
                                 c_up1, c_up2 = st.columns([2, 1])
                                 selected_label = c_up1.selectbox("수정할 파일 선택", list(exist_opts.keys()), label_visibility="collapsed")
                                 target_id = exist_opts[selected_label]
-                                
-                                # 선택된 이름 찾기 (팝업 표시용)
                                 target_name = selected_label.split(" (")[0]
 
                                 if c_up2.button("덮어쓰기", type="primary", use_container_width=True):
-                                    # [안전장치 2] 기존 수정 시에도 팝업 띄우기 (일관성)
                                     st.session_state.show_overwrite_dialog = {
                                         "name": target_name,
                                         "id": target_id,
                                         "data": save_data
                                     }
 
-                        # 🚨 [공통 안전 호출 구역] 다이얼로그 실행
+                        # 덮어쓰기 팝업 실행
                         if "show_overwrite_dialog" in st.session_state:
                             info = st.session_state.show_overwrite_dialog
                             del st.session_state.show_overwrite_dialog
@@ -803,7 +758,8 @@ def render_calculator_page(df):
     df_ana = pd.DataFrame(all_data)
     if not df_ana.empty:
         st.write("")
-        # [핵심 변경] st.tabs -> st.segmented_control (UI 및 상태 유지)
+        
+        # 메인 분석 탭 (Segmented Control)
         tab_options = ["💎 자산 구성 분석", "💰 10년 뒤 자산 미리보기", "🎯 목표 배당 달성"]
         selected_tab = st.segmented_control(
             "main_tab_nav",
@@ -814,7 +770,6 @@ def render_calculator_page(df):
         )
         if not selected_tab: selected_tab = tab_options[0]
 
-        # [키 포인트] 변수 Hoisting (UnboundLocalError 해결)
         saved_monthly = st.session_state.get("shared_monthly_input", 150)
         
         st.write("")
@@ -853,11 +808,12 @@ def render_calculator_page(df):
             ui.render_custom_table(df_ana)
             st.error("""**⚠️ 포트폴리오 분석 시 유의사항**\n1. 과거의 데이터를 기반으로 한 단순 결과값이며, 실제 투자 수익을 보장하지 않습니다.\n2. '달러 자산' 비율 실제 환노출 여부와 다를 수 있습니다 투자 전 확인이 필요합니다.\n3. 실제 배당금 지급일과 금액은 운용사의 사정에 따라 변경될 수 있습니다.""")
 
-        # 2. 10년 뒤 자산 미리보기
+        # 2. 10년 뒤 자산 시뮬레이션
         elif selected_tab == "💰 10년 뒤 자산 미리보기":
             start_money = total_invest
             is_over_100m = start_money > 100000000
             st.info(f"📊 상단에서 설정한 **초기 자산 {start_money/10000:,.0f}만원**으로 시뮬레이션을 시작합니다.")
+            
             c1, c2 = st.columns([1.5, 1])
             with c1:
                 if is_over_100m:
@@ -883,7 +839,6 @@ def render_calculator_page(df):
             
             st.markdown("---")
             
-            # [수정] 공유된 변수(saved_monthly)를 사용하여 값 유지
             monthly_input_val = st.number_input(
                 "➕ 매월 추가 적립 (만원)", min_value=0, max_value=3000, value=saved_monthly, step=10, key="shared_monthly_input"
             )
@@ -1030,12 +985,11 @@ def render_calculator_page(df):
             st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**\n1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 단순 결과입니다.
                     2. 재투자가 매월 이루어진다는 가정하에 계산된 복리 결과입니다.""")
 
-        # 3. 목표 배당 달성 (역산기) - 심플 버전
+        # 3. 목표 배당 달성 (역산기)
         elif selected_tab == "🎯 목표 배당 달성":
             st.subheader("🎯 목표 배당금 역산기 (은퇴 시뮬레이터)")
             st.caption("내가 원하는 월급을 받기 위해 총 얼마가 필요한지 계산합니다.")
 
-            # [수정] 2열 레이아웃으로 변경 (추가납입 삭제)
             with st.container(border=True):
                 col_info1, col_info2 = st.columns(2)
                 col_info1.metric("📊 평균 연배당률", f"{avg_y:.2f}%")
@@ -1044,7 +998,6 @@ def render_calculator_page(df):
 
             st.write("")
 
-            # [입력창] - 추가납입 제거, 목표금액과 보유자산 포함 여부만 유지
             col_g1, col_g2 = st.columns(2)
             with col_g1:
                 target_monthly_goal = st.number_input(
@@ -1065,44 +1018,36 @@ def render_calculator_page(df):
                 )
                 st.caption(f"보유: {total_invest/10000:,.0f}만원")
 
-            # [계산 로직] - 추가 납입(calc_monthly_input)을 0으로 고정
+            # 계산 로직
             current_bal_goal = total_invest if use_start_money else 0
             actual_start_bal = current_bal_goal 
-            
-            # 여기서 0으로 고정하여 탭 간 간섭 제거
-            calc_monthly_input = 0
+            calc_monthly_input = 0 # 단순화: 추가 납입 없이 현재 자산으로만 계산
             
             tax_factor = 0.846
             monthly_yld = avg_y / 100 / 12  
             months_passed = 0
             max_months = 720                
             
-            # 목표 자산(고정값) 계산
             if avg_y > 0:
                 required_asset_at_time = (target_monthly_goal / tax_factor) * 12 / (avg_y / 100)
             else:
                 required_asset_at_time = 0
             
-            # 시뮬레이션 루프 (단순 복리 계산용)
+            # 시뮬레이션
             while months_passed < max_months:
-                if current_bal_goal >= required_asset_at_time:
-                    break
-                    
+                if current_bal_goal >= required_asset_at_time: break
                 div_reinvest = current_bal_goal * monthly_yld * tax_factor
                 current_bal_goal += calc_monthly_input + div_reinvest
                 months_passed += 1
 
             st.markdown("---")
-
-            # [결과 표시]
             gap_money = max(0, required_asset_at_time - actual_start_bal)
             progress_rate = (actual_start_bal / required_asset_at_time) * 100 if required_asset_at_time > 0 else 0
 
-            # 1. 진행률 바
+            # 결과 시각화
             st.write(f"📊 **목표 달성 진행률: {min(progress_rate, 100):.1f}%**")
             st.progress(min(progress_rate / 100, 1.0))
 
-            # 2. 결과 카드
             if months_passed >= max_months:
                 st.warning("⚠️ 현재 조건(추가 납입 없음)으로는 목표 달성에 60년 이상 걸립니다. 초기 자산을 늘리거나 목표를 조정해 보세요.")
             else:
@@ -1122,19 +1067,16 @@ def render_calculator_page(df):
                     else:
                         st.success("🎉 이미 목표 달성! 은퇴하셔도 됩니다.")
                 
-            # [하단 문구 정리]
             st.write("") 
             st.info("💡 이 계산은 **추가 납입 없이**, 배당금 재투자만으로 목표에 도달하는 기준입니다.")
-                
             st.error("""
                     **⚠️ 시뮬레이션 활용 시 유의사항**
                     1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 단순 결과입니다.
                     2. 재투자가 매월 이루어진다는 가정하에 계산된 복리 결과입니다.
                     """)
 
-            
 def render_roadmap_page(df):
-    """📅 월별 로드맵 페이지 렌더링"""
+    """📅 월별 로드맵 페이지"""
     st.header("📅 나의 배당 월급 로드맵")
     st.info("💡 종목별 배당 주기를 반영한 데이터입니다. (로그인 없이 이용 가능)")
 
@@ -1143,36 +1085,28 @@ def render_roadmap_page(df):
         st.warning("⚠️ **'💰 배당금 계산기'** 메뉴에서 종목을 먼저 선택해 주세요!")
         st.stop()
     
-    # [수정] Bottom-up 호환 로직
     weights = {}
     temp_total = 0
     amounts = {}
     
-    # [핵심 추가] 데이터 증발 방지 (포트폴리오 백업 불러오기)
     portfolio_cache = st.session_state.get('portfolio_map', {})
 
-    # 1. 입력된 금액 수집 (안전장치 적용)
     for i, stock in enumerate(selected):
-        # 1순위: Calculator 페이지에서 넘어온 백업 데이터 사용
         if stock in portfolio_cache:
             val = portfolio_cache[stock]
-        # 2순위: 혹시라도 위젯 데이터가 살아있으면 사용
         else:
             val = st.session_state.get(f"amt_{i}", 0)
         
-        # 3순위: 데이터가 0이고 총 자산은 설정되어 있다면? (초기화 방지용 N빵)
         if val == 0 and st.session_state.total_invest > 0:
              val = int(st.session_state.total_invest / 10000 / len(selected))
 
         temp_total += val
         amounts[stock] = val
         
-    # 2. 비중 계산 (Zero Division 방지)
     if temp_total > 0:
         for stock in selected:
             weights[stock] = (amounts[stock] / temp_total) * 100
     else:
-        # 금액이 하나도 없으면 균등 비중 등으로 처리하거나 0으로
         for stock in selected: weights[stock] = 0
 
     timeline.render_toss_style_heatmap(df, weights, st.session_state.total_invest)
@@ -1192,28 +1126,20 @@ def render_roadmap_page(df):
 
 
 def render_stocklist_page(df):
-    """📃 전체 종목 리스트 페이지 렌더링 (검색 + 유형 필터 + 배당 시기 필터)"""
+    """📃 전체 종목 리스트 페이지 (검색/필터)"""
     
     st.info("💡 **이동 안내:** '코드' 클릭 시 블로그 분석글로, '🔗정보' 클릭 시 네이버/야후 금융 정보로 이동합니다. (**⭐ 표시는 상장 1년 미만 종목입니다.**)")
     
-    # ---------------------------------------------------------
-    # [설정] 데이터 전처리 (검색용 라벨 + 배당 시기 분류)
-    # ---------------------------------------------------------
     if not df.empty:
-        # 1. 검색 옵션 생성
         search_options = df.apply(lambda x: f"{x['종목명']} ({x['코드']})", axis=1).tolist()
         
-        # 2. [수정] 배당 시기 자동 분류 (숫자 범위 판단 로직 적용)
+        # 배당 시기 자동 분류
         def classify_timing(text):
             import re
             t = str(text).strip()
-            
-            # (1) 명확한 키워드 우선 처리 (숫자가 없거나 범위일 때)
             if any(k in t for k in ['월초', '초순', '1~']): return "🟢 월초 (1~10일)"
             if any(k in t for k in ['월말', '마지막', '말일', '하순']): return "🔴 월말 (21~31일)"
             
-            # (2) 숫자 추출 및 범위 판단 (오해 방지 핵심 로직)
-            # "15일"에서 15만 쏙 뽑아냅니다.
             match = re.search(r'(\d+)', t)
             if match:
                 day = int(match.group(1))
@@ -1227,13 +1153,9 @@ def render_stocklist_page(df):
     else:
         search_options = []
 
-    # ---------------------------------------------------------
-    # 상단 도구 모음
-    # ---------------------------------------------------------
+    # 검색 및 필터 UI
     with st.container():
-        # 검색창은 넓게, 필터는 아래로 배치
         col_search = st.columns([1])[0]
-        
         with col_search:
             selected_items = st.multiselect(
                 "🔍 종목 검색", 
@@ -1241,149 +1163,67 @@ def render_stocklist_page(df):
                 placeholder="이름/코드 입력 (자동완성)"
             )
         
-        st.write("") # 간격 띄우기
+        st.write("") 
 
-        # [필터 영역] 2단 구성 (유형 + 시기)
         col_f1, col_f2 = st.columns(2)
-        
         with col_f1:
-            # 1. 자산 유형 필터
             if not df.empty and '유형' in df.columns:
                 unique_types = ["전체"] + sorted(df['유형'].unique().tolist())
             else:
                 unique_types = ["전체"]
-            
             selected_type = st.pills("🏷️ 자산 유형", unique_types, default="전체", selection_mode="single")
 
         with col_f2:
-            # 2. [NEW] 배당 시기 필터
             timing_options = ["전체", "🟢 월초 (1~10일)", "🟡 월중 (11~20일)", "🔴 월말 (21~31일)"]
             selected_timing = st.pills("📅 배당락 시기", timing_options, default="전체", selection_mode="single")
 
-    # ---------------------------------------------------------
-    # 데이터 필터링 로직
-    # ---------------------------------------------------------
+    # 필터링 로직
     df_filtered = df.copy()
-    
-    # (1) 검색어 필터
     if selected_items:
         df_filtered['검색라벨_temp'] = df_filtered.apply(lambda x: f"{x['종목명']} ({x['코드']})", axis=1)
         df_filtered = df_filtered[df_filtered['검색라벨_temp'].isin(selected_items)]
         df_filtered = df_filtered.drop(columns=['검색라벨_temp'])
         
-    # (2) 자산 유형 필터
     if selected_type and selected_type != "전체":
         df_filtered = df_filtered[df_filtered['유형'] == selected_type]
         
-    # (3) [NEW] 배당 시기 필터
     if selected_timing and selected_timing != "전체":
         df_filtered = df_filtered[df_filtered['배당시기_temp'] == selected_timing]
 
-    # 임시 컬럼 삭제 (깔끔하게)
     if '배당시기_temp' in df_filtered.columns:
         df_filtered = df_filtered.drop(columns=['배당시기_temp'])
 
-    # ---------------------------------------------------------
-    # 결과 렌더링
-    # ---------------------------------------------------------
     if not df_filtered.empty:
         st.caption(f"📊 총 **{len(df_filtered)}개** 종목이 표시됩니다.")
     else:
         st.warning("조건에 맞는 종목이 없습니다.")
     
     tab_all, tab_kor, tab_usa = st.tabs(["🌎 전체", "🇰🇷 국내", "🇺🇸 해외"])
-    
     with tab_all: ui.render_custom_table(df_filtered)
     with tab_kor: ui.render_custom_table(df_filtered[df_filtered['분류'] == '국내'])
     with tab_usa: ui.render_custom_table(df_filtered[df_filtered['분류'] == '해외'])
 
-# ==========================================
-# [SECTION 5] 메인 애플리케이션 실행 엔진 (관제실)
-# ==========================================
 
-# 🚨 [추가된 함수] 삭제 확인 다이얼로그 (Dialog)
-@st.dialog("⚠️ 정말 삭제하시겠습니까?")
-def confirm_delete_dialog(target_names, opts, supabase):
-    st.write(f"선택하신 **{len(target_names)}개**의 포트폴리오가 영구적으로 삭제됩니다.")
-    st.warning("이 작업은 되돌릴 수 없습니다.")
-    
-    col_del1, col_del2 = st.columns(2)
-    
-    if col_del1.button("✅ 네, 삭제합니다", type="primary", use_container_width=True):
-        try:
-            target_ids = [opts[name]['id'] for name in target_names]
-            # Supabase 'in' 쿼리로 일괄 삭제
-            supabase.table("portfolios").delete().in_("id", target_ids).execute()
-            
-            logger.info(f"🗑️ 포트폴리오 일괄 삭제: {len(target_ids)}건")
-            st.rerun()
-        except Exception as e:
-            st.error(f"삭제 중 오류 발생: {e}")
-            
-    if col_del2.button("취소", use_container_width=True):
-        st.rerun()
-
-# 💾 [추가된 함수] 덮어쓰기 확인 다이얼로그
-@st.dialog("💾 기존 파일 덮어쓰기")
-def confirm_overwrite_dialog(final_name, user_id, user_email, save_data, existing_id, supabase):
-    """이미 같은 이름의 포트폴리오가 있을 때 띄우는 팝업"""
-    st.write(f"이미 **'{final_name}'**이라는 이름의 포트폴리오가 존재합니다.")
-    st.info("새로운 데이터로 덮어쓰시겠습니까?")
-    
-    col_ov1, col_ov2 = st.columns(2)
-    
-    if col_ov1.button("🎮 네, 덮어씁니다", type="primary", use_container_width=True):
-        try:
-            # 기존 ID를 찾아서 해당 데이터만 업데이트
-            supabase.table("portfolios").update({
-                "ticker_data": save_data, 
-                "created_at": "now()" # 저장 시간 갱신
-            }).eq("id", existing_id).execute()
-            
-            logger.info(f"🔄 기존 포트폴리오 덮어쓰기 완료: {final_name}")
-            st.toast(f"'{final_name}' 파일을 성공적으로 갱신했습니다!", icon="✅")
-            st.balloons()
-            time.sleep(1.0)
-            st.rerun()
-        except Exception as e:
-            st.error(f"저장 중 오류 발생: {e}")
-            
-    if col_ov2.button("아니요, 취소", use_container_width=True):
-        st.rerun()
+# =============================================================================
+# [SECTION 6] 메인 실행 함수 (진입점)
+# =============================================================================
 
 def main():
-    # 1. 페이지 설정 (모바일 최적화를 위해 'centered'로 변경)
-    st.set_page_config(
-        page_title="배당팽이 포트폴리오",
-        page_icon="🐌",
-        layout="wide"  # 👈 wide 대신 centered를 쓰면 모바일에서 여백이 생겨 깔끔합니다.
-    )
-
-    inject_ga()
-    
-    # 2. 초기화
+    # 1. 초기화 및 설정
     init_session_state() 
     ui.load_css() 
     
-    # ---------------------------------------------------------
-    # [심플 버전] 🐌 메인 타이틀
-    # ---------------------------------------------------------
-    # 불필요한 컬럼이나 버튼 없이 제목만 깔끔하게 배치
+    # 헤더
     st.title("🐌 배당팽이 월배당 계산기")
-   
-    st.caption("나만의 배당 포트폴리오를 관리하고, 월별 예상 수입을 확인하세요.")
-    
+    st.caption("나만의 배당 포트폴리오를 관리하고, 월별 예상 배당금을 확인하세요.")
     st.divider() 
-    # ---------------------------------------------------------
 
-    # 3. 안전 장치 및 로깅
-    #check_coppa_compliance() 
-    
+    # 분석 도구
+    inject_ga()
     logger.info("🚀 배당팽이 메인 엔진 가동")
     db.cleanup_old_tokens()
 
-
-    # 2. 관리자 인증
+    # 2. 관리자 인증 확인
     is_admin = False
     if st.query_params.get("admin", "false").lower() == "true":
         ADMIN_HASH = st.secrets["ADMIN_PASSWORD_HASH"]
@@ -1399,8 +1239,7 @@ def main():
 
     render_login_ui()
     
-    # [수정] 3. 상단 통합 관제 구역 (로그인 & AI)
-    # 로그인 여부에 따라 헤더 구성을 동적으로 변경하여 공간을 절약합니다.
+    # 3. 로그인 및 AI 헤더
     with st.container(border=True):
         col_auth, col_ai = st.columns([2, 1.2])
         
@@ -1419,13 +1258,14 @@ def main():
             if st.button("🕵️ AI 로보어드바이저", use_container_width=True, type="primary"):
                 if st.session_state.get("is_logged_in"):
                     st.session_state.ai_modal_open = True
-                    st.session_state.wiz_step = 0 # <--- 0으로 수정된 핵심 포인트!
+                    st.session_state.wiz_step = 0
                     st.session_state.wiz_data = {}
                     if "ai_result_cache" in st.session_state:
                         del st.session_state.ai_result_cache
                 else:
                     st.toast("🔒 로그인을 먼저 해주세요!", icon="👆")
 
+    # 4. 데이터 로드 및 처리
     df_raw = logic.load_stock_data_from_csv()
     if df_raw.empty: 
         logger.error("❌ 데이터 로드 실패: CSV 파일이 비어있음")
@@ -1433,39 +1273,26 @@ def main():
 
     if is_admin:
         render_admin_tools(df_raw)
-    # ================= [여기서부터 교체 시작] =================
     
-    # 3. 로직 수행 및 데이터 동기화 (핵심 수정 파트)
     with st.spinner('⚙️ 배당 데이터베이스 엔진 가동 중...'):
-        # (1) 로직 실행 (크롤링 수행)
         df_calculated = logic.load_and_process_data(df_raw, is_admin=is_admin)
-        st.session_state['shared_df'] = df_calculated  # 계산된 데이터 공유
+        st.session_state['shared_df'] = df_calculated 
         
-        # (2) [NEW] 크롤링된 Auto 데이터를 저장용 변수(df_dirty)에 강제 주입
-        #     -> 이렇게 해야 '저장' 버튼 누를 때 0원이 아닌 51원이 저장됨!
+        # 크롤링된 Auto 데이터 동기화
         if df_calculated is not None and not df_calculated.empty and 'df_dirty' in st.session_state:
             try:
-                # 종목코드를 기준으로 매핑 (순서 섞임 방지)
                 auto_map = df_calculated.set_index('종목코드')['연배당금_크롤링_auto'].to_dict()
-                
-                # 저장용 데이터(df_dirty)에 값 채워 넣기
-                # "코드가 같으면 auto_map 값을 넣고, 없으면 원래 값 유지"
                 st.session_state.df_dirty['연배당금_크롤링_auto'] = (
                     st.session_state.df_dirty['종목코드']
                     .map(auto_map)
                     .fillna(st.session_state.df_dirty['연배당금_크롤링_auto'])
                 )
-                
-                # (선택) 디버깅용: 성공 로그
-                # print("✅ Auto 데이터 동기화 완료!")
             except Exception as e:
                 logger.error(f"⚠️ 데이터 동기화 중 오류: {e}")
 
-        # (3) 화면 표시용 변수는 계산된 결과물(df_calculated) 사용
         df = df_calculated
 
-    # ================= [여기까지 교체 완료] =================
-
+    # 5. 사이드바 및 페이지 라우팅
     with st.sidebar:
         if not st.session_state.is_logged_in: st.markdown("---")
         
@@ -1478,13 +1305,14 @@ def main():
             min_value=10, 
             value=st.session_state.monthly_expense, 
             step=10,
-            key="sidebar_expense_input", # 키값 부여하여 동기화 속도 개선
+            key="sidebar_expense_input",
             help="이 수치는 배당 방어율 계산의 기준이 됩니다."
         )
         st.session_state.monthly_expense = expense_input
 
         st.markdown("---")
 
+        # 포트폴리오 관리 (불러오기/삭제)
         with st.expander("📂 불러오기 / 관리", expanded=True):
             if not st.session_state.is_logged_in:
                 st.caption("🔒 상단에서 로그인을 해주세요.")
@@ -1495,12 +1323,10 @@ def main():
                     if resp.data:
                         opts = {f"{p.get('name') or '이름없음'} ({p['created_at'][5:10]} {p['created_at'][11:16]})": p for p in resp.data}
                         
-                        # [NEW] 삭제 모드 토글
                         is_delete_mode = st.toggle("🗑️ 포트폴리오 정리(삭제) 모드")
 
                         if is_delete_mode:
                             st.caption("삭제할 포트폴리오를 모두 선택하세요.")
-                            # 다중 선택 박스
                             targets_to_delete = st.multiselect(
                                 "삭제 목록 선택", 
                                 options=list(opts.keys()),
@@ -1510,20 +1336,17 @@ def main():
 
                             if targets_to_delete:
                                 if st.button(f"🚨 선택한 {len(targets_to_delete)}개 영구 삭제", type="primary", use_container_width=True):
-                                    # 다이얼로그 호출
                                     confirm_delete_dialog(targets_to_delete, opts, supabase)
                             else:
                                 st.button("🚨 삭제 버튼 (항목을 먼저 선택하세요)", disabled=True, use_container_width=True)
 
                         else:
-                            # 기존 불러오기 모드
                             sel_name = st.selectbox("항목 선택", list(opts.keys()), label_visibility="collapsed")
                             
                             if st.button("📂 불러오기", use_container_width=True):
                                 data = opts[sel_name]['ticker_data']
                                 st.session_state.total_invest = int(data.get('total_money', 30000000))
                                 st.session_state.selected_stocks = list(data.get('composition', {}).keys())
-                                # 저장된 비중 불러오기 (없으면 무시)
                                 saved_weights = data.get('composition', {})
                                 st.session_state.ai_suggested_weights = saved_weights
                                 st.session_state.monthly_expense = int(data.get('monthly_expense', 200))
@@ -1548,6 +1371,7 @@ def main():
 
         render_sidebar_footer()
 
+    # 6. 페이지 렌더링
     if menu == "💰 배당금 계산기":
         render_calculator_page(df)
     elif menu == "📅 월별 로드맵":
@@ -1555,6 +1379,7 @@ def main():
     elif menu == "📃 전체 종목 리스트":
         render_stocklist_page(df)
 
+    # 7. 푸터
     st.divider()
     st.caption("© 2025 **배당 팽이** | 실시간 데이터 기반 배당 대시보드")
     st.caption("First Released: 2025.12.31 | [📝 배당팽이 투자 일지 ](https://blog.naver.com/dividenpange) | [💌 앱 개선 의견 남기기](https://docs.google.com/forms/d/e/1FAIpQLSdEJWd4sYx-09wZk7gl86Sf7bMliT4X9R0eWTAqxjv_Mal8Jg/viewform?usp=header)")
