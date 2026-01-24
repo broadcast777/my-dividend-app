@@ -891,10 +891,11 @@ def reset_auto_data(code):
         return False, f"❌ 오류 발생: {e}"
 
 def smart_update_and_save():
-  
+    import time
+    import streamlit as st
     
     try:
-        # 1. 데이터 로드 (이때 제가 아까 드린 'Clean Load' 함수를 쓰면 열이 더 깔끔해집니다)
+        # 1. 데이터 로드
         df = load_stock_data_from_csv()
         if df.empty: return False, "❌ CSV 파일을 찾을 수 없습니다.", []
         
@@ -916,7 +917,7 @@ def smart_update_and_save():
             name = row['종목명']
             category = str(row.get('분류', '국내')).strip()
             
-            # [보호 1] 신규 상장 보호
+            # [보호 1] 신규 상장 보호 (이건 아예 건너뛰는 게 맞음)
             try: months = int(row.get('신규상장개월수', 0))
             except: months = 0
             if 0 < months < 12:
@@ -925,26 +926,44 @@ def smart_update_and_save():
                 continue
             
             # [보호 2] 사용자 수동 잠금(-1.0) 확인
+            # 여기서 continue를 하지 않고, 값만 확인해둡니다.
             current_auto = float(row.get('연배당금_크롤링_auto', 0) or 0)
-            if current_auto == -1.0:
-                protected_count += 1
-                status_text.markdown(f"🔒 **{name}** -> 보호됨 (건너뜀)")
-                my_bar.progress((idx + 1) / total_count)
-                continue
+            
+            status_text.markdown(f"🔄 **[{idx+1}/{total_count}] {name}** 데이터 수집 중...")
             
             try:
-                # 2. 데이터 수집 (배당금과 TTM 수익률을 동시에 가져옴)
+                # 2. 데이터 수집 (무조건 실행!)
                 if category == '국내':
                     val, rate = _fetch_domestic_sensor(code)
                 else:
                     val, rate = _fetch_overseas_sensor(code)
                 
-                # 3. [핵심] 두 칸에 정확히 세트로 저장
-                if val > 0 or rate > 0:
-                    # 괄호가 포함된 정확한 컬럼명에만 꽂습니다.
+                # ---------------------------------------------------------
+                # [핵심 수정] 저장 로직 분리 (Auto는 보호, TTM은 강제 저장)
+                # ---------------------------------------------------------
+                data_updated = False
+                
+                # 1) 배당금(Auto) 저장 로직
+                if current_auto == -1.0:
+                    # 잠금 상태면 배당금은 업데이트 안 함 (방패)
+                    pass 
+                elif val > 0:
+                    # 잠금 상태가 아니고 값이 있으면 업데이트
                     df.at[idx, '연배당금_크롤링_auto'] = float(val)
+                    data_updated = True
+                
+                # 2) TTM 수익률 저장 로직
+                # ★ 중요: 잠금 여부(-1.0)와 상관없이 무조건 저장합니다.
+                if rate > 0:
                     df.at[idx, 'TTM_연배당률(크롤링)'] = float(rate)
+                    data_updated = True
+                
+                # 결과 카운팅
+                if data_updated:
                     success_count += 1
+                elif current_auto == -1.0:
+                    # 업데이트는 안 했지만 보호된 경우 성공으로 간주
+                    protected_count += 1
                 else:
                     fail_count += 1
                     failed_list.append(name)
@@ -957,7 +976,10 @@ def smart_update_and_save():
             my_bar.progress((idx + 1) / total_count)
                 
         # 4. 세션 세팅 및 마무리
+        my_bar.empty()
+        status_text.empty()
         st.session_state['df_dirty'] = df
+        
         return True, f"✨ 완료! (성공:{success_count}, 실패:{fail_count}, 🔒보호:{protected_count})", failed_list
             
     except Exception as e:
