@@ -1356,7 +1356,7 @@ def main():
     st.set_page_config(
         page_title="배당팽이 포트폴리오",
         page_icon="🐌",
-        layout="centered"  # 👈 wide 대신 centered를 쓰면 모바일에서 여백이 생겨 깔끔합니다.
+        layout="wide"  # 👈 wide 대신 centered를 쓰면 모바일에서 여백이 생겨 깔끔합니다.
     )
 
     inject_ga()
