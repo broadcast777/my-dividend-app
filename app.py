@@ -1213,6 +1213,23 @@ def main():
     init_session_state() 
     ui.load_css() 
     
+    # =================================================
+    # 🚧 [점검 모드 설정] True = 점검중 / False = 정상
+    # =================================================
+    MAINTENANCE_MODE = False  
+    
+    # 점검 모드가 켜져있고, 관리자(?admin=true)가 아니면 멈춤!
+    if MAINTENANCE_MODE:
+        # URL에 ?admin=true가 없으면 점검 화면 보여주고 멈춤
+        if st.query_params.get("admin", "false").lower() != "true":
+            st.title("🚧 서비스 점검 중입니다")
+            st.markdown("### 🔧 더 나은 기능을 위해 시스템 점검을 진행하고 있습니다.")
+            st.info("잠시 후 다시 접속해 주세요. (예상 시간: 30분 내외)")
+            st.divider()
+            st.caption("🐌 배당팽이 팀 드림")
+            st.stop()  # 🛑 여기서 앱 실행 강제 종료 (이 아래 코드는 실행되지 않음)
+    # =================================================
+    
     # 헤더
     st.title("🐌 배당팽이 월배당 계산기")
     st.caption("나만의 배당 포트폴리오를 관리하고, 월별 예상 배당금을 확인하세요.")
