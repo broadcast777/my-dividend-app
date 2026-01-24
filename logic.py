@@ -848,26 +848,71 @@ def _fetch_domestic_sensor(code):
 
 
 def _fetch_overseas_sensor(code):
-    """(내부용) 야후에서 연배당금($)과 TTM수익률 가져오기"""
+    """
+    [수정됨] 해외 ETF의 경우 '폭탄 배당' 왜곡을 피하기 위해
+    TTM(과거 합계)과 Forward(최근 월배당*12) 차이가 크면 Forward를 우선합니다.
+    """
+    import yfinance as yf
+    import pandas as pd # pandas가 필요할 수 있으니 안전하게 임포트
+    
     try:
         ticker = yf.Ticker(code)
-        # 1. 연배당금 (최근 1년 합계)
-        divs = ticker.dividends
-        if not divs.empty:
-            cutoff = pd.Timestamp.now(tz=divs.index.tz) - pd.Timedelta(days=365)
-            annual_sum = float(divs[divs.index >= cutoff].sum())
-        else:
-            annual_sum = 0.0
-            
-        # 2. TTM 수익률
-        ttm_yield = ticker.info.get('trailingAnnualDividendYield', 0)
-        if ttm_yield == 0: ttm_yield = ticker.info.get('dividendYield', 0)
         
-        # 0.08 -> 8.0 변환
-        if 0 < ttm_yield < 1: ttm_yield *= 100
+        # 1. 현재가 가져오기 (fast_info가 더 빠르고 정확함)
+        try:
+            price = ticker.fast_info['last_price']
+        except:
+            history = ticker.history(period='1d')
+            if history.empty: return 0, 0
+            price = history['Close'].iloc[-1]
             
-        return annual_sum, round(ttm_yield, 2)
-    except:
+        if price <= 0: return 0, 0
+
+        # 2. [핵심] 배당률 계산 로직 개선 (Forward vs TTM 비교)
+        rate = 0.0
+        val = 0.0
+        
+        try:
+            # 최근 배당 내역 가져오기
+            dividends = ticker.dividends
+            if not dividends.empty:
+                # 가장 최근 배당금 1회분 (예: QYLG $0.16)
+                last_div = float(dividends.iloc[-1])
+                
+                # 최근 1년 치 합계 (TTM, 폭탄 배당 포함됨 -> 17%의 원인)
+                # timezone 문제 방지를 위해 단순 슬라이싱 사용 권장
+                ttm_div = float(dividends.iloc[-12:].sum())
+                
+                # ---------------------------------------------------------
+                # [판단 로직]
+                # ---------------------------------------------------------
+                ttm_yield = (ttm_div / price) * 100
+                forward_yield = (last_div * 12 / price) * 100
+                
+                # QYLG처럼 두 수치의 차이가 5%p 이상 나면 -> 특별배당 왜곡으로 판단 -> Forward(7%) 사용
+                # 일반적인 종목(SCHD 등)은 차이가 적으므로 -> TTM 사용
+                if abs(ttm_yield - forward_yield) > 5.0:
+                    val = last_div * 12
+                    rate = forward_yield
+                else:
+                    val = ttm_div
+                    rate = ttm_yield
+            else:
+                # 배당 내역 없으면 info에서 가져오기 (비상용)
+                val = ticker.info.get('dividendRate', 0)
+                rate = ticker.info.get('dividendYield', 0) * 100
+                
+        except Exception:
+            # 계산 실패 시 기본 info 값 사용 (안전장치)
+            val = ticker.info.get('trailingAnnualDividendRate', 0)
+            rate = ticker.info.get('trailingAnnualDividendYield', 0) * 100
+
+        # 0.08 -> 8.0 변환 (혹시 모를 소수점 단위 오류 방지)
+        if 0 < rate < 1: rate *= 100
+
+        return val, round(rate, 2)
+
+    except Exception as e:
         return 0.0, 0.0
 
 def reset_auto_data(code):
