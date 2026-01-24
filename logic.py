@@ -364,13 +364,19 @@ def get_hedge_status(name, category):
 def load_and_process_data(df_raw, is_admin=False):
     if df_raw.empty: return pd.DataFrame()
 
-    # 1. 데이터 전처리 (결측치 방어)
+    # [핵심 수정] 컬럼명 공백 제거 및 수치화 대상 추가
+    df_raw.columns = df_raw.columns.str.strip() # 보이지 않는 공백 제거
+    
     try:
-        num_cols = ['연배당금', '연배당률', '현재가', '신규상장개월수', '연배당금_크롤링']
+        # 여기에 auto와 ttm 컬럼을 반드시 추가해야 합니다!
+        num_cols = [
+            '연배당금', '연배당률', '현재가', '신규상장개월수', 
+            '연배당금_크롤링', '연배당금_크롤링_auto', 'TTM_연배당률(크롤링)'
+        ]
         for col in num_cols:
             if col in df_raw.columns:
-                # 문자가 섞여있을 경우 강제 변환 후 NaN은 0으로
-                df_raw[col] = pd.to_numeric(df_raw[col], errors='coerce').fillna(0)
+                # 숫자 변환을 여기서 확실히 해줘야 뒤에서 사고가 안 납니다.
+                df_raw[col] = pd.to_numeric(df_raw[col].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
 
         if '종목코드' in df_raw.columns:
             def clean_ticker(x):
