@@ -156,6 +156,29 @@ def render_login_ui():
                 st.session_state.code_processed = False
                 st.rerun()
 
+
+def render_install_guide():
+    """앱 설치 안내 가이드 (네이버 앱 대응)"""
+    with st.expander("📱 배당팽이를 앱(App)처럼 설치하는 법 (클릭)", expanded=False):
+        st.markdown("""
+        **매번 검색해서 들어오기 귀찮으셨죠?**<br>
+        스마트폰 홈 화면에 아이콘을 추가하면 **1초 만에 접속**하실 수 있습니다.
+
+        **⚠️ (필독) 네이버 앱으로 보고 계신가요?**
+        네이버 앱에서는 구글 로그인이 차단될 수 있습니다.
+        아래 방법대로 **'다른 브라우저'**로 여신 후 설치해 주세요!
+
+        **1️⃣ 갤럭시 (안드로이드)**
+        1. 네이버 앱 하단 **[새로고침 옆 네모(ㅁ)]** 클릭
+        2. **[기본 브라우저로 열기]** 클릭 (삼성 인터넷/크롬 등)
+        3. 새 창이 뜨면 우측 상단/하단 메뉴에서 **[홈 화면에 추가]** 클릭!
+
+        **2️⃣ 아이폰 (iOS)**
+        1. 네이버 앱 우측 하단 **[더보기(≡) 또는 점 3개(⋮)]** 클릭
+        2. **[Safari로 열기]** 클릭
+        3. 사파리 하단 **[공유 버튼(네모 위 화살표)]** 누르고 **[홈 화면에 추가]** 클릭!
+        """, unsafe_allow_html=True)
+        
 def render_sidebar_footer():
     """사이드바 하단: 후원 버튼"""
     bmc_url = "https://www.buymeacoffee.com/dividenpange"
@@ -1424,6 +1447,12 @@ def main():
     st.divider()
     st.caption("© 2025 **배당 팽이** | 실시간 데이터 기반 배당 대시보드")
     st.caption("First Released: 2025.12.31 | [📝 배당팽이 투자 일지 ](https://blog.naver.com/dividenpange) | [💌 앱 개선 의견 남기기](https://docs.google.com/forms/d/e/1FAIpQLSdEJWd4sYx-09wZk7gl86Sf7bMliT4X9R0eWTAqxjv_Mal8Jg/viewform?usp=header)")
+
+    
+    # [NEW] 앱 설치 가이드 추가
+    st.write("")
+    render_install_guide()  # <--- 여기 추가했습니다!
+
 
 
 if __name__ == "__main__":
