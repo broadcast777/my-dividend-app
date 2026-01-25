@@ -194,7 +194,7 @@ def render_custom_table(data_frame, key_suffix="default"):
                 with c3:
                     # 시기 표시
                     st.markdown(f"**{ex_date}**")
-                    st.caption("기준일")
+                    st.caption("배당락일")
 
     # -----------------------------------------------------------
     # 2-B. PC 테이블 모드 (기존에 만드신 HTML 코드 유지)
