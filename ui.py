@@ -127,9 +127,12 @@ def sanitize_url(url):
         return clean_url
     return "#"
 
-def render_custom_table(data_frame):
+# [ui.py]
+
+# 1. 함수 인자에 key_suffix 추가 (기본값은 'default')
+def render_custom_table(data_frame, key_suffix="default"):
     """
-    [업그레이드] 모바일(카드) vs PC(표) 보기 모드 지원
+    [업그레이드] 모바일(카드) vs PC(표) 보기 모드 지원 + 탭 중복 에러 방지(key)
     """
     if data_frame.empty:
         st.info("📭 표시할 데이터가 없습니다.")
@@ -138,15 +141,17 @@ def render_custom_table(data_frame):
     # -----------------------------------------------------------
     # 1. 보기 모드 선택 (화면 상단 토글)
     # -----------------------------------------------------------
-    # 모바일 유저가 많다고 하셨으니, 기본값을 '리스트'로 두는 것도 방법입니다.
     view_mode = st.radio(
         "보기 방식 선택", 
         ["📱 리스트(모바일 추천)", "💻 전체 표(PC 추천)"], 
         horizontal=True,
-        label_visibility="collapsed" # 라벨 숨김 (깔끔하게)
+        label_visibility="collapsed", # 라벨 숨김
+        key=f"view_mode_{key_suffix}" # 🔥 [핵심] 탭마다 다른 키를 부여해서 중복 방지!
     )
 
-    st.write("") # 약간의 여백
+    st.write("") 
+    
+    # ... (아래 코드는 기존과 동일) ...
 
     # -----------------------------------------------------------
     # 2-A. 모바일 리스트 모드 (토스 스타일 카드 뷰)
