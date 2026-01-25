@@ -129,72 +129,128 @@ def sanitize_url(url):
 
 def render_custom_table(data_frame):
     """
-    데이터프레임을 모바일 반응형 HTML 테이블로 변환
+    [업그레이드] 모바일(카드) vs PC(표) 보기 모드 지원
     """
     if data_frame.empty:
         st.info("📭 표시할 데이터가 없습니다.")
         return
 
-    # HTML 행(Row) 조립
-    rows_buffer = ""
-    
-    for row in data_frame.to_dict('records'):
-        # 1. 데이터 가져오기
-        safe_code = str(row.get('코드', ''))
-        safe_name = str(row.get('종목명', ''))
-        safe_price = str(row.get('현재가', '0'))
-        safe_exch = str(row.get('환구분', '-'))
-        safe_ex_date = str(row.get('배당락일', '-'))
-        
-        # 2. 링크 생성
-        blog_link = str(row.get('블로그링크', '')).strip()
-        if not blog_link or blog_link == '#' or blog_link == 'nan':
-            blog_link = "https://blog.naver.com/dividenpange"
-        
-        finance_link = str(row.get('금융링크', '#'))
-        
-        # 3. HTML 조각 조립
-        code_html = f"<a href='{blog_link}' target='_blank' rel='noopener noreferrer' style='color:#0068c9; text-decoration:none; font-weight:bold; background-color:#f0f7ff; padding:2px 6px; border-radius:4px;'>{safe_code}</a>"
-        
-        # 배당률 스타일링
-        try:
-            dividend_yield = float(row.get('연배당률', 0))
-        except:
-            dividend_yield = 0.0
-            
-        try:
-            months = int(row.get('신규상장개월수', 0))
-        except:
-            months = 0
-            
-        suffix = " <span style='font-size:0.8em; color:#999;'>(추정)</span>" if (0 < months < 12) else ""
-        yield_color = "#ff4b4b" if dividend_yield >= 10 else "#333"
-        yield_weight = "bold" if dividend_yield >= 10 else "normal"
-        
-        yield_html = f"<span style='color:{yield_color}; font-weight:{yield_weight};'>{dividend_yield:.2f}%{suffix}</span>"
-        
-        # 정보 링크
-        info_html = f"<a href='{finance_link}' target='_blank' rel='noopener noreferrer' style='text-decoration:none; font-size:1.1em;'>🔗</a>"
-        
-        # 행(Row) 조립
-        rows_buffer += f"<tr><td>{code_html}</td><td class='name-cell'>{safe_name}</td><td>{safe_price}</td><td>{yield_html}</td><td>{safe_exch}</td><td style='color:#555;'>{safe_ex_date}</td><td>{info_html}</td></tr>"
+    # -----------------------------------------------------------
+    # 1. 보기 모드 선택 (화면 상단 토글)
+    # -----------------------------------------------------------
+    # 모바일 유저가 많다고 하셨으니, 기본값을 '리스트'로 두는 것도 방법입니다.
+    view_mode = st.radio(
+        "보기 방식 선택", 
+        ["📱 리스트(모바일 추천)", "💻 전체 표(PC 추천)"], 
+        horizontal=True,
+        label_visibility="collapsed" # 라벨 숨김 (깔끔하게)
+    )
 
-    # 4. 테이블 전체 렌더링
-    table_html = """<div class="table-wrapper">
-    <table>
-        <thead>
-            <tr>
-                <th style="width: 80px;">코드</th>
-                <th style="min-width: 140px; text-align:left; padding-left:12px;">종목명</th>
-                <th style="min-width: 80px;">현재가</th>
-                <th style="min-width: 90px;">연배당률</th>
-                <th style="min-width: 80px;">환구분</th>
-                <th style="min-width: 100px;">배당락일</th>
-                <th style="width: 50px;">정보</th>
-            </tr>
-        </thead>
-        <tbody>{}</tbody>
-    </table>
-</div>""".format(rows_buffer)
-    
-    st.markdown(table_html, unsafe_allow_html=True)
+    st.write("") # 약간의 여백
+
+    # -----------------------------------------------------------
+    # 2-A. 모바일 리스트 모드 (토스 스타일 카드 뷰)
+    # -----------------------------------------------------------
+    if "리스트" in view_mode:
+        # 데이터를 한 줄씩 꺼내서 '카드'로 만듭니다.
+        for row in data_frame.to_dict('records'):
+            
+            # 데이터 준비
+            name = str(row.get('종목명', ''))
+            code = str(row.get('코드', ''))
+            category = str(row.get('분류', '')) # 국내/해외
+            
+            try: yield_val = float(row.get('연배당률', 0))
+            except: yield_val = 0.0
+            
+            ex_date = str(row.get('배당락일', '-')).replace("매월 ", "").replace("(영업일 기준)", "").strip()
+            
+            # 링크 준비
+            blog_link = str(row.get('블로그링크', '')).strip()
+            if not blog_link or blog_link == '#' or blog_link == 'nan':
+                blog_link = "https://blog.naver.com/dividenpange"
+
+            # --- 카드 디자인 시작 (st.container) ---
+            with st.container(border=True):
+                # 3단 분할 (이름 / 배당률 / 시기)
+                c1, c2, c3 = st.columns([3.5, 1.5, 1.5])
+                
+                with c1:
+                    # 종목명 (클릭하면 블로그 이동하게 링크 적용)
+                    st.markdown(f"**[{name}]({blog_link})**")
+                    st.caption(f"{code} | {category}")
+                
+                with c2:
+                    # 배당률 강조
+                    color = "red" if yield_val >= 10 else "black"
+                    st.markdown(f":{color}[**{yield_val:.2f}%**]")
+                    st.caption("연배당률")
+                
+                with c3:
+                    # 시기 표시
+                    st.markdown(f"**{ex_date}**")
+                    st.caption("기준일")
+
+    # -----------------------------------------------------------
+    # 2-B. PC 테이블 모드 (기존에 만드신 HTML 코드 유지)
+    # -----------------------------------------------------------
+    else:
+        # HTML 행(Row) 조립
+        rows_buffer = ""
+        
+        for row in data_frame.to_dict('records'):
+            # 1. 데이터 가져오기
+            safe_code = str(row.get('코드', ''))
+            safe_name = str(row.get('종목명', ''))
+            safe_price = str(row.get('현재가', '0'))
+            safe_exch = str(row.get('환구분', '-'))
+            safe_ex_date = str(row.get('배당락일', '-'))
+            
+            # 2. 링크 생성
+            blog_link = str(row.get('블로그링크', '')).strip()
+            if not blog_link or blog_link == '#' or blog_link == 'nan':
+                blog_link = "https://blog.naver.com/dividenpange"
+            
+            finance_link = str(row.get('금융링크', '#'))
+            
+            # 3. HTML 조각 조립
+            code_html = f"<a href='{blog_link}' target='_blank' rel='noopener noreferrer' style='color:#0068c9; text-decoration:none; font-weight:bold; background-color:#f0f7ff; padding:2px 6px; border-radius:4px;'>{safe_code}</a>"
+            
+            try:
+                dividend_yield = float(row.get('연배당률', 0))
+            except:
+                dividend_yield = 0.0
+                
+            try:
+                months = int(row.get('신규상장개월수', 0))
+            except:
+                months = 0
+                
+            suffix = " <span style='font-size:0.8em; color:#999;'>(추정)</span>" if (0 < months < 12) else ""
+            yield_color = "#ff4b4b" if dividend_yield >= 10 else "#333"
+            yield_weight = "bold" if dividend_yield >= 10 else "normal"
+            
+            yield_html = f"<span style='color:{yield_color}; font-weight:{yield_weight};'>{dividend_yield:.2f}%{suffix}</span>"
+            info_html = f"<a href='{finance_link}' target='_blank' rel='noopener noreferrer' style='text-decoration:none; font-size:1.1em;'>🔗</a>"
+            
+            rows_buffer += f"<tr><td>{code_html}</td><td class='name-cell'>{safe_name}</td><td>{safe_price}</td><td>{yield_html}</td><td>{safe_exch}</td><td style='color:#555;'>{safe_ex_date}</td><td>{info_html}</td></tr>"
+
+        # 4. 테이블 전체 렌더링
+        table_html = """<div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 80px;">코드</th>
+                    <th style="min-width: 140px; text-align:left; padding-left:12px;">종목명</th>
+                    <th style="min-width: 80px;">현재가</th>
+                    <th style="min-width: 90px;">연배당률</th>
+                    <th style="min-width: 80px;">환구분</th>
+                    <th style="min-width: 100px;">배당락일</th>
+                    <th style="width: 50px;">정보</th>
+                </tr>
+            </thead>
+            <tbody>{}</tbody>
+        </table>
+    </div>""".format(rows_buffer)
+        
+        st.markdown(table_html, unsafe_allow_html=True)
