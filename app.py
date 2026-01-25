@@ -170,7 +170,7 @@ def render_sidebar_footer():
     """, unsafe_allow_html=True)
 
 def render_login_buttons(key_suffix="default"):
-    """소셜 로그인 버튼 렌더링 (카카오/구글) - 디자인 개선판"""
+    """소셜 로그인 버튼 렌더링 (카카오/구글)"""
     try:
         ctx = get_script_run_ctx()
         current_session_id = ctx.session_id
@@ -181,33 +181,20 @@ def render_login_buttons(key_suffix="default"):
         st.caption("🔒 기능을 사용하려면 로그인이 필요합니다.")
         
     col1, col2 = st.columns(2)
-    
-    # 1. 카카오 (기존 유지)
     with col1:
         try:
             res_kakao = supabase.auth.sign_in_with_oauth({"provider": "kakao", "options": {"redirect_to": redirect_url, "skip_browser_redirect": True}})
             if res_kakao.url:
                 st.markdown(f'''<a href="{res_kakao.url}" target="_blank" class="kakao-login-btn">💬 카카오로 3초 만에 시작</a>''', unsafe_allow_html=True)
         except: st.error("Kakao 오류")
-
-    # 2. 구글 (디자인 개선: 아이콘 + 버튼)
     with col2:
-        # [핵심 변경] 컬럼을 1:5 비율로 쪼개서 로고와 버튼을 나란히 둡니다.
-        sub_c1, sub_c2 = st.columns([1, 5])
-        
-        with sub_c1:
-            # 구글 공식 'G' 로고 이미지 (너비 조절)
-            st.image("https://cdn-icons-png.flaticon.com/512/2991/2991148.png", width=28)
-            
-        with sub_c2:
-            # 버튼 생성 (문구 깔끔하게 정리, 툴팁에 권장 사항 표시)
-            if st.button("Google 로그인 (PC권장)", key=f"btn_google_{key_suffix}", use_container_width=True, help="PC 환경이나 크롬 브라우저 사용을 권장합니다."):
-                try:
-                    res_google = supabase.auth.sign_in_with_oauth({"provider": "google", "options": {"redirect_to": redirect_url, "queryParams": {"access_type": "offline", "prompt": "consent"}, "skip_browser_redirect": False}})
-                    if res_google.url:
-                        st.markdown(f'<meta http-equiv="refresh" content="0;url={res_google.url}">', unsafe_allow_html=True)
-                        st.stop()
-                except: pass
+        if st.button("🔵 Google로 시작하기(PC/크롬 권장)", key=f"btn_google_{key_suffix}", use_container_width=True):
+            try:
+                res_google = supabase.auth.sign_in_with_oauth({"provider": "google", "options": {"redirect_to": redirect_url, "queryParams": {"access_type": "offline", "prompt": "consent"}, "skip_browser_redirect": False}})
+                if res_google.url:
+                    st.markdown(f'<meta http-equiv="refresh" content="0;url={res_google.url}">', unsafe_allow_html=True)
+                    st.stop()
+            except: pass
 
 
 # =============================================================================
