@@ -241,27 +241,47 @@ def get_smart_recommendation(df, user_choices):
                 break
         if not found: break # 더 이상 뽑을 게 없으면 중단
 
-    # 7. 비중(Weight) 최적화 (황금 비율 적용)
+# 7. 비중(Weight) 최적화 (황금 비율 + 달러 50% 자동 제한)
     # 토스라면 1/n 안함. 대장주에 몰아줌.
     selected_pool = pool[pool['pure_name'].isin(final_picks)].copy()
     pick_weights = {}
     
+    # [NEW] 달러 자산 판별 함수 (내부용)
+    def _is_usd_asset(row):
+        name = str(row['pure_name'])
+        cat = str(row['분류'])
+        # 1. 해외 상장 종목이거나
+        # 2. 이름에 '미국/글로벌'이 들어가면서 '(H)' 환헤지가 아닌 경우
+        # 3. '환노출'이라고 명시된 경우
+        if cat == '해외': return True
+        if ('미국' in name or '글로벌' in name) and '(H)' not in name: return True
+        if '환노출' in name: return True
+        return False
+    
     # 우선순위 정렬 (SCHD > 필수쿼터 > 나머지)
     ranked_picks = []
     for p in final_picks:
+        # 해당 종목의 상세 정보를 가져옴
+        row = selected_pool[selected_pool['pure_name']==p].iloc[0]
         priority = 0
         
         # 스타일별 대장주 우선순위 (황금 비율의 주인공 찾기)
         if "배당다우존스" in p and style == 'growth': priority = 10 # 성장형 대장
         elif style == 'safe' and "채권" in p: priority = 8       # 안정형 대장
         elif style == 'flow' and "커버드콜" in p: priority = 8   # 현금흐름형 대장
-        else: priority = selected_pool[selected_pool['pure_name']==p]['score'].iloc[0] / 20 
+        else: priority = row['score'] / 20 
         
-        if p in focus_real_names: priority += 100 # 사용자 픽은 무조건 최우선
+        # [NEW] 달러 자산 50% 제한 로직 (자동 적용)
+        # 달러 자산이라면 우선순위를 깎아서 1등(50%) 자리를 못 차지하게 함
+        if _is_usd_asset(row):
+            priority -= 1000 
+
+        # 사용자 픽은 무조건 최우선 (사용자가 고른 건 건드리지 않음)
+        if p in focus_real_names: priority += 2000
         
         ranked_picks.append((p, priority))
     
-    # 우선순위 높은 순서대로 정렬
+    # 우선순위 높은 순서대로 정렬 (원화 자산이 위로 올라옴)
     ranked_picks.sort(key=lambda x: x[1], reverse=True)
     ordered_names = [x[0] for x in ranked_picks]
     
