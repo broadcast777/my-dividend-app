@@ -188,7 +188,7 @@ def render_login_buttons(key_suffix="default"):
                 st.markdown(f'''<a href="{res_kakao.url}" target="_blank" class="kakao-login-btn">💬 카카오로 3초 만에 시작</a>''', unsafe_allow_html=True)
         except: st.error("Kakao 오류")
     with col2:
-        if st.button("🔵 Google로 시작하기", key=f"btn_google_{key_suffix}", use_container_width=True):
+        if st.button("🔵 Google로 시작하기(PC/크롬 권장)", key=f"btn_google_{key_suffix}", use_container_width=True):
             try:
                 res_google = supabase.auth.sign_in_with_oauth({"provider": "google", "options": {"redirect_to": redirect_url, "queryParams": {"access_type": "offline", "prompt": "consent"}, "skip_browser_redirect": False}})
                 if res_google.url:
