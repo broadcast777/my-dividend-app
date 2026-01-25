@@ -1213,10 +1213,19 @@ def render_stocklist_page(df):
     else:
         st.warning("조건에 맞는 종목이 없습니다.")
     
+    # ---------------------------------------------------------------
+    # [핵심 수정] 각 탭마다 key_suffix를 다르게 지정하여 중복 에러 해결
+    # ---------------------------------------------------------------
     tab_all, tab_kor, tab_usa = st.tabs(["🌎 전체", "🇰🇷 국내", "🇺🇸 해외"])
-    with tab_all: ui.render_custom_table(df_filtered)
-    with tab_kor: ui.render_custom_table(df_filtered[df_filtered['분류'] == '국내'])
-    with tab_usa: ui.render_custom_table(df_filtered[df_filtered['분류'] == '해외'])
+    
+    with tab_all: 
+        ui.render_custom_table(df_filtered, key_suffix="all") # key="all"
+        
+    with tab_kor: 
+        ui.render_custom_table(df_filtered[df_filtered['분류'] == '국내'], key_suffix="kor") # key="kor"
+        
+    with tab_usa: 
+        ui.render_custom_table(df_filtered[df_filtered['분류'] == '해외'], key_suffix="usa") # key="usa"
 
 
 # =============================================================================
