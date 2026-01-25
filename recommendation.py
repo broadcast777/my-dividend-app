@@ -91,7 +91,6 @@ def get_smart_recommendation(df, user_choices):
             if not match.empty: focus_real_names.append(match.iloc[0]['pure_name'])
 
     # 2. 유니버스 필터링 (데이터 무결성 강화)
-    # [필수 개선] 숫자가 아닌 데이터(문자, NaN)가 섞여있으면 에러가 나므로 강제 변환 및 제거
     df['연배당률'] = pd.to_numeric(df['연배당률'], errors='coerce')
     pool = df.dropna(subset=['연배당률']) # NaN 데이터 삭제
     
@@ -131,37 +130,28 @@ def get_smart_recommendation(df, user_choices):
     quotas = []
     
     if style == 'safe':
-        # 🚨 [연금 모드 자동 적용] 
-        # 안정형을 선택한 경우, 연배당률 12%를 초과하는 초고위험 종목은 후보에서 아예 제외합니다.
-        pool = pool[pool['연배당률'] <= 12.0]
-
-        # 안정형: 채권 필수 + 리츠(물가방어) 필수
+        # [안정형 로직]
+        pool = pool[pool['연배당률'] <= 12.0] # 초고위험 제외
         quotas = ['bond', 'reit'] 
         
-        # 기본 가산점
         pool.loc[pool['cluster'] == 'bond', 'score'] += 30 
         pool.loc[pool['cluster'] == 'reit', 'score'] += 20
         
-        # 🚨 [안정형 특화 필터링] 
         for idx, row in pool.iterrows():
             if row['cluster'] == 'bond':
                 name_upper = (str(row.get('pure_name', '')) + " " + str(row.get('종목명', ''))).upper()
-                
-                # 위험 채권 감점 (하이일드, SPHY, 액티브 등)
                 if any(k in name_upper for k in ['하이일드', 'HIGH YIELD', 'SPHY', '액티브', 'ACTIVE']):
                     pool.at[idx, 'score'] -= 100 
-                
-                # 안전 채권 우대 (국채, Treasury, 단기, SGOV, T-Bill)
                 if any(k in name_upper for k in ['국채', 'TREASURY', 'SGOV', '단기', 'BILL', '초단기']):
                     pool.at[idx, 'score'] += 30
-        
+       
     elif style == 'growth':
-        # 성장형: 배당성장 필수 + 리츠/고배당 중 하나
-        quotas = ['growth', 'income'] 
-        pool.loc[pool['cluster'] == 'growth', 'score'] += 30
+        # [성장형 로직]
+        quotas = ['growth', 'growth'] # 성장주 비중 대폭 강화
+        pool.loc[pool['cluster'] == 'growth', 'score'] += 50 # 가산점 대폭 상향 (기존 30 -> 50)
         
     elif style == 'flow':
-        # 현금흐름형: 커버드콜 필수 + 안전핀(채권) 필수
+        # [현금흐름형 로직]
         quotas = ['cov', 'bond'] 
         pool.loc[pool['cluster'] == 'cov', 'score'] += 30
         pool.loc[pool['cluster'] == 'bond', 'score'] += 10 
@@ -171,9 +161,33 @@ def get_smart_recommendation(df, user_choices):
     picked_names = set(focus_real_names)
     picked_core = [_get_core_index_name(n) for n in focus_real_names]
     
-    # (1) 원픽 먼저 담기
+    # (1) 원픽(사용자 지정) 먼저 담기
     final_picks.extend(focus_real_names)
     
+    # -------------------------------------------------------------------------
+    # [핵심 수정] 성장형(Growth)일 경우 '배당다우존스(SCHD)' 시리즈 1개 강제 포함
+    # -------------------------------------------------------------------------
+    if style == 'growth':
+        # "배당다우존스"라는 이름이 들어간 종목 필터링 (한국판 SCHD들)
+        # 이미 원픽에 포함되어 있다면 건너뜀
+        schd_candidates = pool[
+            (pool['pure_name'].str.contains("배당다우존스")) & 
+            (~pool['pure_name'].isin(picked_names))
+        ]
+        
+        if not schd_candidates.empty:
+            # 그 중에서 하나를 랜덤으로 뽑음
+            picked_schd = schd_candidates.sample(1).iloc[0]
+            schd_name = picked_schd['pure_name']
+            schd_core = _get_core_index_name(schd_name)
+            
+            # 중복 체크 후 추가
+            if schd_core not in picked_core:
+                final_picks.append(schd_name)
+                picked_names.add(schd_name)
+                picked_core.append(schd_core)
+    # -------------------------------------------------------------------------
+
     # (2) 쿼터(필수 자산군) 우선 선발
     for q_type in quotas:
         if len(final_picks) >= wanted_count: break
@@ -183,8 +197,7 @@ def get_smart_recommendation(df, user_choices):
             (~pool['pure_name'].isin(picked_names))
         ].sort_values('score', ascending=False)
         
-        # 상위 3개 중 랜덤
-        top_candidates = candidates.head(3) 
+        top_candidates = candidates.head(5) # 상위 후보군을 좀 더 넓힘 (3->5)
         if not top_candidates.empty:
             shuffled = top_candidates.sample(frac=1)
             for _, row in shuffled.iterrows():
@@ -200,7 +213,6 @@ def get_smart_recommendation(df, user_choices):
         candidates = pool[~pool['pure_name'].isin(picked_names)].sort_values('score', ascending=False)
         if candidates.empty: break
         
-        # 상위 5개 중 랜덤
         top_n = candidates.head(5) 
         shuffled = top_n.sample(frac=1)
         
@@ -231,11 +243,16 @@ def get_smart_recommendation(df, user_choices):
             
             diff = rem_quota - sum(w_map.values())
             best_fit = ai_picks[0]
+            # 비중 몰아주기 로직 강화
             for p in ai_picks:
                 cluster = ai_sub_pool[ai_sub_pool['pure_name']==p]['cluster'].iloc[0]
+                is_schd = "배당다우존스" in p
+                
                 if style == 'safe' and cluster == 'bond': best_fit = p
                 elif style == 'flow' and cluster == 'cov': best_fit = p
-                elif style == 'growth' and cluster == 'growth': best_fit = p
+                elif style == 'growth':
+                    if is_schd: best_fit = p # 성장형이면 SCHD에 잔여 비중 몰아주기
+                    elif cluster == 'growth': best_fit = p
             
             w_map[best_fit] += diff
             pick_weights.update(w_map)
@@ -248,10 +265,15 @@ def get_smart_recommendation(df, user_choices):
         for p in final_picks:
             cluster = selected_pool[selected_pool['pure_name']==p]['cluster'].iloc[0]
             priority = 0
+            is_schd = "배당다우존스" in p
+            
             # 스타일별 대장주 우선순위
             if style == 'safe' and cluster == 'bond': priority = 3
             elif style == 'flow' and cluster == 'cov': priority = 3
-            elif style == 'growth' and cluster == 'growth': priority = 3
+            elif style == 'growth':
+                if is_schd: priority = 4 # SCHD는 최우선 (대장)
+                elif cluster == 'growth': priority = 3
+            
             elif cluster == 'reit': priority = 2 
             elif cluster == 'bond': priority = 2 
             sorted_picks.append((p, priority))
@@ -259,12 +281,11 @@ def get_smart_recommendation(df, user_choices):
         sorted_picks.sort(key=lambda x: x[1], reverse=True)
         ordered_names = [x[0] for x in sorted_picks]
         
-        # 💡 비중 배분 (안정형 50:25:25)
+        # 비중 배분 (안정형/성장형 대장주 50%)
         if len(ordered_names) == 3:
-            if style == 'safe':
-                ratios = [50, 25, 25] 
-            else:
-                ratios = [50, 30, 20] 
+            if style == 'safe': ratios = [50, 25, 25] 
+            elif style == 'growth': ratios = [50, 30, 20] # 1등(SCHD)에게 50%
+            else: ratios = [50, 30, 20] 
         elif len(ordered_names) == 2: ratios = [60, 40]
         elif len(ordered_names) == 4: ratios = [40, 30, 20, 10]
         else: ratios = [100]
