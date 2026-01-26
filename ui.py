@@ -132,9 +132,12 @@ def sanitize_url(url):
 import streamlit as st
 import pandas as pd
 
+import streamlit as st
+import pandas as pd
+
 def render_custom_table(data_frame, key_suffix="default"):
     """
-    [수정됨] 모바일 카드 뷰 깨짐 방지 및 HTML 들여쓰기 문제 해결
+    [최종 수정] 소수점 2자리 제한 & 색상 구분 명확화 (보라/빨강/파랑)
     """
     if data_frame.empty:
         st.info("📭 표시할 데이터가 없습니다.")
@@ -161,38 +164,43 @@ def render_custom_table(data_frame, key_suffix="default"):
             code = str(row.get('코드', ''))
             category = str(row.get('분류', '국내'))
             
-            # 블로그 링크
             blog_link = str(row.get('블로그링크', '')).strip()
             if not blog_link or blog_link == '#' or blog_link == 'nan':
                 blog_link = "https://blog.naver.com/dividenpange"
 
-            # (2) 배당률 처리
+            # (2) 배당률 처리 (소수점 자르기 & 색상 변경)
             raw_yield = row.get('연배당률', '')
             
             if pd.isna(raw_yield) or str(raw_yield).strip() == '':
                 disp_yield = "-"
                 yield_color = "#999999"
             else:
-                disp_yield = str(raw_yield)
                 try:
-                    clean_num = float(disp_yield.replace('%', '').replace(':black', '').strip())
+                    # 숫자 변환
+                    clean_num = float(str(raw_yield).replace('%', '').replace(':black', '').strip())
                     
-                    if clean_num >= 15: yield_color = "#FF0000"     # 빨강
-                    elif clean_num >= 10: yield_color = "#FF4500"   # 주황
-                    elif clean_num >= 5: yield_color = "#0000FF"    # 파랑
-                    else: yield_color = "#333333"                   # 검정
+                    # [색상 로직 변경] 확실하게 구분!
+                    if clean_num >= 15: 
+                        yield_color = "#8E44AD"   # 보라색 (초고배당)
+                    elif clean_num >= 10: 
+                        yield_color = "#E74C3C"   # 빨간색 (고배당)
+                    elif clean_num >= 5: 
+                        yield_color = "#2980B9"   # 파란색 (중배당)
+                    else: 
+                        yield_color = "#333333"   # 검정색
                     
-                    if '%' not in disp_yield:
-                        disp_yield = f"{clean_num}%"
+                    # [핵심] 소수점 2자리로 강제 포맷팅
+                    disp_yield = f"{clean_num:.2f}%"
+                    
                 except:
+                    disp_yield = str(raw_yield)
                     yield_color = "#333333"
 
             # (3) 날짜 처리
             ex_date = str(row.get('배당락일', '-')).replace("매월 ", "").replace("(영업일 기준)", "")
             base_date = str(row.get('데이터기준일', '-'))[:10]
 
-            # (4) HTML 카드 출력 (들여쓰기 없이 왼쪽 벽에 붙여서 작성)
-            # 주의: 아래 HTML 문자열은 들여쓰기를 하지 마세요!
+            # (4) HTML 카드 출력
             card_html = f"""
 <div style="background-color: white; padding: 16px; border-radius: 12px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); margin-bottom: 12px; border: 1px solid #f0f0f0;">
     <div style="display: flex; justify-content: space-between; align-items: flex-start;">
@@ -243,22 +251,30 @@ def render_custom_table(data_frame, key_suffix="default"):
             
             code_html = f"<a href='{blog_link}' target='_blank' style='color:#0068c9; text-decoration:none; font-weight:bold; background-color:#f0f7ff; padding:2px 6px; border-radius:4px;'>{safe_code}</a>"
             
-            try: dividend_yield = float(row.get('연배당률', 0))
-            except: dividend_yield = 0.0
+            try: 
+                raw_y = float(row.get('연배당률', 0))
+                # PC 버전도 소수점 2자리 적용
+                dividend_yield_str = f"{raw_y:.2f}%"
+            except: 
+                raw_y = 0.0
+                dividend_yield_str = "0.00%"
                 
             try: months = int(row.get('신규상장개월수', 0))
             except: months = 0
                 
             suffix = " <span style='font-size:0.8em; color:#999;'>(추정)</span>" if (0 < months < 12) else ""
-            yield_color = "#ff4b4b" if dividend_yield >= 10 else "#333"
-            yield_weight = "bold" if dividend_yield >= 10 else "normal"
             
-            yield_html = f"<span style='color:{yield_color}; font-weight:{yield_weight};'>{dividend_yield:.2f}%{suffix}</span>"
+            # PC 버전 색상도 통일
+            if raw_y >= 15: y_col = "#8E44AD"
+            elif raw_y >= 10: y_col = "#E74C3C"
+            elif raw_y >= 5: y_col = "#2980B9"
+            else: y_col = "#333"
+            
+            yield_html = f"<span style='color:{y_col}; font-weight:bold;'>{dividend_yield_str}{suffix}</span>"
             info_html = f"<a href='{finance_link}' target='_blank' style='text-decoration:none; font-size:1.1em;'>🔗</a>"
             
             rows_buffer += f"<tr><td>{code_html}</td><td class='name-cell'>{safe_name}</td><td>{safe_price}</td><td>{yield_html}</td><td>{safe_exch}</td><td style='color:#555;'>{safe_ex_date}</td><td>{info_html}</td></tr>"
 
-        # PC용 HTML도 들여쓰기를 제거
         table_html = f"""
 <div class="table-wrapper">
     <table>
