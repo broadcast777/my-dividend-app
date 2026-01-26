@@ -38,19 +38,7 @@ st.set_page_config(
     layout="wide"  
 )
 
-# 브라우저 localStorage와 URL 파라미터 동기화 (RFID 센서 역할)
-components.html("""
-<script>
-    try {
-        const ageVerified = localStorage.getItem('age_verified');
-        const params = new URLSearchParams(window.parent.location.search);
-        if (ageVerified === '1' && !params.has('age_verified')) {
-            params.set('age_verified', '1');
-            window.parent.location.search = params.toString();
-        }
-    } catch (e) { console.log("Sensor Error: ", e); }
-</script>
-""", height=0)
+
 
 def init_session_state():
     """
