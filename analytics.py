@@ -1,21 +1,20 @@
 import streamlit as st
-import streamlit.components.v1 as components
-from logger import logger # 아까 만든 관제 시스템 연동
+from logger import logger
 
 def inject_ga():
     """
     Google Analytics 4 (GA4) 추적 코드를 심습니다.
-    - 로컬(localhost) 환경: Debug 모드 자동 활성화 (통계 오염 방지)
-    - 배포(Server) 환경: 정상 집계 모드 자동 전환
+    (components.html 대신 st.markdown을 사용하여 메인 페이지에 직접 주입)
     """
-    # secrets.toml에서 ID 가져오기
-    ga_id = st.secrets.get("google_analytics_id")
+    # 1. secrets.toml에서 ID 가져오기
+    # (없으면 하드코딩된 값이라도 넣어서 테스트해보세요)
+    ga_id = st.secrets.get("google_analytics_id", "G-XXXXXXXXXX") 
     
-    if not ga_id:
-        logger.warning("⚠️ [Analytics] GA4 ID가 설정되지 않았습니다. 통계 수집이 중단됩니다.")
+    if not ga_id or ga_id == "G-XXXXXXXXXX":
+        logger.warning("⚠️ [Analytics] GA4 ID가 설정되지 않았습니다.")
         return
 
-    # GA4 자바스크립트 코드 (환경 자동 감지 로직 포함)
+    # 2. GA4 자바스크립트 코드 (메인 윈도우에 주입)
     ga_code = f"""
     <script async src="https://www.googletagmanager.com/gtag/js?id={ga_id}"></script>
     <script>
@@ -28,23 +27,25 @@ def inject_ga():
         var isLocal = (host === "localhost" || host === "127.0.0.1" || host.includes("192.168"));
 
         if (isLocal) {{
-            // 🏠 로컬 환경: 디버그 모드 ON (데이터가 DebugView로만 전송됨)
-            console.log("🚀 GA4: 로컬 개발 환경 감지됨 (Debug Mode ON)");
+            // 🏠 로컬 환경: 디버그 모드 ON
+            console.log("🚀 GA4: 로컬 개발 환경 감지됨 (Debug Mode ON) - ID: {ga_id}");
             gtag('config', '{ga_id}', {{
                 'debug_mode': true,
                 'cookie_domain': 'none' 
             }});
         }} else {{
             // ☁️ 배포 환경: 정상 집계 모드
+            console.log("✅ GA4: 배포 환경 감지됨 - ID: {ga_id}");
             gtag('config', '{ga_id}');
         }}
     </script>
     """
     
-    # iframe을 통해 헤더에 스크립트 주입 (화면에는 안 보임)
-    components.html(ga_code, height=0, width=0)
+    # 3. [핵심 변경] components.html 대신 st.markdown 사용!
+    # 그래야 iframe에 갇히지 않고 전체 페이지를 추적합니다.
+    st.markdown(ga_code, unsafe_allow_html=True)
     
-    # (선택) 로그에 한 번만 기록 (너무 자주 뜨지 않게 세션 체크)
+    # 로그 기록 (세션당 1회)
     if "ga_injected" not in st.session_state:
         logger.info(f"📡 GA4 추적 코드 주입 완료 ({ga_id})")
         st.session_state.ga_injected = True
