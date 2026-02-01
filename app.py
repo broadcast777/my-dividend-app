@@ -353,17 +353,27 @@ def render_admin_tools(df_raw):
             #
             if st.button("🔄 스마트 갱신 시작", key="btn_smart_update", use_container_width=True):
                 targets = selected_targets if selected_targets else None
-                msg_target = f"선택한 {len(targets)}개 종목" if targets else "전체 종목"
                 
-                # UI(스피너)는 여기서 담당합니다.
-                with st.spinner(f"⏳ {msg_target} 데이터 수집 중... (잠시만 기다려주세요)"):
+                # 1. [NEW] 화면에 진행 막대기 하나 그리기
+                my_bar = st.progress(0, text="데이터 수집 준비 중...")
+                
+                # 2. [NEW] 막대기를 움직이는 리모컨 함수 만들기
+                def update_progress_ui(percent, message):
+                    my_bar.progress(percent, text=message)
+
+                try:
+                    # 3. 로직한테 리모컨(update_progress_ui) 쥐어주고 일 시키기
+                    # (logic.py가 일을 하면서 이 리모컨 버튼을 꾹꾹 누를 겁니다)
+                    success, msg, failed_list, new_df = logic.smart_update_and_save(
+                        target_names=targets, 
+                        progress_callback=update_progress_ui 
+                    )
                     
-                    # [수정] 4개 값을 받아옵니다 (new_df 추가됨)
-                    # 로직은 계산만 해서 'new_df'를 던져주고 끝납니다.
-                    success, msg, failed_list, new_df = logic.smart_update_and_save(target_names=targets)
-                    
+                    # 4. 다 끝나면 막대기 치우기
+                    my_bar.empty()
+
                     if success:
-                        # [핵심] 받은 데이터를 세션에 저장하는 건 이제 'UI(app.py)'가 직접 합니다!
+                        # 받아온 최신 데이터 저장
                         if new_df is not None and not new_df.empty:
                             st.session_state.df_dirty = new_df
                             
@@ -375,26 +385,10 @@ def render_admin_tools(df_raw):
                         st.info("💡 결과가 마음에 드신다면 아래 '영구 저장' 버튼을 눌러주세요.")
                     else:
                         st.error(msg)
-  
-        st.markdown("---")
-        if st.checkbox("네, 덮어써도 좋습니다."):
-            if st.button("🚀 깃허브에 영구 저장", type="primary", use_container_width=True):
-                with st.spinner("업로드 중..."):
-                    
-                    # 로직 모듈 재로드 (안전장치)
-                    import importlib
-                    try:
-                        importlib.reload(logic)
-                    except Exception: pass
-
-                    target_df = st.session_state.get('df_dirty', df_raw)
-                    success, msg = logic.save_to_github(target_df)
-                    if success:
-                        st.balloons()
-                        st.success(msg)
-                    else:
-                        st.error(msg)
-
+                        
+                except Exception as e:
+                    my_bar.empty() # 에러 나도 막대기는 치우기
+                    st.error(f"실행 중 오류가 발생했습니다: {e}")
 
 # =============================================================================
 # [SECTION 5] 메인 페이지 (계산기 / 로드맵 / 리스트)
