@@ -883,37 +883,7 @@ def main():
         admin_ui.render_admin_tools(df_raw, supabase)  # 👈 새 파일(admin_ui)에 있는 함수 호출!
         admin_ui.render_etf_uploader(supabase) # [추가] ETF 업로더도 같이!
         
-        # -------------------------------------------------------------
-        # 🛠️ [NEW] 관리자 전용: ETF 구성종목 DB 대량 업데이트
-        # -------------------------------------------------------------
-        st.divider()
-        st.subheader("📤 ETF 구성종목 DB 업데이트 (관리자용)")
-        st.info("💡 'etf_holdings.csv' (id 포함) 파일을 업로드하면 DB가 덮어씌워집니다.")
-        
-        uploaded_file = st.file_uploader("CSV 파일 업로드", type=['csv'])
-        if uploaded_file is not None:
-            st.write("파일명:", uploaded_file.name)
-            if st.button("🚀 DB 덮어쓰기 (기존 데이터 삭제됨)", type="primary"):
-                with st.spinner("DB 업데이트 중..."):
-                    try:
-                        # CSV 읽기
-                        df_new = pd.read_csv(uploaded_file)
-                        
-                        # 데이터프레임을 리스트 딕셔너리로 변환
-                        data_to_upload = df_new.to_dict(orient='records')
-                        
-                        # 1. 기존 데이터 삭제 (안전하게 id가 0이 아닌 것들 삭제)
-                        # 주의: 테이블이 비어있으면 에러 날 수 있으니 예외처리 필요할 수도 있음
-                        supabase.table("etf_holdings").delete().neq("id", 0).execute()
-                        
-                        # 2. 새 데이터 삽입
-                        supabase.table("etf_holdings").insert(data_to_upload).execute()
-                        
-                        st.success(f"✅ 업데이트 완료! (총 {len(data_to_upload)}건)")
-                        st.balloons()
-                    except Exception as e:
-                        st.error(f"업데이트 실패: {e}")
-        # -------------------------------------------------------------
+       
     
     with st.spinner('⚙️ 배당 데이터베이스 엔진 가동 중...'):
         df_calculated = logic.load_and_process_data(df_raw, is_admin=is_admin)
