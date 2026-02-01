@@ -2,38 +2,42 @@ import streamlit as st
 import pandas as pd
 import altair as alt
 import db  # DB 연결 도구
+import constants as C  # 👈 [핵심] 상수 파일 연결 (이게 꼭 있어야 합니다!)
 
 # ---------------------------------------------------------
-# 1. 데이터 정제 함수
+# 1. 데이터 정제 함수 (로직 분리형 - constants.py 활용)
 # ---------------------------------------------------------
 def _get_clean_data(row, col_map):
     raw_name = row.get(col_map['stock_name'], '') 
     name = str(raw_name).upper().strip()
     
-    # 제외 키워드
-    exclude_keywords = ['KODEX', 'TIGER', 'RISE', 'ACE', 'SOL', 'KOSEF', 'ARIRANG', '스왑', '설정액', 'PLUS', 'USD', 'KRW', '선물']
-    if any(x in name for x in exclude_keywords): return None, None, None
+    # [1] 제외 키워드 체크 (constants.py에서 가져옴)
+    if any(x in name for x in C.EXCLUDE_KEYWORDS): 
+        # 파킹통장용 예외 처리 (현금/예금 등은 살림)
+        if not any(safe in name for safe in C.SECTOR_KEYWORDS['Cash']):
+            return None, None, None
 
+    # [2] 이름 정규화 (constants.py 매핑 규칙 사용)
     clean_name = name
-    if any(x in name for x in ['NVIDIA', 'NVDA', '엔비디아']): clean_name = '엔비디아'
-    elif any(x in name for x in ['APPLE', 'AAPL', '애플']): clean_name = '애플'
-    elif any(x in name for x in ['MICROSOFT', 'MSFT', '마이크로소프트']): clean_name = '마이크로소프트'
-    elif any(x in name for x in ['ALPHABET', 'GOOG', '알파벳']): clean_name = '구글(알파벳)'
-    elif any(x in name for x in ['META', '메타']): clean_name = '메타'
-    elif any(x in name for x in ['TESLA', 'TSLA', '테슬라']): clean_name = '테슬라'
-    elif any(x in name for x in ['AMAZON', 'AMZN', '아마존']): clean_name = '아마존'
-    elif any(x in name for x in ['BROADCOM', 'AVGO', '브로드컴']): clean_name = '브로드컴'
+    for standard_name, keywords in C.STOCK_NAME_MAPPING.items():
+        if any(k in name for k in keywords):
+            clean_name = standard_name
+            break
 
     sector = str(row.get(col_map['category'], '기타'))
     
-    # 섹터 분류 (짧은 이름)
-    if '하이일드' in clean_name or 'USHY' in clean_name or 'JNK' in clean_name or 'HYG' in clean_name or '고수익' in sector:
+    # [3] 섹터 분류 (constants.py 키워드 활용)
+    # 🔥 하이일드
+    if any(k in clean_name for k in C.SECTOR_KEYWORDS['HighYield']) or '고수익' in sector:
         sector = "🔥 하이일드"
-    elif any(x in clean_name for x in ['BIL', 'SHV', 'SGOV', '초단기', 'CD금리', 'KOFR', '머니마켓', '현금', '예금']):
+    # 🛡️ 현금
+    elif any(k in clean_name for k in C.SECTOR_KEYWORDS['Cash']):
         sector = "🛡️ 현금"
-    elif '국채' in clean_name or '채권' in clean_name or 'TLT' in clean_name or '30년' in clean_name: 
+    # 📉 국채
+    elif any(k in clean_name for k in C.SECTOR_KEYWORDS['Bond_Long']): 
         sector = "📉 국채"
-    elif clean_name in ['엔비디아', '애플', '마이크로소프트', '구글(알파벳)', '메타', '테슬라', '아마존', '브로드컴']: sector = "💻 빅테크"
+    # 💻 빅테크 및 기타
+    elif clean_name in C.SECTOR_KEYWORDS['BigTech']: sector = "💻 빅테크"
     elif '금융' in sector or '은행' in clean_name or '지주' in clean_name: sector = "💰 금융"
     elif '리츠' in sector or '부동산' in clean_name or '인프라' in clean_name: sector = "🏢 리츠"
     elif '산업재' in sector or '자동차' in clean_name: sector = "🚗 산업재"
@@ -48,7 +52,7 @@ def _get_clean_data(row, col_map):
     return clean_name, sector, weight
 
 # ---------------------------------------------------------
-# 2. UI 컴포넌트 (멘트 최적화됨)
+# 2. UI 컴포넌트 (변경 없음)
 # ---------------------------------------------------------
 def _render_blur_ui(top_weight, top_stock_sector, max_portfolio_sector):
     # 1. [용어 보정]
@@ -57,7 +61,7 @@ def _render_blur_ui(top_weight, top_stock_sector, max_portfolio_sector):
     elif "국채" in top_stock_sector: display_sector = "미국 국채"
     elif "하이일드" in top_stock_sector: display_sector = "하이일드 채권"
     
-    # 2. [문구 최적화] '단일 종목' -> '기초자산' (오해 방지)
+    # 2. [문구 최적화]
     if top_stock_sector == max_portfolio_sector:
         badge_text = f"{display_sector} 내 비중 1위"
         description = f"현재 포트폴리오에서 <b>{max_portfolio_sector}</b> 섹터의 비중이 가장 높으며,<br>해당 섹터 내에서 이 자산이 가장 큰 비중을 차지하고 있습니다."
@@ -73,7 +77,7 @@ def _render_blur_ui(top_weight, top_stock_sector, max_portfolio_sector):
     elif "국채" in top_stock_sector: badge_bg, badge_color = "#f3f0ff", "#7950f2" 
     elif "하이일드" in top_stock_sector: badge_bg, badge_color = "#fff5f5", "#fa5252"
     
-    # 4. [상단 카드] 제목 변경 (종목 -> 기초자산)
+    # 4. [상단 카드]
     html_top = f"""
     <div style="border: 1px solid #e0e0e0; border-bottom: none; border-top-left-radius: 16px; border-top-right-radius: 16px; background-color: white; padding: 24px 24px 10px 24px; text-align: center; margin-bottom: -5px;">
         <span style="background-color: {badge_bg}; color: {badge_color}; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; display: inline-block; margin-bottom: 12px;">{badge_text}</span>
@@ -87,7 +91,7 @@ def _render_blur_ui(top_weight, top_stock_sector, max_portfolio_sector):
     st.markdown("""<style>div[data-testid="column"] { padding: 0 !important; }</style>""", unsafe_allow_html=True)
     c1, c2, c3 = st.columns([0.2, 0.6, 0.2])
     with c2:
-        btn = st.button("🔒 자산명 확인하기 (로그인 필요)", use_container_width=True) # 버튼 멘트도 '자산명'으로 변경
+        btn = st.button("🔒 자산명 확인하기 (로그인 필요)", use_container_width=True)
         if btn:
             st.toast("로그인이 필요합니다!", icon="🔒")
             st.error("상단(모바일은 메뉴)의 로그인 버튼을 이용해 주세요.")
@@ -105,10 +109,9 @@ def _render_blur_ui(top_weight, top_stock_sector, max_portfolio_sector):
     st.markdown(html_bottom, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 3. 메인 분석 함수
+# 3. 메인 분석 함수 (하드코딩 제거됨)
 # ---------------------------------------------------------
 def render_analysis(user_weights, user_name, is_logged_in):
-    # 제목도 조금 더 명확하게 수정
     st.header("🧐 ETF 속 실제 보유 자산 분석")
     st.markdown("ETF 겉포장이 아닌, **실제로 투자되고 있는 알맹이(기초자산)** 기준의 비중입니다.")
     st.markdown("---")
@@ -155,16 +158,11 @@ def render_analysis(user_weights, user_name, is_logged_in):
     exposure = {}
     failed_etfs = [] 
 
-    ALIAS_MAP = {
-        "KODEX 미국30년국채타겟커버드콜(합성)": "KODEX 미국30년국채액티브(H)",
-        "ACE 미국30년국채액티브(H)": "ACE 미국30년국채액티브",
-        "SOL 미국30년국채액티브(H)": "SOL 미국30년국채커버드콜(합성)", 
-        "TIGER 미국초단기(3개월이하)국채": "TIGER 미국초단기채권액티브",
-    }
-
+    # [수정] constants.py에서 ETF 별명 매핑 가져오기
     for etf_input, u_w in normalized_weights.items():
         if u_w <= 0: continue
-        target_name = ALIAS_MAP.get(etf_input, etf_input)
+        # 여기가 바뀌었습니다! (C.ETF_ALIAS_MAP)
+        target_name = C.ETF_ALIAS_MAP.get(etf_input, etf_input)
         search_key = str(target_name).replace(' ', '').upper()
         
         items = df_raw[df_raw['KEY_NAME'] == search_key]
