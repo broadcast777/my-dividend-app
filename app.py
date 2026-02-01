@@ -27,7 +27,7 @@ import recommendation
 import timeline
 import analysis  # 👈 [추가] 자산 분석 모듈 (X-Ray)
 import constants as C
-
+import simulation
 
 # =============================================================================
 # [SECTION 1] 기본 설정 및 초기화
@@ -1067,7 +1067,7 @@ def render_calculator_page(df):
             # =================================================================
             # [핵심 변경] 복잡한 while문 삭제 -> logic 함수 호출 1줄로 끝!
             # =================================================================
-            sim_result = logic.calculate_goal_simulation(
+            sim_result = simulation.calculate_goal_simulation(
                 target_monthly_goal, 
                 avg_y, 
                 total_invest, 
