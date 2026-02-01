@@ -12,13 +12,12 @@ import random
 import constants as C
 
 # =======================================================
-# [PART 1] 목표 배당 달성 역산기 (Target Calculator)
+# [PART 1] 목표 배당 달성 역산기 (Logic)
 # =======================================================
 
 def calculate_goal_simulation(target_monthly_goal, avg_y, total_invest, use_start_money):
     """
     [로직] 목표 월 배당금을 받으려면 얼마가 필요한지 계산
-    Returns: 결과 Dictionary
     """
     # 1. 초기 자산 설정
     start_balance = total_invest if use_start_money else 0
@@ -36,7 +35,7 @@ def calculate_goal_simulation(target_monthly_goal, avg_y, total_invest, use_star
     # 4. 달성 기간 시뮬레이션 (단순 복리 가정)
     current_bal = start_balance
     months_passed = 0
-    max_months = 720 # 60년 제한 (무한루프 방지)
+    max_months = 720 # 60년 제한
     
     if required_asset > 0 and current_bal < required_asset:
         while months_passed < max_months:
@@ -61,26 +60,23 @@ def calculate_goal_simulation(target_monthly_goal, avg_y, total_invest, use_star
 
 
 # =======================================================
-# [PART 2] 10년 자산 시뮬레이션 (10-Year Asset Projection)
+# [PART 2] 10년 자산 시뮬레이션 (Logic)
 # =======================================================
 
 def run_asset_simulation(start_money, monthly_add, years, avg_y, is_isa, apply_inflation):
     """
     [로직] ISA/일반 계좌별 미래 자산 성장 시뮬레이션
-    Returns: 차트 데이터 및 최종 금액 정보
     """
-    reinvest_ratio = 100 # 기본 100% 재투자 가정
+    reinvest_ratio = 100 
     months_sim = years * 12
     monthly_yld = avg_y / 100 / 12
     
-    # ISA 공제 한도 설정 (일반형 200만원 가정)
     isa_exempt = 200 if is_isa else 0
         
-    # 초기 자산 배분 (ISA 한도 고려)
     isa_bal = start_money if (is_isa and start_money <= C.ISA_TOTAL_CAP) else 0
     general_bal = max(0, start_money - C.ISA_TOTAL_CAP) if is_isa else start_money
     
-    if not is_isa: # ISA 미사용 시 전액 일반 계좌
+    if not is_isa:
         isa_bal = 0
         general_bal = start_money
 
@@ -93,13 +89,11 @@ def run_asset_simulation(start_money, monthly_add, years, avg_y, is_isa, apply_i
     year_tracker = 0
     yearly_contribution = 0
 
-    # 월별 시뮬레이션 루프
     for m in range(1, months_sim + 1):
         if m // 12 > year_tracker:
             yearly_contribution = 0
             year_tracker = m // 12
         
-        # 1. 납입 (Contribution)
         if is_isa:
             remaining_isa_yearly = max(0, C.ISA_YEARLY_CAP - yearly_contribution)
             remaining_isa_total = max(0, C.ISA_TOTAL_CAP - isa_principal)
@@ -116,12 +110,11 @@ def run_asset_simulation(start_money, monthly_add, years, avg_y, is_isa, apply_i
             general_bal += monthly_add
             general_principal += monthly_add
 
-        # 2. 배당 및 재투자 (Dividend & Reinvest)
         div_isa = isa_bal * monthly_yld
-        isa_bal += div_isa # ISA는 비과세/과세이연 (세금 없이 재투자)
+        isa_bal += div_isa 
         
         div_gen = general_bal * monthly_yld
-        this_tax = div_gen * C.TAX_RATE_GENERAL # 일반 계좌는 15.4% 떼고 재투자
+        this_tax = div_gen * C.TAX_RATE_GENERAL 
         total_tax_paid_general += this_tax
         reinvest_gen = (div_gen - this_tax) * (reinvest_ratio / 100)
         general_bal += reinvest_gen
@@ -133,16 +126,14 @@ def run_asset_simulation(start_money, monthly_add, years, avg_y, is_isa, apply_i
             "실제월배당": div_isa + div_gen
         })
         
-    # 최종 결과 정리
     final_asset = isa_bal + general_bal
     final_principal = isa_principal + general_principal
     profit_isa = isa_bal - isa_principal
     monthly_div_final = sim_data[-1]['실제월배당']
     
-    # 세금 정산 (만기 해지 시점 가정)
     if is_isa:
         taxable_isa = max(0, profit_isa - (isa_exempt * 10000))
-        tax_isa = taxable_isa * C.TAX_RATE_ISA_OVER # 9.9% 분리과세
+        tax_isa = taxable_isa * C.TAX_RATE_ISA_OVER 
         real_money = final_asset - tax_isa
         tax_msg = f"예상 세금 {tax_isa/10000:,.0f}만원 (9.9% 분리과세)"
         monthly_pocket = monthly_div_final 
@@ -151,7 +142,6 @@ def run_asset_simulation(start_money, monthly_add, years, avg_y, is_isa, apply_i
         tax_msg = f"기납부 세금 {total_tax_paid_general/10000:,.0f}만원 (15.4% 원천징수)"
         monthly_pocket = monthly_div_final * C.AFTER_TAX_RATIO
 
-    # 물가상승률 반영 (현재 가치 환산)
     if apply_inflation:
         discount_rate = (1.0 + C.INFLATION_RATE) ** years
         real_money = real_money / discount_rate
@@ -169,19 +159,16 @@ def run_asset_simulation(start_money, monthly_add, years, avg_y, is_isa, apply_i
 
 
 # =======================================================
-# [PART 3] 화면 렌더링 (UI Rendering)
+# [PART 3] 10년 자산 시뮬레이션 (UI)
 # =======================================================
 
 def render_10y_sim_page(total_invest, avg_y, saved_monthly):
-    """
-    [UI] 10년 자산 시뮬레이션 탭 전체 화면 표시
-    """
+    """10년 자산 시뮬레이션 탭 전체 화면 표시"""
     start_money = total_invest
     is_over_100m = start_money > 100000000
     
     st.info(f"📊 상단에서 설정한 **초기 자산 {start_money/10000:,.0f}만원**으로 시뮬레이션을 시작합니다.")
     
-    # 1. 사용자 입력 컨트롤 (Input)
     c1, c2 = st.columns([1.5, 1])
     with c1:
         if is_over_100m:
@@ -202,24 +189,19 @@ def render_10y_sim_page(total_invest, avg_y, saved_monthly):
     )
     monthly_add = monthly_input_val * 10000
     
-    # ISA 한도 초과 경고
     isa_limit_mo = C.ISA_YEARLY_CAP / 12
     if is_isa_mode and monthly_add > isa_limit_mo:
         st.warning(f"⚠️ **ISA 연간 한도 제한:** 월 납입금이 **약 {isa_limit_mo/10000:,.0f}만원**을 초과하면 초과분은 일반 계좌로 자동 계산됩니다.")
 
-    # 2. 로직 실행 (Computation)
     result = run_asset_simulation(start_money, monthly_add, years_sim, avg_y, is_isa_mode, apply_inflation)
     
-    # 3. 차트 시각화 (Visualization)
     base = alt.Chart(result['df']).encode(x=alt.X('년차:Q', title='경과 기간 (년)'))
     area = base.mark_area(opacity=0.3, color='#0068c9').encode(y=alt.Y('자산총액:Q', title='자산 (만원)'))
     line = base.mark_line(color='#ff9f43', strokeDash=[5,5]).encode(y='총원금:Q')
     st.altair_chart((area + line).properties(height=280), use_container_width=True)
 
-    # 4. 결과 카드 표시 (Result Card)
     _render_result_card(result, years_sim, apply_inflation)
     
-    # 5. 하단 주의사항 (Footer)
     annual_div = result['monthly_pocket'] * 12
     if annual_div > C.ISA_YEARLY_CAP: 
         st.warning(f"🚨 **주의:** {years_sim}년 뒤 연간 배당금이 2,000만원을 초과하여 금융소득종합과세 대상이 될 수 있습니다.")
@@ -229,28 +211,24 @@ def render_10y_sim_page(total_invest, avg_y, saved_monthly):
             2. 재투자가 매월 이루어진다는 가정하에 계산된 복리 결과입니다.""")
 
 def _render_result_card(res, years, inflation):
-    """[Helper] 결과 카드 HTML 생성"""
+    """[내부함수] 결과 카드 HTML 생성"""
     real_money = res['real_money']
     monthly_pocket = res['monthly_pocket']
     
-    # 물가상승률 문구 처리
     inf_msg_m = f"<br><span style='font-size:0.6em; color:#ff6b6b;'>(현재가치 환산됨)</span>" if inflation else ""
     inf_msg_mo = f"<span style='font-size:0.7em; color:#ff6b6b;'>(현재가치)</span>" if inflation else ""
 
-    # 체감 물가 비유 (랜덤 아이템)
     analogy_items = [
         {"name": "스타벅스", "unit": "잔", "price": 4500, "emoji": "☕"},
         {"name": "뜨끈한 국밥", "unit": "그릇", "price": 10000, "emoji": "🍲"},
         {"name": "치킨", "unit": "마리", "price": 23000, "emoji": "🍗"},
         {"name": "호텔 숙박", "unit": "박", "price": 200000, "emoji": "🏨"},
     ]
-    # 월 배당금으로 살 수 있는 아이템 찾기
     affordable = [item for item in analogy_items if monthly_pocket >= item['price']]
     selected = random.choice(affordable) if affordable else analogy_items[0]
     count = int(monthly_pocket // selected['price'])
     count_str = f"{count:,}" if count > 0 else f"{monthly_pocket / selected['price']:.1f}"
 
-    # ISA 한도 초과 시 일반 계좌 혼용 안내 문구
     gen_msg = ""
     if res['is_isa'] and res['general_bal'] > 10000:
         gen_val = res['general_bal'] / 10000
@@ -273,16 +251,13 @@ def _render_result_card(res, years, inflation):
     """
     st.markdown(html, unsafe_allow_html=True)
 
-# ... (위에는 10년 시뮬레이션 관련 코드들이 있습니다) ...
 
 # =======================================================
-# 4. [UI] 목표 달성 역산기 화면 렌더링 (app.py에서 호출)
+# [PART 4] 목표 달성 역산기 (UI) - 👈 이게 아까 없어서 에러난 겁니다!
 # =======================================================
+
 def render_goal_sim_page(selected_stocks, avg_y, total_invest):
-    """
-    [UI] 목표 배당 달성(역산기) 탭 전체 화면 표시
-    """
-    import streamlit as st
+    """목표 배당 달성(역산기) 탭 전체 화면 표시"""
     
     st.subheader("🎯 목표 배당금 역산기 (은퇴 시뮬레이터)")
     st.caption("내가 원하는 월급을 받기 위해 총 얼마가 필요한지 계산합니다.")
