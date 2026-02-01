@@ -871,8 +871,7 @@ def smart_update_and_save(target_names=None):
         protected_count = 0
         failed_list = []
         
-        my_bar = st.progress(0, text="스마트 업데이트 중...")
-        status_text = st.empty()
+        
         
         # [수정 2] 진행률 바를 위한 별도 카운터
         progress_idx = 0
@@ -894,13 +893,13 @@ def smart_update_and_save(target_names=None):
             except: months = 0
             if 0 < months < 12:
                 protected_count += 1
-                my_bar.progress(progress_idx / total_count)
+                
                 continue
             
             # 잠금 상태 확인 (-1.0)
             current_auto = float(row.get('연배당금_크롤링_auto', 0) or 0)
             
-            status_text.markdown(f"🔄 **[{progress_idx}/{total_count}] {name}** 데이터 수집 중...")
+          
             
             try:
                 # 센서 작동
@@ -936,16 +935,16 @@ def smart_update_and_save(target_names=None):
                 failed_list.append(name)
             
             time.sleep(0.05)
-            my_bar.progress(progress_idx / total_count)
-                
-        my_bar.empty()
-        status_text.empty()
-        st.session_state['df_dirty'] = df
-        
-        return True, f"✨ 완료! (성공:{success_count}, 실패:{fail_count}, 🔒보호:{protected_count})", failed_list
-            
+
+
+
+    # [수정] 끝에 ', df'를 추가해서 데이터를 뱉어내게 만듦
+        return True, f"✨ 완료! (성공:{success_count}, 실패:{fail_count}, 🔒보호:{protected_count})", failed_list, df
+    
     except Exception as e:
-        return False, f"오류 발생: {e}", []
+        # [수정] 여기도 끝에 ', None' 추가 (형식 맞추기)
+        return False, f"오류 발생: {e}", [], None
+
 
 def update_dividend_rolling(current_history_str, new_dividend_amount):
     """최근 12개월 배당 기록 갱신 헬퍼"""
