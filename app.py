@@ -26,6 +26,7 @@ import db
 import recommendation
 import timeline
 import analysis  # 👈 [추가] 자산 분석 모듈 (X-Ray)
+import constants as C
 
 
 # =============================================================================
@@ -50,9 +51,9 @@ def init_session_state():
         "code_processed": False,
         "ai_modal_open": False,
         "age_verified": False,
-        "total_invest": 30000000, 
+        "total_invest": C.DEFAULT_INVEST_AMOUNT, 
         "selected_stocks": [],
-        "monthly_expense": 200, 
+        "monthly_expense": C.DEFAULT_MONTHLY_EXPENSE, 
         "ai_result_cache": None,
         "show_ai_login": False,
         "portfolio_map": {} # 페이지 이동 간 데이터 보존용 금고
@@ -664,14 +665,14 @@ def render_calculator_page(df):
             st.metric("📈 가중 평균 연배당률", f"{avg_y:.2f}%")
             
             r1, r2, r3 = st.columns(3)
-            r1.metric("월 수령액 (세후)", f"{total_m * 0.846:,.0f}원", delta="-15.4%", delta_color="inverse")
+            r1.metric("월 수령액 (세후)", f"{total_m * C.AFTER_TAX_RATIO:,.0f}원", delta="-15.4%", delta_color="inverse")
             r2.metric("월 수령액 (ISA/세전)", f"{total_m:,.0f}원", delta="100%", delta_color="normal")
             with r3:
-                st.markdown(f"""<div style="background-color: #d4edda; color: #155724; padding: 15px; border-radius: 8px; border: 1px solid #c3e6cb; height: 100%; display: flex; flex-direction: column; justify-content: center;"><div style="font-weight: bold; font-size: 1.05em;">✅ 일반 계좌 대비 월 {total_m * 0.154:,.0f}원 이득!</div><div style="color: #6c757d; font-size: 0.8em; margin-top: 5px;">(비과세 및 과세이연 단순 가정입니다)</div></div>""", unsafe_allow_html=True)
+                st.markdown(f"""<div style="background-color: #d4edda; color: #155724; padding: 15px; border-radius: 8px; border: 1px solid #c3e6cb; height: 100%; display: flex; flex-direction: column; justify-content: center;"><div style="font-weight: bold; font-size: 1.05em;">✅ 일반 계좌 대비 월 {total_m * C.TAX_RATE_GENERAL:,.0f}원 이득!</div><div style="color: #6c757d; font-size: 0.8em; margin-top: 5px;">(비과세 및 과세이연 단순 가정입니다)</div></div>""", unsafe_allow_html=True)
 
             # 차트 시각화
             st.write("")
-            c_data = pd.DataFrame({'계좌 종류': ['일반 계좌', 'ISA/연금계좌'], '월 수령액': [total_m * 0.846, total_m]})
+            c_data = pd.DataFrame({'계좌 종류': ['일반 계좌', 'ISA/연금계좌'], '월 수령액': [total_m * C.AFTER_TAX_RATIO, total_m]})
             chart_compare = alt.Chart(c_data).mark_bar(cornerRadiusTopLeft=10, cornerRadiusTopRight=10).encode(
                 x=alt.X('계좌 종류', sort=None, axis=alt.Axis(labelAngle=0, title=None)), 
                 y=alt.Y('월 수령액', title=None), 
@@ -890,14 +891,15 @@ def render_calculator_page(df):
             monthly_input = monthly_input_val * 10000 
             monthly_add = monthly_input
             
-            if is_isa_mode and monthly_add > 1666666:
-                st.warning("⚠️ **ISA 연간 한도 제한:** 월 납입금이 **약 166만원(연 2,000만원)**을 초과하면 초과분은 일반 계좌로 자동 계산됩니다.")
+            isa_monthly_limit = C.ISA_YEARLY_CAP / 12
+            if is_isa_mode and monthly_add > isa_monthly_limit:
+                st.warning(f"⚠️ **ISA 연간 한도 제한:** 월 납입금이 **약 {isa_monthly_limit/10000:,.0f}만원(연 {C.ISA_YEARLY_CAP/100000000:,.1f}억원)**을 초과하면 초과분은 일반 계좌로 자동 계산됩니다.")
             
             months_sim = years_sim * 12
             monthly_yld = avg_y / 100 / 12
             
-            ISA_YEARLY_CAP = 20000000
-            ISA_TOTAL_CAP = 100000000
+            ISA_YEARLY_CAP = C.ISA_YEARLY_CAP
+            ISA_TOTAL_CAP = C.ISA_TOTAL_CAP
             
             if is_isa_mode:
                 isa_bal = start_money if start_money <= ISA_TOTAL_CAP else ISA_TOTAL_CAP
@@ -942,7 +944,7 @@ def render_calculator_page(df):
                 isa_bal += div_isa
                 
                 div_gen = general_bal * monthly_yld
-                this_tax = div_gen * 0.154
+                this_tax = div_gen * C.TAX_RATE_GENERAL
                 total_tax_paid_general += this_tax
                 reinvest_gen = (div_gen - this_tax) * (reinvest_ratio / 100)
                 general_bal += reinvest_gen
@@ -968,19 +970,19 @@ def render_calculator_page(df):
 
             if is_isa_mode:
                 taxable_isa = max(0, profit_isa - (isa_exempt * 10000))
-                tax_isa = taxable_isa * 0.099
+                tax_isa = taxable_isa * C.TAX_RATE_ISA_OVER
                 real_money = final_asset - tax_isa
                 tax_msg = f"예상 세금 {tax_isa/10000:,.0f}만원 (9.9% 분리과세)"
                 monthly_pocket = monthly_div_final 
             else:
                 real_money = final_asset
                 tax_msg = f"기납부 세금 {total_tax_paid_general/10000:,.0f}만원 (15.4% 원천징수)"
-                monthly_pocket = monthly_div_final * 0.846
+                monthly_pocket = monthly_div_final * C.AFTER_TAX_RATIO
 
             inflation_msg_money = ""
             inflation_msg_monthly = ""
             if apply_inflation:
-                discount_rate = (1.025) ** years_sim 
+                discount_rate = (1.0 + C.INFLATION_RATE) ** years_sim 
                 pv_money = real_money / discount_rate
                 pv_monthly = monthly_pocket / discount_rate
                 inflation_msg_money = f"<br><span style='font-size:0.6em; color:#ff6b6b;'>(현재가치: 약 {pv_money/10000:,.0f}만원)</span>"
@@ -1026,7 +1028,7 @@ def render_calculator_page(df):
             """, unsafe_allow_html=True)
             
             annual_div_income = monthly_div_final * 12
-            if annual_div_income > 20000000: st.warning(f"🚨 **주의:** {years_sim}년 뒤 연간 배당금이 2,000만원을 초과하여 금융소득종합과세 대상이 될 수 있습니다.")
+            if annual_div_income > C.ISA_YEARLY_CAP: st.warning(f"🚨 **주의:** {years_sim}년 뒤 연간 배당금이 2,000만원을 초과하여 금융소득종합과세 대상이 될 수 있습니다.")
             st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**\n1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 단순 결과입니다.
                     2. 재투자가 매월 이루어진다는 가정하에 계산된 복리 결과입니다.""")
 
@@ -1068,7 +1070,7 @@ def render_calculator_page(df):
             actual_start_bal = current_bal_goal 
             calc_monthly_input = 0 # 단순화: 추가 납입 없이 현재 자산으로만 계산
             
-            tax_factor = 0.846
+            tax_factor = C.AFTER_TAX_RATIO
             monthly_yld = avg_y / 100 / 12  
             months_passed = 0
             max_months = 720                
