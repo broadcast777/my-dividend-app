@@ -253,13 +253,13 @@ def _render_result_card(res, years, inflation):
 
 
 # =======================================================
-# [PART 4] 목표 달성 역산기 (UI) - [수정됨: 금소세 경고 추가]
+# [PART 4] 목표 달성 역산기 (UI) - [최종 수정: 상수 적용 완료]
 # =======================================================
 
 def render_goal_sim_page(selected_stocks, avg_y, total_invest):
     """목표 배당 달성(역산기) 탭 전체 화면 표시"""
     import streamlit as st
-    import constants as C # 상수(0.846 등) 사용을 위해 필요
+    import constants as C # 상수를 쓰기 위해 필요
     
     st.subheader("🎯 목표 배당금 역산기 (은퇴 시뮬레이터)")
     st.caption("내가 원하는 월급을 받기 위해 총 얼마가 필요한지 계산합니다.")
@@ -282,12 +282,13 @@ def render_goal_sim_page(selected_stocks, avg_y, total_invest):
         target_monthly_goal = input_val * 10000
         
         # -------------------------------------------------------------
-        # [NEW] 금융소득종합과세(금소세) 경고 로직
+        # [상수 적용] 0.846 대신 C.AFTER_TAX_RATIO 사용!
         # -------------------------------------------------------------
-        # 연간 세전 배당금 = (월세후 * 12) / 0.846
+        # 연간 세전 배당금 = (월세후 * 12) / 세후비율(0.846)
         annual_pretax = (target_monthly_goal * 12) / C.AFTER_TAX_RATIO
         
-        if annual_pretax > 20000000: # 2,000만원 초과 시
+        # 금소세(2천만원) 경고 로직
+        if annual_pretax > 20000000: 
             st.warning(f"🚨 **금융소득종합과세 주의!**\n연간 세전 배당금이 약 **{annual_pretax/10000:,.0f}만원**이 되어 2,000만원을 초과합니다.")
         else:
             st.caption(f"💡 연간 세전 약 **{annual_pretax/10000:,.0f}만원** 수준으로, 종합과세 기준(2,000만원) 이내입니다.")
