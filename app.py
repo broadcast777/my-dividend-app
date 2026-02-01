@@ -1030,6 +1030,7 @@ def render_calculator_page(df):
                     2. 재투자가 매월 이루어진다는 가정하에 계산된 복리 결과입니다.""")
 
         # 3. 목표 배당 달성 (역산기)
+        # 3. 목표 배당 달성 (역산기) - [수정됨: 로직 분리 완료]
         elif selected_tab == "🎯 목표 배당 달성":
             st.subheader("🎯 목표 배당금 역산기 (은퇴 시뮬레이터)")
             st.caption("내가 원하는 월급을 받기 위해 총 얼마가 필요한지 계산합니다.")
@@ -1044,12 +1045,13 @@ def render_calculator_page(df):
 
             col_g1, col_g2 = st.columns(2)
             with col_g1:
-                target_monthly_goal = st.number_input(
+                input_val = st.number_input(
                     "목표 월 배당금 (만원, 세후)", 
                     min_value=10, value=166, step=10, 
                     key="target_monthly_goal_input"
-                ) * 10000
-                st.caption(f"💡 '세후' 월 141만원 설정 시 연간 세전 약 2,000만원 이내로 절세가 가능합니다.")
+                )
+                target_monthly_goal = input_val * 10000
+                st.caption(f"💡 '세후' 월 {input_val}만원 설정 시 연간 세전 약 {int(input_val * 12 / 0.846):,}만원 이내로 절세가 가능합니다.")
             
             with col_g2:
                 st.write("") 
@@ -1062,50 +1064,43 @@ def render_calculator_page(df):
                 )
                 st.caption(f"보유: {total_invest/10000:,.0f}만원")
 
-            # 계산 로직
-            current_bal_goal = total_invest if use_start_money else 0
-            actual_start_bal = current_bal_goal 
-            calc_monthly_input = 0 # 단순화: 추가 납입 없이 현재 자산으로만 계산
-            
-            tax_factor = C.AFTER_TAX_RATIO
-            monthly_yld = avg_y / 100 / 12  
-            months_passed = 0
-            max_months = 720                
-            
-            if avg_y > 0:
-                required_asset_at_time = (target_monthly_goal / tax_factor) * 12 / (avg_y / 100)
-            else:
-                required_asset_at_time = 0
-            
-            # 시뮬레이션
-            while months_passed < max_months:
-                if current_bal_goal >= required_asset_at_time: break
-                div_reinvest = current_bal_goal * monthly_yld * tax_factor
-                current_bal_goal += calc_monthly_input + div_reinvest
-                months_passed += 1
+            # =================================================================
+            # [핵심 변경] 복잡한 while문 삭제 -> logic 함수 호출 1줄로 끝!
+            # =================================================================
+            sim_result = logic.calculate_goal_simulation(
+                target_monthly_goal, 
+                avg_y, 
+                total_invest, 
+                use_start_money
+            )
+            # =================================================================
 
             st.markdown("---")
-            gap_money = max(0, required_asset_at_time - actual_start_bal)
-            progress_rate = (actual_start_bal / required_asset_at_time) * 100 if required_asset_at_time > 0 else 0
+            
+            # 받아온 결과(Dictionary)를 꺼내서 화면에 보여줍니다.
+            progress = sim_result['progress_rate']
+            st.write(f"📊 **목표 달성 진행률: {progress:.1f}%**")
+            st.progress(progress / 100)
 
-            # 결과 시각화
-            st.write(f"📊 **목표 달성 진행률: {min(progress_rate, 100):.1f}%**")
-            st.progress(min(progress_rate / 100, 1.0))
-
-            if months_passed >= max_months:
+            # 불가능한 경우 (60년 초과)
+            if sim_result['is_impossible']:
                 st.warning("⚠️ 현재 조건(추가 납입 없음)으로는 목표 달성에 60년 이상 걸립니다. 초기 자산을 늘리거나 목표를 조정해 보세요.")
             else:
                 c_res1, c_res2 = st.columns(2)
                 with c_res1:
-                    st.metric("최종 필요 자산", f"{required_asset_at_time/100000000:,.2f} 억원")
+                    req_asset = sim_result['required_asset']
+                    st.metric("최종 필요 자산", f"{req_asset/100000000:,.2f} 억원")
                     st.caption(f"월 {target_monthly_goal/10000:,.0f}만원을 받기 위해 필요한 돈")
                 
                 with c_res2:
-                    if gap_money > 0:
+                    gap = sim_result['gap_money']
+                    start_bal = sim_result['actual_start_bal']
+                    
+                    if gap > 0:
                         st.metric(
                             "앞으로 더 모아야 할 금액", 
-                            f"{gap_money/100000000:,.2f} 억원", 
-                            delta=f"✅ {actual_start_bal/10000:,.0f}만원 보유 중", 
+                            f"{gap/100000000:,.2f} 억원", 
+                            delta=f"✅ {start_bal/10000:,.0f}만원 보유 중", 
                             delta_color="normal"
                         )
                     else:
@@ -1118,6 +1113,7 @@ def render_calculator_page(df):
                     1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 단순 결과입니다.
                     2. 재투자가 매월 이루어진다는 가정하에 계산된 복리 결과입니다.
                     """)
+                    
 def render_roadmap_page(df):
     """📅 월별 로드맵 페이지"""
     st.header("📅 나의 배당 월급 로드맵")
