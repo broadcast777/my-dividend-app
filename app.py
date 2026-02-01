@@ -350,20 +350,23 @@ def render_admin_tools(df_raw):
                 options=all_stocks,
                 placeholder="특정 종목만 갱신하려면 선택하세요"
             )
-            
+            #
             if st.button("🔄 스마트 갱신 시작", key="btn_smart_update", use_container_width=True):
-                # 선택된 게 없으면 None(전체), 있으면 리스트 전달
                 targets = selected_targets if selected_targets else None
-                
-                # 로딩 메시지도 상황에 맞게 변경
                 msg_target = f"선택한 {len(targets)}개 종목" if targets else "전체 종목"
                 
-                with st.spinner(f"⏳ {msg_target} 데이터 수집 중..."):
+                # UI(스피너)는 여기서 담당합니다.
+                with st.spinner(f"⏳ {msg_target} 데이터 수집 중... (잠시만 기다려주세요)"):
                     
-                    # [핵심] logic 함수에 명단(targets)을 같이 넘겨줍니다
-                    success, msg, failed_list = logic.smart_update_and_save(target_names=targets)
+                    # [수정] 4개 값을 받아옵니다 (new_df 추가됨)
+                    # 로직은 계산만 해서 'new_df'를 던져주고 끝납니다.
+                    success, msg, failed_list, new_df = logic.smart_update_and_save(target_names=targets)
                     
                     if success:
+                        # [핵심] 받은 데이터를 세션에 저장하는 건 이제 'UI(app.py)'가 직접 합니다!
+                        if new_df is not None and not new_df.empty:
+                            st.session_state.df_dirty = new_df
+                            
                         st.success(msg)
                         if failed_list:
                             with st.expander("⚠️ 일부 종목 업데이트 제외 (데이터 없음)"):
