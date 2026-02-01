@@ -197,7 +197,9 @@ def render_login_buttons(key_suffix="default"):
             res_kakao = supabase.auth.sign_in_with_oauth({"provider": "kakao", "options": {"redirect_to": redirect_url, "skip_browser_redirect": True}})
             if res_kakao.url:
                 st.markdown(f'''<a href="{res_kakao.url}" target="_blank" class="kakao-login-btn">💬 카카오로 3초 만에 시작</a>''', unsafe_allow_html=True)
-        except: st.error("Kakao 오류")
+        except Exception as e:
+            logger.error(f"Kakao Login Error: {e}")  # 이 줄 추가!
+            st.error("Kakao 오류")
     with col2:
         if st.button("🔵 Google로 시작하기(PC/크롬 권장)", key=f"btn_google_{key_suffix}", use_container_width=True):
             try:
@@ -205,7 +207,9 @@ def render_login_buttons(key_suffix="default"):
                 if res_google.url:
                     st.markdown(f'<meta http-equiv="refresh" content="0;url={res_google.url}">', unsafe_allow_html=True)
                     st.stop()
-            except: pass
+            except Exception as e:
+                logger.error(f"Google Login Error: {e}")  # 이 줄 추가!
+                pass
 
 
 
@@ -230,6 +234,7 @@ def confirm_delete_dialog(target_names, opts, supabase):
             logger.info(f"🗑️ 포트폴리오 일괄 삭제: {len(target_ids)}건")
             st.rerun()
         except Exception as e:
+            logger.error(f"Portfolio Delete Error: {e}")
             st.error(f"삭제 중 오류 발생: {e}")
             
     if col_del2.button("취소", use_container_width=True):
@@ -256,6 +261,7 @@ def confirm_overwrite_dialog(final_name, user_id, user_email, save_data, existin
             time.sleep(1.0)
             st.rerun()
         except Exception as e:
+            logger.error(f"Portfolio Save Error: {e}")
             st.error(f"저장 중 오류 발생: {e}")
             
     if col_ov2.button("아니요, 취소", use_container_width=True):
@@ -966,6 +972,7 @@ def main():
                     else: 
                         st.caption("저장된 기록이 없습니다.")
                 except Exception as e: 
+                    logger.error(f"Portfolio Load Error: {e}")
                     st.error(f"불러오기 실패: {e}")
 
         st.markdown("---")
