@@ -29,6 +29,7 @@ import analysis  # 👈 [추가] 자산 분석 모듈 (X-Ray)
 import constants as C
 import simulation
 import admin_ui
+import auth_manager
 # =============================================================================
 # [SECTION 1] 기본 설정 및 초기화
 # =============================================================================
@@ -70,79 +71,12 @@ supabase = db.init_supabase()
 # [SECTION 2] 인증 시스템 (Supabase Auth)
 # =============================================================================
 
-def check_auth_status():
-    """로그인 세션 확인 및 OAuth 콜백 처리"""
-    if not supabase: return
-
-    # 1. 기존 세션 확인
-    try:
-        session = supabase.auth.get_session()
-        if session and session.user:
-            st.session_state.is_logged_in = True
-            st.session_state.user_info = session.user
-            # URL 정리
-            for key in ["code", "old_id"]:
-                if key in st.query_params: del st.query_params[key]
-            return 
-    except Exception:
-        pass
-
-    # 2. OAuth 콜백 처리 (로그인 직후 리다이렉트)
-    query_params = st.query_params
-    if "code" in query_params and not st.session_state.get("code_processed", False):
-        st.session_state.code_processed = True
-        try:
-            auth_code = query_params["code"]
-            auth_response = supabase.auth.exchange_code_for_session({"auth_code": auth_code})
-            session = auth_response.session
-            if session and session.user:
-                st.session_state.is_logged_in = True
-                st.session_state.user_info = session.user
-                logger.info(f"👤 사용자 로그인 성공: {session.user.email}")
-            
-            if "code" in st.query_params: del st.query_params["code"]
-            st.success("✅ 로그인되었습니다!")
-            st.rerun()
-        except Exception as e:
-            logger.error(f"🚨 [Auth Error] 인증 예외: {str(e)}", exc_info=True)
-            # 토큰 갱신 이슈 발생 시 재시도 유도
-            if "verifier" in str(e).lower() or "non-empty" in str(e).lower():
-                st.warning("🔄 보안 토큰 갱신 중... 잠시만 기다려주세요.")
-                for key in ["code", "old_id"]:
-                    if key in st.query_params: del st.query_params[key]
-                time.sleep(1.0)
-                st.rerun()
-            else:
-                st.error(f"🔴 인증 오류: {e}")
-                if "code" in st.query_params: del st.query_params["code"]
-
-check_auth_status()
 
 
 # =============================================================================
 # [SECTION 3] 공통 UI 컴포넌트
 # =============================================================================
 
-def render_login_ui():
-    """사이드바 상단: 로그인 사용자 정보 표시"""
-    if not supabase: return
-    is_logged_in = st.session_state.get("is_logged_in", False)
-    user_info = st.session_state.get("user_info", None)
-    
-    if is_logged_in and user_info:
-        email = user_info.email if user_info.email else "User"
-        nickname = email.split("@")[0]
-        
-        with st.sidebar:
-            st.markdown("---")
-            st.success(f"👋 반가워요! **{nickname}**님")
-            if st.button("🚪 로그아웃", key="logout_btn_sidebar", use_container_width=True):
-                logger.info(f"🚪 사용자 로그아웃: {email}")
-                supabase.auth.sign_out()
-                st.session_state.is_logged_in = False
-                st.session_state.user_info = None
-                st.session_state.code_processed = False
-                st.rerun()
 
 
 def render_install_guide():
@@ -180,32 +114,7 @@ def render_sidebar_footer():
         </div>
     """, unsafe_allow_html=True)
 
-def render_login_buttons(key_suffix="default"):
-    """소셜 로그인 버튼 렌더링 (카카오/구글)"""
-    try:
-        ctx = get_script_run_ctx()
-        current_session_id = ctx.session_id
-    except: current_session_id = "unknown"
-    redirect_url = f"https://dividend-pange.streamlit.app?old_id={current_session_id}"
 
-    if key_suffix != "top_header":
-        st.caption("🔒 기능을 사용하려면 로그인이 필요합니다.")
-        
-    col1, col2 = st.columns(2)
-    with col1:
-        try:
-            res_kakao = supabase.auth.sign_in_with_oauth({"provider": "kakao", "options": {"redirect_to": redirect_url, "skip_browser_redirect": True}})
-            if res_kakao.url:
-                st.markdown(f'''<a href="{res_kakao.url}" target="_blank" class="kakao-login-btn">💬 카카오로 3초 만에 시작</a>''', unsafe_allow_html=True)
-        except: st.error("Kakao 오류")
-    with col2:
-        if st.button("🔵 Google로 시작하기(PC/크롬 권장)", key=f"btn_google_{key_suffix}", use_container_width=True):
-            try:
-                res_google = supabase.auth.sign_in_with_oauth({"provider": "google", "options": {"redirect_to": redirect_url, "queryParams": {"access_type": "offline", "prompt": "consent"}, "skip_browser_redirect": False}})
-                if res_google.url:
-                    st.markdown(f'<meta http-equiv="refresh" content="0;url={res_google.url}">', unsafe_allow_html=True)
-                    st.stop()
-            except: pass
 
 
 # =============================================================================
@@ -845,7 +754,7 @@ def main():
                 else:
                     st.error("비밀번호 불일치")
 
-    render_login_ui()
+    auth_manager.render_login_ui(supabase)
     
     # 3. 로그인 및 AI 헤더
     with st.container(border=True):
@@ -856,7 +765,7 @@ def main():
                 if "code" in st.query_params:
                      st.info("🔄 로그인 확인 중입니다...")
                 else:
-                    render_login_buttons(key_suffix="top_header")
+                    auth_manager.render_login_buttons(supabase, key_suffix="top_header")
             else:
                 user = st.session_state.user_info
                 nickname = user.email.split("@")[0] if user.email else "User"
