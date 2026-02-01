@@ -2,7 +2,7 @@
 프로젝트: 배당 팽이 (Dividend Top) - 핵심 로직 모듈
 파일명: logic.py
 설명: 데이터 크롤링, 우선순위 로직(Auto/TTM/Manual), GitHub 연동, 캘린더 생성 등 백엔드 기능 담당
-최종 정리: 2026.01.24
+최종 정리: 2026.02.01 (3단계: 방어 운전 코드 적용 완료)
 """
 
 import streamlit as st
@@ -96,7 +96,9 @@ def parse_dividend_date(date_str):
                 return datetime.date(year, next_month, real_day)
             
             return target_date
-        except Exception:
+        except Exception as e:
+            # [방어 운전] 날짜 파싱 실패 시 로그 남김
+            logger.debug(f"Date Parsing Warning ({s}): {e}")
             pass
             
     return None 
@@ -248,7 +250,10 @@ def _fetch_naver_price(code):
             data = res.json()
             if 'result' in data and 'closePrice' in data['result']:
                 return int(data['result']['closePrice'])
-    except: pass
+    except Exception as e:
+        # [방어 운전] 네이버 가격 조회 실패 로그
+        logger.debug(f"Naver Price Fetch Failed ({code}): {e}")
+        pass
     return 0
     
 def _fetch_price_raw(broker, code, category):
@@ -268,7 +273,7 @@ def _fetch_price_raw(broker, code, category):
                         return int(resp['output']['stck_prpr'])
             except Exception as e:
                 logger.warning(f"KIS Price Error ({code}): {e}")
-                return None
+                # return None  <-- 여기서 바로 리턴하지 않고 아래 백업 로직으로 넘어가도록 함
         
         # 2. 해외 주식 (Yfinance)
         ticker_code = f"{code_str}.KS" if category == '국내' else code_str
@@ -293,7 +298,9 @@ def _fetch_price_raw(broker, code, category):
                     continue
                 else:
                     logger.error(f"DB Locked Fail ({code}): Max retries exceeded")
-            except Exception:
+            except Exception as e:
+                # [방어 운전] YFinance 에러 로그 구체화
+                logger.debug(f"YFinance Price Fail ({code}, attempt {attempt+1}): {e}")
                 break 
                 
         return None
@@ -521,7 +528,7 @@ def load_stock_data_from_csv():
         return df
 
     except Exception as e:
-        print(f"CSV 로드 실패: {e}")
+        logger.error(f"CSV Load Fail: {e}") # [수정] print -> logger
         return pd.DataFrame()
 
 
@@ -567,7 +574,8 @@ def fetch_dividend_yield_hybrid(code, category):
             resp = broker.fetch_price(code)
             if resp and 'output' in resp:
                 current_price = float(resp['output'].get('stck_prpr', 0) or 0)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"KIS Single Price Fail ({code}): {e}")
             current_price = 0
 
         if current_price == 0:
@@ -766,7 +774,8 @@ def _fetch_domestic_sensor(code):
                     ttm_rate = round((ttm_sum / price) * 100, 2)
 
         return auto_amt, ttm_rate
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Domestic Sensor Error ({code}): {e}")
         return 0.0, 0.0
 
 
@@ -827,6 +836,7 @@ def _fetch_overseas_sensor(code):
         return val, round(rate, 2)
 
     except Exception as e:
+        logger.debug(f"Overseas Sensor Error ({code}): {e}")
         return 0.0, 0.0
 
 def reset_auto_data(code):
@@ -853,7 +863,6 @@ def smart_update_and_save(target_names=None, progress_callback=None):
     - UI 요소(st.progress 등) 제거됨
     """
     import time
-    # import streamlit as st  <-- 이거 지웠습니다 (로직에 필요 없음)
     
     try:
         df = load_stock_data_from_csv()
@@ -933,7 +942,8 @@ def smart_update_and_save(target_names=None, progress_callback=None):
                     fail_count += 1
                     failed_list.append(name)
                     
-            except Exception:
+            except Exception as e:
+                logger.error(f"Sensor Error ({name}): {e}") # [수정] 로그 추가
                 fail_count += 1
                 failed_list.append(name)
             
@@ -964,4 +974,3 @@ def update_dividend_rolling(current_history_str, new_dividend_amount):
     new_annual_total = sum(history)
     new_history_str = "|".join(map(str, history))
     return new_annual_total, new_history_str
-
