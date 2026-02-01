@@ -284,12 +284,17 @@ def render_analysis(user_weights, user_name, is_logged_in):
     """)
     
 # =======================================================
-# 3. [UI] 자산 구성 분석 (app.py에서 이사 옴)
+# 3. [UI] 자산 구성 분석 (UI 모듈 연동 복구)
 # =======================================================
 def render_asset_allocation(df_ana):
     """
-    [UI] 자산 구성 분석 (파이차트 & 달러 비중)
+    [UI] 자산 구성 분석 (파이차트 & 달러 비중 & 상세 리스트)
     """
+    import streamlit as st
+    import altair as alt
+    import pandas as pd
+    import ui  # 👈 [중요] 기존 UI 파일(.py)을 불러옵니다!
+
     # 1. 통화(Currency) 분류 로직
     def classify_currency(row):
         try:
@@ -312,9 +317,9 @@ def render_asset_allocation(df_ana):
     }).reset_index()
 
     # 2. 화면 그리기 (Layout)
-    c1, c2 = st.columns([1.2, 1])
+    chart_col, table_col = st.columns([1.2, 1])
 
-    with c1:
+    with chart_col:
         st.write("💎 **자산 유형 비중**")
         donut = alt.Chart(asset_sum).mark_arc(innerRadius=60).encode(
             theta=alt.Theta("비중:Q"), 
@@ -328,7 +333,7 @@ def render_asset_allocation(df_ana):
         ).properties(height=320)
         st.altair_chart(donut, use_container_width=True)
     
-    with c2:
+    with table_col:
         st.write("📋 **유형별 요약**")
         st.dataframe(
             asset_sum.sort_values('비중', ascending=False), 
@@ -350,19 +355,18 @@ def render_asset_allocation(df_ana):
         else: 
             st.caption("💡 원화 자산 중심의 구성입니다.")
     
+    # 3. 상세 포트폴리오 (기존 UI 스타일 복구)
     st.write("📋 **상세 포트폴리오**")
     
-    # 상세 데이터프레임 출력
-    st.dataframe(
-        df_ana,
-        use_container_width=True,
-        hide_index=True
-    )
+    # [수정됨] 단순 표 대신 ui.py의 함수를 호출해서 예쁜 리스트로 보여줍니다.
+    if not df_ana.empty:
+        ui.render_custom_table(df_ana) 
+    else:
+        st.info("데이터가 없습니다.")
     
-    st.error("""**⚠️ 포트폴리오 분석 시 유의사항**
+    st.error("""
+    **⚠️ 포트폴리오 분석 시 유의사항**
     
     1. 과거의 데이터를 기반으로 한 단순 결과값이며, 실제 투자 수익을 보장하지 않습니다.
     2. '달러 자산' 비율은 실제 환노출 여부와 다를 수 있으므로 투자 전 확인이 필요합니다.
-    3. 실제 배당금 지급일과 금액은 운용사의 사정에 따라 변경될 수 있습니다.
-    
-    """)
+    3. 실제 배당금 지급일과 금액은 운용사의 사정에 따라 변경될 수 있습니다.""")
