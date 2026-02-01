@@ -845,17 +845,18 @@ def reset_auto_data(code):
     except Exception as e:
         return False, f"❌ 오류 발생: {e}"
 
-def smart_update_and_save(target_names=None):
+def smart_update_and_save(target_names=None, progress_callback=None):
     """
-    전체 또는 선택된 종목의 배당 정보를 일괄 업데이트합니다.
-    target_names: 업데이트할 종목명 리스트 (None이면 전체)
+    [리팩토링] 전체/선택 종목 배당 정보 업데이트
+    - progress_callback: 진행 상황을 보고할 무전기 (함수)
+    - UI 요소(st.progress 등) 제거됨
     """
     import time
-    import streamlit as st
+    # import streamlit as st  <-- 이거 지웠습니다 (로직에 필요 없음)
     
     try:
         df = load_stock_data_from_csv()
-        if df.empty: return False, "❌ CSV 파일을 찾을 수 없습니다.", []
+        if df.empty: return False, "❌ CSV 파일을 찾을 수 없습니다.", [], None
         
         if 'TTM_연배당률(크롤링)' not in df.columns:
             df['TTM_연배당률(크롤링)'] = 0.0
@@ -871,8 +872,6 @@ def smart_update_and_save(target_names=None):
         protected_count = 0
         failed_list = []
         
-        
-        
         # [수정 2] 진행률 바를 위한 별도 카운터
         progress_idx = 0
 
@@ -881,25 +880,28 @@ def smart_update_and_save(target_names=None):
             name = row['종목명']
             category = str(row.get('분류', '국내')).strip()
             
-            # [수정 3] 선택된 목록에 없으면 건너뛰기 (핵심 기능)
+            # [수정 3] 선택된 목록에 없으면 건너뛰기
             if target_names and name not in target_names:
                 continue
             
-            # 진행 카운트 증가
+            # -----------------------------------------------------------
+            # [핵심] 무전기(Callback)로 진행 상황 보고하기
+            # -----------------------------------------------------------
             progress_idx += 1
-            
+            if progress_callback:
+                # (진행률 0.0~1.0,  메시지 텍스트)
+                progress_callback(progress_idx / total_count, f"🔄 [{progress_idx}/{total_count}] {name} 데이터 수집 중...")
+            # -----------------------------------------------------------
+
             # 신규 상장 종목은 건너뜀
             try: months = int(row.get('신규상장개월수', 0))
             except: months = 0
             if 0 < months < 12:
                 protected_count += 1
-                
                 continue
             
             # 잠금 상태 확인 (-1.0)
             current_auto = float(row.get('연배당금_크롤링_auto', 0) or 0)
-            
-          
             
             try:
                 # 센서 작동
@@ -934,15 +936,13 @@ def smart_update_and_save(target_names=None):
                 fail_count += 1
                 failed_list.append(name)
             
-            time.sleep(0.05)
+            time.sleep(0.05) # 서버 부하 방지용 최소 대기
 
-
-
-    # [수정] 끝에 ', df'를 추가해서 데이터를 뱉어내게 만듦
+        # [수정 4] 데이터(df) 반환
         return True, f"✨ 완료! (성공:{success_count}, 실패:{fail_count}, 🔒보호:{protected_count})", failed_list, df
-    
+            
     except Exception as e:
-        # [수정] 여기도 끝에 ', None' 추가 (형식 맞추기)
+        # [수정 5] 에러 시에도 형식을 맞춰서 반환
         return False, f"오류 발생: {e}", [], None
 
 
