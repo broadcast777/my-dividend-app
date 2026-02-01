@@ -206,9 +206,11 @@ def render_10y_sim_page(total_invest, avg_y, saved_monthly):
     if annual_div > C.ISA_YEARLY_CAP: 
         st.warning(f"🚨 **주의:** {years_sim}년 뒤 연간 배당금이 2,000만원을 초과하여 금융소득종합과세 대상이 될 수 있습니다.")
     
-    st.error("""**⚠️ 시뮬레이션 활용 시 유의사항**
+    st.error("""
+            **⚠️ 시뮬레이션 활용 시 유의사항**
             1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 단순 결과입니다.
-            2. 재투자가 매월 이루어진다는 가정하에 계산된 복리 결과입니다.""")
+            2. 재투자가 매월 이루어진다는 가정하에 계산된 복리 결과입니다.
+            """)
 
 def _render_result_card(res, years, inflation):
     """[내부함수] 결과 카드 HTML 생성"""
