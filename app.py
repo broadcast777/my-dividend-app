@@ -857,90 +857,11 @@ def render_calculator_page(df):
             simulation.render_10y_sim_page(total_invest, avg_y, saved_monthly)        
     
 
+       
         # 3. 목표 배당 달성 (역산기)
-        # 3. 목표 배당 달성 (역산기) - [수정됨: 로직 분리 완료]
         elif selected_tab == "🎯 목표 배당 달성":
-            st.subheader("🎯 목표 배당금 역산기 (은퇴 시뮬레이터)")
-            st.caption("내가 원하는 월급을 받기 위해 총 얼마가 필요한지 계산합니다.")
-
-            with st.container(border=True):
-                col_info1, col_info2 = st.columns(2)
-                col_info1.metric("📊 평균 연배당률", f"{avg_y:.2f}%")
-                col_info2.metric("📦 선택 종목 수", f"{len(selected)}개")
-                st.caption(f"🔎 **적용 종목:** {', '.join(selected)}")
-
-            st.write("")
-
-            col_g1, col_g2 = st.columns(2)
-            with col_g1:
-                input_val = st.number_input(
-                    "목표 월 배당금 (만원, 세후)", 
-                    min_value=10, value=166, step=10, 
-                    key="target_monthly_goal_input"
-                )
-                target_monthly_goal = input_val * 10000
-                st.caption(f"💡 '세후' 월 {input_val}만원 설정 시 연간 세전 약 {int(input_val * 12 / 0.846):,}만원 이내로 절세가 가능합니다.")
-            
-            with col_g2:
-                st.write("") 
-                st.write("") 
-                use_start_money = st.checkbox(
-                    "현재 설정된 초기 자산을 포함하여 계산", 
-                    value=True, 
-                    help="체크 해제 시 0원에서 시작한다고 가정합니다.",
-                    key="use_start_money_chk"
-                )
-                st.caption(f"보유: {total_invest/10000:,.0f}만원")
-
-            # =================================================================
-            # [핵심 변경] 복잡한 while문 삭제 -> logic 함수 호출 1줄로 끝!
-            # =================================================================
-            sim_result = simulation.calculate_goal_simulation(
-                target_monthly_goal, 
-                avg_y, 
-                total_invest, 
-                use_start_money
-            )
-            # =================================================================
-
-            st.markdown("---")
-            
-            # 받아온 결과(Dictionary)를 꺼내서 화면에 보여줍니다.
-            progress = sim_result['progress_rate']
-            st.write(f"📊 **목표 달성 진행률: {progress:.1f}%**")
-            st.progress(progress / 100)
-
-            # 불가능한 경우 (60년 초과)
-            if sim_result['is_impossible']:
-                st.warning("⚠️ 현재 조건(추가 납입 없음)으로는 목표 달성에 60년 이상 걸립니다. 초기 자산을 늘리거나 목표를 조정해 보세요.")
-            else:
-                c_res1, c_res2 = st.columns(2)
-                with c_res1:
-                    req_asset = sim_result['required_asset']
-                    st.metric("최종 필요 자산", f"{req_asset/100000000:,.2f} 억원")
-                    st.caption(f"월 {target_monthly_goal/10000:,.0f}만원을 받기 위해 필요한 돈")
-                
-                with c_res2:
-                    gap = sim_result['gap_money']
-                    start_bal = sim_result['actual_start_bal']
-                    
-                    if gap > 0:
-                        st.metric(
-                            "앞으로 더 모아야 할 금액", 
-                            f"{gap/100000000:,.2f} 억원", 
-                            delta=f"✅ {start_bal/10000:,.0f}만원 보유 중", 
-                            delta_color="normal"
-                        )
-                    else:
-                        st.success("🎉 이미 목표 달성! 은퇴하셔도 됩니다.")
-                
-            st.write("") 
-            st.info("💡 이 계산은 **추가 납입 없이**, 배당금 재투자만으로 목표에 도달하는 기준입니다.")
-            st.error("""
-                    **⚠️ 시뮬레이션 활용 시 유의사항**
-                    1. 본 결과는 주가·환율 변동을 제외하고, 현재 배당률로만 계산한 단순 결과입니다.
-                    2. 재투자가 매월 이루어진다는 가정하에 계산된 복리 결과입니다.
-                    """)
+            # [수정] 역산기 UI와 로직도 simulation.py로 이사 갔습니다!
+            simulation.render_goal_sim_page(selected, avg_y, total_invest)
                     
 def render_roadmap_page(df):
     """📅 월별 로드맵 페이지"""
