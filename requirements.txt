@@ -1,0 +1,15 @@
+streamlit
+pandas
+requests
+beautifulsoup4
+yfinance
+finance-datareader
+pytz
+altair
+streamlit-analytics2
+supabase
+git+https://github.com/sharebook-kr/mojito.git
+PyGithub
+cryptography
+playwright
+nest_asyncio  
