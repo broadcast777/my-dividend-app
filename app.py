@@ -801,38 +801,9 @@ def render_calculator_page(df):
 
         # 1. 자산 구성 분석
         if selected_tab == "💎 자산 구성 분석":
-            chart_col, table_col = st.columns([1.2, 1])
-            def classify_currency(row):
-                try:
-                    bunryu = str(row.get('분류', ''))
-                    exch = str(row.get('환구분', ''))
-                    name = str(row.get('종목', ''))
-                    if bunryu == "해외" or "(해외)" in name or "환노출" in exch: return "🇺🇸 달러 자산"
-                    return "🇰🇷 원화 자산"
-                except: return "🇰🇷 원화 자산"
+            # [수정] 자산 분석 차트/표 그리기도 analysis.py로 이사 갔습니다!
+            analysis.render_asset_allocation(df_ana)
             
-            df_ana['통화'] = df_ana.apply(classify_currency, axis=1)
-            usd_ratio = df_ana[df_ana['통화'] == "🇺🇸 달러 자산"]['비중'].sum()
-            asset_sum = df_ana.groupby('자산유형').agg({'비중': 'sum', '투자금액_만원': 'sum', '종목': lambda x: ', '.join(x)}).reset_index()
-
-            with chart_col:
-                st.write("💎 **자산 유형 비중**")
-                donut = alt.Chart(asset_sum).mark_arc(innerRadius=60).encode(theta=alt.Theta("비중:Q"), color=alt.Color("자산유형:N", legend=alt.Legend(orient='bottom', title=None)), tooltip=[alt.Tooltip("자산유형"), alt.Tooltip("비중", format=".1f"), alt.Tooltip("투자금액_만원", format=",d"), alt.Tooltip("종목")]).properties(height=320)
-                st.altair_chart(donut, use_container_width=True)
-            
-            with table_col:
-                st.write("📋 **유형별 요약**")
-                st.dataframe(asset_sum.sort_values('비중', ascending=False), column_config={"비중": st.column_config.NumberColumn(format="%d%%"), "투자금액_만원": st.column_config.NumberColumn("투자금(만원)", format="%d"), "종목": st.column_config.TextColumn("포함 종목", width="large")}, hide_index=True, use_container_width=True)
-                st.divider()
-                st.markdown(f"**🌐 달러 자산 노출도: `{usd_ratio:.1f}%`**")
-                st.progress(usd_ratio / 100)
-                if usd_ratio >= 50: st.caption("💡 포트폴리오의 절반 이상이 환율 변동에 영향을 받습니다.")
-                else: st.caption("💡 원화 자산 중심의 구성입니다.")
-            
-            st.write("📋 **상세 포트폴리오**")
-            ui.render_custom_table(df_ana)
-            st.error("""**⚠️ 포트폴리오 분석 시 유의사항**\n1. 과거의 데이터를 기반으로 한 단순 결과값이며, 실제 투자 수익을 보장하지 않습니다.\n2. '달러 자산' 비율 실제 환노출 여부와 다를 수 있습니다 투자 전 확인이 필요합니다.\n3. 실제 배당금 지급일과 금액은 운용사의 사정에 따라 변경될 수 있습니다.""")
-
         # [수정 후] 탭 이름에 맞춰 조건문과 설명 멘트도 수정
         elif selected_tab == "🧐 실제 보유 종목":
 
